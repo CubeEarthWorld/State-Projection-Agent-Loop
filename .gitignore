@@ -41,3 +41,6 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Design documents (not published)
+projection_loop_design_spec.md
