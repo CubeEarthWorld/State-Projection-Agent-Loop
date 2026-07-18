@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "state-projection-loop"
+version = "0.1.0"
+description = "State-Projection Agent Loop: a projection-based LLM agent runtime. Truth lives outside the context; every turn renders a minimal disposable view."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "state-projection-loop contributors" }]
+keywords = ["llm", "agent", "agent-loop", "tools", "function-calling", "context-engineering"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "jsonschema>=4.17",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.40"]
+embeddings = ["llama-cpp-python>=0.2.90", "huggingface-hub>=0.23"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "python-dotenv>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mosimosi/State-Projection-Agent-Loop"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/state_projection_loop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that hit live services (DeepSeek API, GGUF model download); skipped unless env is configured",
+    "slow: long-running tests",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

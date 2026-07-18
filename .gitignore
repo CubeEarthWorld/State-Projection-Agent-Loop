@@ -1,0 +1,43 @@
+# Secrets — never commit API keys
+.env
+.env.*
+!.env.example
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Model files (downloaded at runtime, large)
+*.gguf
+models/
+.hf_cache/
+
+# Session logs produced by the runtime
+*.spal.jsonl
+logs/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
