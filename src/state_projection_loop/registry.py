@@ -130,6 +130,17 @@ class Registry:
             counts[cat] = counts.get(cat, 0) + 1
         return dict(sorted(counts.items()))
 
+    def categories_with_pinned(self) -> dict[str, tuple[int, int]]:
+        """Return {category: (total, pinned_count)} sorted by category name."""
+        totals: dict[str, int] = {}
+        pinned: dict[str, int] = {}
+        for t in self._tools.values():
+            cat = t.category or "misc"
+            totals[cat] = totals.get(cat, 0) + 1
+            if t.discovery.pinned:
+                pinned[cat] = pinned.get(cat, 0) + 1
+        return {cat: (totals[cat], pinned.get(cat, 0)) for cat in sorted(totals)}
+
     def in_category(self, category: str) -> list[ToolDef]:
         return [
             t for t in self._tools.values()
@@ -139,19 +150,36 @@ class Registry:
     # -- layer 1: table of contents (§5) ------------------------------------
 
     def toc_text(self, *, max_categories: int = 60) -> str:
-        """Compact category index, e.g. ``web/search(2) file(12) game/flags(24)``.
+        """Compact category index with pinned counts.
+
+        Format per category:
+        - ``meta(2p)`` — all tools in this category are pinned (always available)
+        - ``game/media(3)`` — none pinned
+        - ``file(2, 1p)`` — 2 total, 1 pinned
 
         Above ``max_categories`` the index collapses to top-level categories
         only (§16: hierarchise when the TOC itself grows too large).
         """
-        counts = self.categories()
-        if len(counts) > max_categories:
-            top: dict[str, int] = {}
-            for cat, n in counts.items():
+        cat_info = self.categories_with_pinned()
+        if len(cat_info) > max_categories:
+            top_totals: dict[str, int] = {}
+            top_pinned: dict[str, int] = {}
+            for cat, (total, p) in cat_info.items():
                 root = cat.split("/", 1)[0]
-                top[root] = top.get(root, 0) + n
-            counts = dict(sorted(top.items()))
-        return " ".join(f"{cat}({n})" for cat, n in counts.items())
+                top_totals[root] = top_totals.get(root, 0) + total
+                top_pinned[root] = top_pinned.get(root, 0) + p
+            cat_info = {cat: (top_totals[cat], top_pinned.get(cat, 0))
+                        for cat in sorted(top_totals)}
+
+        parts: list[str] = []
+        for cat, (total, p) in cat_info.items():
+            if p == total and total > 0:
+                parts.append(f"{cat}({total}p)")
+            elif p > 0:
+                parts.append(f"{cat}({total}, {p}p)")
+            else:
+                parts.append(f"{cat}({total})")
+        return " ".join(parts)
 
     # -- scoped views for sub-agents (§11) -----------------------------------
 
