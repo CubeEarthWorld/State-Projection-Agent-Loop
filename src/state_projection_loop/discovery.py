@@ -12,9 +12,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .capability import Capability
 from .embeddings import EmbeddingBackend, cosine
 from .registry import Registry
-from .tooldef import ToolDef
 
 _ASCII_WORD = re.compile(r"[a-z0-9_]+")
 
@@ -51,7 +51,7 @@ def _tokenize(text: str) -> list[str]:
 
 @dataclass
 class ScoredTool:
-    tool: ToolDef
+    tool: Capability
     score: float
     components: dict[str, float] = field(default_factory=dict)
 
@@ -88,7 +88,7 @@ class ToolSearch:
 
     # -- index --------------------------------------------------------------
 
-    def _doc_text(self, tool: ToolDef) -> str:
+    def _doc_text(self, tool: Capability) -> str:
         parts = [
             tool.name.replace("_", " "),
             tool.name,
@@ -140,7 +140,7 @@ class ToolSearch:
             score += idf * (tf * (k1 + 1)) / denom
         return score
 
-    def _tag_score(self, query: str, query_tokens: list[str], tool: ToolDef) -> float:
+    def _tag_score(self, query: str, query_tokens: list[str], tool: Capability) -> float:
         q = query.lower()
         score = 0.0
         if tool.name.lower() in q or q.strip() == tool.name.lower():

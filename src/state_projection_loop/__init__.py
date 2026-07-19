@@ -1,17 +1,20 @@
 """state-projection-loop — State-Projection Agent Loop.
 
-Truth lives outside the context; every turn projects a minimal disposable
-view (spec §2.2). Three nouns — Registry, Projection, Runtime — and four
-verbs: render → decide → execute → commit.
+Truth lives in the append-only Event Ledger, never in the model's context;
+every turn renders a minimal disposable Projection derived from it. The
+loop: Project → Decide → Validate → Plan Effects → Authorize → Execute →
+Record → Continue/Wait/Complete.
 """
 
+from .artifacts import ArtifactStore, ref as artifact_ref
+from .capability import Capability, ToolContext, capability
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
-from .embeddings import EmbeddingBackend, HashingEmbedding, LlamaCppEmbedding
-from .handles import ValueStore
-from .hooks import HookBlock, Hooks
-from .llm import LLMAdapter, ScriptedLLM, parse_text_tool_calls
+from .embeddings import EmbeddingBackend, HashingEmbedding
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, Snapshot
+from .llm import LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
 from .messages import Decision, Message, ToolCall, Usage
+from .policy import PolicyEngine, PolicyDecision, Rule
 from .projection import (
     CandidatesSection,
     ConversationSection,
@@ -19,51 +22,65 @@ from .projection import (
     Projection,
     ProjectionError,
     Section,
-    SummarySection,
     TocSection,
     TurnContext,
 )
 from .registry import Registry, ToolProvider
-from .runtime import BudgetState, Runtime, ToolResult, validate_args
-from .session import Session
-from .tooldef import ToolContext, ToolDef, tool
+from .run import ApprovalRequest, Command, Run, RunStateError
+from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult, validate_args
+from .session import ConcurrencyError, Session
+from .working_state import RecordedDecision, WorkingState, WorkingStateSection
 from .builtin.meta import install_spawn
-from .builtin.state import StateViewSection, install_state
+from .builtin.state import install_state
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Config",
     "Session",
+    "ConcurrencyError",
     "Registry",
     "ToolProvider",
-    "ToolDef",
+    "Capability",
     "ToolContext",
-    "tool",
+    "capability",
     "Projection",
     "ProjectionError",
     "Section",
     "TurnContext",
     "KernelSection",
     "TocSection",
-    "SummarySection",
     "ConversationSection",
     "CandidatesSection",
-    "StateViewSection",
+    "WorkingState",
+    "WorkingStateSection",
+    "RecordedDecision",
     "Runtime",
     "ToolResult",
+    "ExecuteBatchResult",
     "BudgetState",
     "validate_args",
-    "ValueStore",
-    "Hooks",
-    "HookBlock",
+    "ArtifactStore",
+    "artifact_ref",
+    "PolicyEngine",
+    "PolicyDecision",
+    "Rule",
+    "Run",
+    "RunStateError",
+    "Command",
+    "ApprovalRequest",
+    "Event",
+    "EventLedger",
+    "InMemoryLedger",
+    "JsonlLedger",
+    "Snapshot",
     "ToolSearch",
     "ScoredTool",
     "EmbeddingBackend",
     "HashingEmbedding",
-    "LlamaCppEmbedding",
     "LLMAdapter",
     "ScriptedLLM",
+    "extract_finish",
     "parse_text_tool_calls",
     "Decision",
     "Message",

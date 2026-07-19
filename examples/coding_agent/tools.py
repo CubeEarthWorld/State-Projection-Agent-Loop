@@ -1,7 +1,7 @@
 """Coding-agent scenario toolkit: sandboxed file tools + a test runner.
 
 All file access is confined to the workspace root (path-traversal safe);
-``run_tests`` executes the workspace's test scripts in a subprocess and
+``dev.tests.run`` executes the workspace's test scripts in a subprocess and
 reports pass/fail output as an observation.
 """
 from __future__ import annotations
@@ -51,7 +51,7 @@ def build_coding_registry(root: Path) -> Registry:
         return "\n\n".join(outputs) or "no test files found"
 
     registry.register({
-        "name": "list_files",
+        "name": "filesystem.file.list",
         "category": "file",
         "spec": {
             "description": "ワークスペース内のファイル一覧を返す。",
@@ -59,11 +59,12 @@ def build_coding_registry(root: Path) -> Registry:
                 "pattern": {"type": "string", "default": "**/*"}}},
         },
         "discovery": {"embedding_text": "ファイル一覧 構成 どんなファイル ls list"},
-        "execution": {"timeout_s": 10, "parallel_safe": True},
+        "execution": {"timeout_s": 10, "retry_safety": "pure"},
+        "effects": [{"kind": "read", "resource": "workspace:*"}],
     }, handler=list_files)
 
     registry.register({
-        "name": "read_file",
+        "name": "filesystem.file.read",
         "category": "file",
         "spec": {
             "description": "ワークスペース内のファイルを読む。",
@@ -71,13 +72,14 @@ def build_coding_registry(root: Path) -> Registry:
                 "path": {"type": "string"}}, "required": ["path"]},
         },
         "discovery": {"embedding_text": "ファイルを読む 中身 コード 確認 read cat"},
-        "execution": {"timeout_s": 10, "parallel_safe": True,
+        "execution": {"timeout_s": 10, "retry_safety": "pure",
                       "output_policy": {"max_inline_tokens": 1200}},
+        "effects": [{"kind": "read", "resource": "workspace:*"}],
     }, handler=read_file)
 
     registry.register({
-        "name": "write_file",
-        "category": "file/edit",
+        "name": "filesystem.file.write",
+        "category": "file.edit",
         "spec": {
             "description": "ワークスペース内のファイルへ全文を書き込む(上書き)。",
             "parameters": {"type": "object", "properties": {
@@ -86,29 +88,31 @@ def build_coding_registry(root: Path) -> Registry:
             "usage_notes": "部分編集ではなくファイル全文を渡すこと。",
         },
         "discovery": {"embedding_text": "ファイルを書く 保存 修正 編集 write save fix"},
-        "execution": {"timeout_s": 10},
+        "execution": {"timeout_s": 10, "retry_safety": "idempotent"},
+        "effects": [{"kind": "write", "resource": "workspace:*"}],
     }, handler=write_file)
 
     registry.register({
-        "name": "run_tests",
+        "name": "dev.tests.run",
         "category": "dev",
         "spec": {
             "description": "ワークスペースの test_*.py を実行し結果を返す。",
             "parameters": {"type": "object", "properties": {}},
         },
         "discovery": {"embedding_text": "テスト実行 テストを走らせる 検証 pytest test run"},
-        "execution": {"timeout_s": 60,
+        "execution": {"timeout_s": 60, "retry_safety": "never_retry",
                       "output_policy": {"max_inline_tokens": 1200}},
+        "effects": [{"kind": "external", "resource": "sandbox:subprocess"}],
     }, handler=run_tests)
 
     return registry
 
 
 CODING_KERNEL = """あなたはコーディングエージェントです。手順:
-1. run_tests でまず現状を確認する。
-2. 失敗があれば read_file で該当コードを読み、原因を特定する。
-3. write_file で修正し、必ず run_tests で修正を検証する。
-4. テストが全て通ったら、行った修正を簡潔に報告する。"""
+1. dev.tests.run でまず現状を確認する。
+2. 失敗があれば filesystem.file.read で該当コードを読み、原因を特定する。
+3. filesystem.file.write で修正し、必ず dev.tests.run で修正を検証する。
+4. テストが全て通ったら、行った修正を簡潔に報告してから finish(result) を呼ぶ。"""
 
 BUGGY_CALCULATOR = '''\
 def divide(a, b):

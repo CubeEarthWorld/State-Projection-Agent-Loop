@@ -44,9 +44,22 @@ from PySide6.QtWidgets import (
 )
 
 # -- project imports ---------------------------------------------------------
+import os
+
 from state_projection_loop import Registry, Session
-from state_projection_loop.adapters import DeepSeekAdapter
 from state_projection_loop.builtin.state import install_state
+from state_projection_loop.policy import Rule
+
+from examples.llm_adapters import OpenAICompatAdapter
+
+
+def _make_llm(**kwargs):
+    return OpenAICompatAdapter(
+        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
+        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+        **kwargs,
+    )
 
 from examples.coding_agent.tools import CODING_KERNEL, build_coding_registry, seed_workspace
 from examples.customer_support.tools import SUPPORT_KERNEL, SupportBackend, build_support_registry
@@ -113,7 +126,7 @@ class SessionWorker(QThread):
 
             self.reply_ready.emit(reply)
             # Emit latest state from the session
-            self.state_updated.emit(dict(self.session.state))
+            self.state_updated.emit(self.session.working_state.to_dict())
         except Exception as exc:
             self.error_occurred.emit(f"{type(exc).__name__}: {exc}")
         finally:
@@ -449,12 +462,14 @@ class MainWindow(QMainWindow):
         log = MediaLog()
         registry = build_game_registry(log)
         self.session = Session(
-            DeepSeekAdapter(temperature=0.8),
+            _make_llm(temperature=0.8),
             kernel=GM_KERNEL,
             registry=registry,
             seed=initial_seed(),
         )
         install_state(self.session)
+        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
+        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
         self._scenario_backend = log
         self._log(f"Game Master session created. {len(list(registry))} tools registered.")
 
@@ -462,10 +477,11 @@ class MainWindow(QMainWindow):
         backend = SupportBackend()
         registry = build_support_registry(backend)
         self.session = Session(
-            DeepSeekAdapter(),
+            _make_llm(),
             kernel=SUPPORT_KERNEL,
             registry=registry,
         )
+        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="support.*"))
         self._scenario_backend = backend
         self._log(f"Customer Support session created. {len(list(registry))} tools registered.")
 
@@ -475,10 +491,12 @@ class MainWindow(QMainWindow):
         seed_workspace(root)
         registry = build_coding_registry(root)
         self.session = Session(
-            DeepSeekAdapter(),
+            _make_llm(),
             kernel=CODING_KERNEL,
             registry=registry,
         )
+        self.session.policy.set_scope("workspace_write", "allow")
+        self.session.policy.set_scope("sandbox_command", "allow")
         self._scenario_backend = root
         self._log(f"Coding Agent session created. Workspace: {root}")
         self._log(f"Seeded: calculator.py, test_calculator.py")
@@ -631,7 +649,7 @@ class MainWindow(QMainWindow):
         if self.session is None:
             self.state_view.setPlainText("(no session)")
             return
-        state = self.session.state
+        state = self.session.working_state.to_dict()
         if not state:
             self.state_view.setPlainText("(empty state)")
             return

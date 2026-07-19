@@ -1,79 +1,103 @@
-"""Tool registry (spec §2.3 "台帳", §5 layer 1 TOC, defect-2 fix: ToolProvider).
+"""Capability registry (layer 1 TOC, ToolProvider sync).
 
-The registry is one of the three nouns. It owns every tool definition and
-exposes:
+One of the three nouns. Owns every :class:`Capability` and exposes:
 
 * ``toc_text()`` — the layer-1 table of contents (category names + counts)
 * ``epoch`` — bumped on any mutation so epoch-cached sections and search
   indexes know when to rebuild (cache_class="epoch")
-* ``ToolProvider`` — a pluggable source of tool definitions (e.g. an MCP-like
+* ``ToolProvider`` — a pluggable source of capabilities (e.g. an MCP-like
   external server) synced via ``refresh_providers()``
-* ``subset()`` — scoped views for sub-agents (§11 tool_scope)
+* ``subset()`` — scoped views for sub-agents (spawn tool_scope)
+
+Capabilities are versioned (``name@version``); ``get(name)`` without a
+version resolves to the highest registered version, so a call site written
+against the bare name always gets the latest contract without touching
+config.
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Optional, Protocol, runtime_checkable
 
-from .tooldef import ToolDef
+from .capability import Capability, from_api_name
 
 
 @runtime_checkable
 class ToolProvider(Protocol):
-    """External source of tool definitions (defect-2 fix, §17 reserve)."""
+    """External source of capability definitions."""
 
-    def provide(self) -> Iterable[Any]:  # ToolDef | dict
+    def provide(self) -> Iterable[Any]:  # Capability | dict
         ...
 
 
 class Registry:
     def __init__(self) -> None:
-        self._tools: dict[str, ToolDef] = {}
+        self._capabilities: dict[str, Capability] = {}  # keyed by qualified_name
+        self._latest: dict[str, str] = {}  # name -> qualified_name of highest version
         self._epoch = 0
         self._providers: list[ToolProvider] = []
         self._provider_tools: dict[int, set[str]] = {}
 
-    # -- mutation -----------------------------------------------------------
+    # -- mutation -------------------------------------------------------------
 
     def register(
         self,
-        tool: ToolDef | dict[str, Any] | Callable[..., Any],
+        capability: Capability | dict[str, Any] | Callable[..., Any],
         handler: Optional[Callable[..., Any]] = None,
         *,
         replace: bool = False,
-    ) -> ToolDef:
-        td = self._coerce(tool, handler)
-        if td.name in self._tools and not replace:
-            raise ValueError(f"Tool {td.name!r} is already registered (use replace=True)")
-        self._tools[td.name] = td
+    ) -> Capability:
+        cap = self._coerce(capability, handler)
+        if cap.qualified_name in self._capabilities and not replace:
+            raise ValueError(f"Capability {cap.qualified_name!r} is already registered (use replace=True)")
+        self._capabilities[cap.qualified_name] = cap
+        current = self._latest.get(cap.name)
+        if current is None or self._capabilities[current].version < cap.version:
+            self._latest[cap.name] = cap.qualified_name
         self._epoch += 1
-        return td
+        return cap
 
-    def register_many(self, tools: Iterable[Any]) -> list[ToolDef]:
-        return [self.register(t) for t in tools]
+    def register_many(self, capabilities: Iterable[Any]) -> list[Capability]:
+        return [self.register(c) for c in capabilities]
 
     def unregister(self, name: str) -> None:
-        if name in self._tools:
-            del self._tools[name]
+        """Remove by bare name (all versions) or exact ``name@version``."""
+        if name in self._capabilities:
+            del self._capabilities[name]
+            self._recompute_latest()
+            self._epoch += 1
+            return
+        removed = [q for q in self._capabilities if q.rsplit("@", 1)[0] == name]
+        if removed:
+            for q in removed:
+                del self._capabilities[q]
+            self._recompute_latest()
             self._epoch += 1
 
+    def _recompute_latest(self) -> None:
+        self._latest = {}
+        for cap in self._capabilities.values():
+            current = self._latest.get(cap.name)
+            if current is None or self._capabilities[current].version < cap.version:
+                self._latest[cap.name] = cap.qualified_name
+
     @staticmethod
-    def _coerce(tool: Any, handler: Optional[Callable[..., Any]] = None) -> ToolDef:
-        if isinstance(tool, ToolDef):
+    def _coerce(capability: Any, handler: Optional[Callable[..., Any]] = None) -> Capability:
+        if isinstance(capability, Capability):
             if handler is not None:
-                tool.execution.handler = handler
-            return tool
-        if isinstance(tool, dict):
-            return ToolDef.from_dict(tool, handler=handler)
-        if callable(tool):
-            td = getattr(tool, "__spal_tool__", None)
-            if td is None:
-                from .tooldef import build_tooldef_from_function
+                capability.execution.handler = handler
+            return capability
+        if isinstance(capability, dict):
+            return Capability.from_dict(capability, handler=handler)
+        if callable(capability):
+            cap = getattr(capability, "__spal_capability__", None)
+            if cap is None:
+                from .capability import build_capability_from_function
 
-                td = build_tooldef_from_function(tool)
-            return td
-        raise TypeError(f"Cannot register {tool!r} as a tool")
+                cap = build_capability_from_function(capability)
+            return cap
+        raise TypeError(f"Cannot register {capability!r} as a capability")
 
-    # -- providers (defect-2 fix) ------------------------------------------
+    # -- providers ------------------------------------------------------------
 
     def attach_provider(self, provider: ToolProvider, *, refresh: bool = True) -> None:
         self._providers.append(provider)
@@ -81,84 +105,102 @@ class Registry:
             self.refresh_providers()
 
     def refresh_providers(self) -> None:
-        """Sync provider-supplied tools; adds/removes bump the epoch once."""
+        """Sync provider-supplied capabilities; adds/removes bump the epoch once."""
         changed = False
         for provider in self._providers:
             pid = id(provider)
-            fresh = {td.name: td for td in (self._coerce(t) for t in provider.provide())}
+            fresh = {cap.qualified_name: cap for cap in (self._coerce(c) for c in provider.provide())}
             previous = self._provider_tools.get(pid, set())
-            for name in previous - set(fresh):
-                if name in self._tools:
-                    del self._tools[name]
+            for qname in previous - set(fresh):
+                if qname in self._capabilities:
+                    del self._capabilities[qname]
                     changed = True
-            for name, td in fresh.items():
-                if name not in self._tools or self._tools[name] is not td:
-                    self._tools[name] = td
+            for qname, cap in fresh.items():
+                if qname not in self._capabilities or self._capabilities[qname] is not cap:
+                    self._capabilities[qname] = cap
                     changed = True
             self._provider_tools[pid] = set(fresh)
         if changed:
+            self._recompute_latest()
             self._epoch += 1
 
-    # -- lookup -------------------------------------------------------------
+    # -- lookup ---------------------------------------------------------------
 
     @property
     def epoch(self) -> int:
         return self._epoch
 
-    def get(self, name: str) -> Optional[ToolDef]:
-        return self._tools.get(name)
+    def get(self, name: str) -> Optional[Capability]:
+        """Resolve by ``name@version`` (exact) or bare ``name`` (latest)."""
+        if name in self._capabilities:
+            return self._capabilities[name]
+        qname = self._latest.get(name)
+        return self._capabilities.get(qname) if qname else None
+
+    def resolve_api_name(self, name: str) -> str:
+        """Translate a provider-safe ``api_name`` (see ``Capability.api_name``)
+        back to the registered dotted name, if it resolves to one.
+
+        Names that already resolve directly (a bare or qualified dotted
+        name) are returned unchanged; a name that doesn't resolve even
+        after decoding is also returned unchanged, so the normal
+        "unknown capability" error path still reports the name the model
+        actually sent.
+        """
+        if name in self._capabilities or name in self._latest:
+            return name
+        dotted = from_api_name(name)
+        if dotted in self._capabilities or dotted in self._latest:
+            return dotted
+        return name
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        return self.get(name) is not None
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self._latest)
 
-    def __iter__(self) -> Iterator[ToolDef]:
-        return iter(self._tools.values())
+    def __iter__(self) -> Iterator[Capability]:
+        return (self._capabilities[q] for q in self._latest.values())
 
-    def all(self) -> list[ToolDef]:
-        return list(self._tools.values())
+    def all(self) -> list[Capability]:
+        return list(self)
 
-    def pinned(self) -> list[ToolDef]:
-        return [t for t in self._tools.values() if t.discovery.pinned]
+    def pinned(self) -> list[Capability]:
+        return [c for c in self if c.discovery.pinned]
 
     def categories(self) -> dict[str, int]:
         counts: dict[str, int] = {}
-        for t in self._tools.values():
-            cat = t.category or "misc"
+        for c in self:
+            cat = c.category or "misc"
             counts[cat] = counts.get(cat, 0) + 1
         return dict(sorted(counts.items()))
 
     def categories_with_pinned(self) -> dict[str, tuple[int, int]]:
-        """Return {category: (total, pinned_count)} sorted by category name."""
         totals: dict[str, int] = {}
         pinned: dict[str, int] = {}
-        for t in self._tools.values():
-            cat = t.category or "misc"
+        for c in self:
+            cat = c.category or "misc"
             totals[cat] = totals.get(cat, 0) + 1
-            if t.discovery.pinned:
+            if c.discovery.pinned:
                 pinned[cat] = pinned.get(cat, 0) + 1
         return {cat: (totals[cat], pinned.get(cat, 0)) for cat in sorted(totals)}
 
-    def in_category(self, category: str) -> list[ToolDef]:
+    def in_category(self, category: str) -> list[Capability]:
         return [
-            t for t in self._tools.values()
-            if (t.category or "misc") == category or (t.category or "").startswith(category.rstrip("/") + "/")
+            c for c in self
+            if (c.category or "misc") == category or (c.category or "").startswith(category.rstrip("/") + "/")
         ]
 
-    # -- layer 1: table of contents (§5) ------------------------------------
+    # -- layer 1: table of contents -------------------------------------------
 
     def toc_text(self, *, max_categories: int = 60) -> str:
-        """Compact category index with pinned counts.
+        """Compact category index with pinned counts, e.g.::
 
-        Format per category:
-        - ``meta(2p)`` — all tools in this category are pinned (always available)
-        - ``game/media(3)`` — none pinned
-        - ``file(2, 1p)`` — 2 total, 1 pinned
+            meta(2p) game/media(3) file(2, 1p)
 
         Above ``max_categories`` the index collapses to top-level categories
-        only (§16: hierarchise when the TOC itself grows too large).
+        only (hierarchise when the TOC itself grows too large).
         """
         cat_info = self.categories_with_pinned()
         if len(cat_info) > max_categories:
@@ -181,25 +223,26 @@ class Registry:
                 parts.append(f"{cat}({total})")
         return " ".join(parts)
 
-    # -- scoped views for sub-agents (§11) -----------------------------------
+    # -- scoped views for sub-agents -------------------------------------------
 
     def subset(self, scope: Iterable[str]) -> "Registry":
-        """New registry containing only the named tools/categories.
+        """New registry containing only the named capabilities/categories.
 
-        Scope entries match a tool name exactly, a category exactly, or a
-        category prefix written as ``"cat/*"``.
+        Scope entries match a capability name exactly, a category exactly,
+        or a category prefix written as ``"cat/*"``.
         """
         scope = list(scope)
         sub = Registry()
-        for t in self._tools.values():
-            cat = t.category or "misc"
+        for c in self:
+            cat = c.category or "misc"
             for entry in scope:
-                if entry == t.name or entry == cat:
+                if entry == c.name or entry == cat:
                     break
                 if entry.endswith("/*") and cat.startswith(entry[:-1]):
                     break
             else:
                 continue
-            sub._tools[t.name] = t
+            sub._capabilities[c.qualified_name] = c
+        sub._recompute_latest()
         sub._epoch = 1
         return sub

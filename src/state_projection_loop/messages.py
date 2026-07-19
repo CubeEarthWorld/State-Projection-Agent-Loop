@@ -54,6 +54,28 @@ class Message:
             )
         return str(self.content)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "role": self.role, "content": self.content,
+            "tool_calls": [
+                {"name": tc.name, "arguments": tc.arguments, "id": tc.id, "raw_arguments": tc.raw_arguments}
+                for tc in self.tool_calls
+            ],
+            "tool_call_id": self.tool_call_id, "name": self.name,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Message":
+        return cls(
+            role=d["role"], content=d.get("content", ""),
+            tool_calls=[
+                ToolCall(name=tc["name"], arguments=tc.get("arguments") or {}, id=tc.get("id") or new_call_id(),
+                          raw_arguments=tc.get("raw_arguments"))
+                for tc in (d.get("tool_calls") or [])
+            ],
+            tool_call_id=d.get("tool_call_id"), name=d.get("name"),
+        )
+
 
 @dataclass
 class Usage:
@@ -67,14 +89,24 @@ class Usage:
 
 @dataclass
 class Decision:
-    """One model output: plain text and/or a batch of tool calls (§2.3)."""
+    """One model output: plain text and/or a batch of tool calls.
+
+    ``finish`` is the formal completion signal (P0-3): it is a property of
+    the *decision itself*, not a tool call routed through the runtime like
+    any other. A decision that sets ``finish`` together with a non-empty
+    ``calls`` is invalid and MUST be rejected by validation before anything
+    executes — declaring the job done and still queuing side effects in the
+    same breath is exactly the bug this separation prevents.
+    """
 
     text: str = ""
     calls: list[ToolCall] = field(default_factory=list)
     thought: str = ""
     usage: Optional[Usage] = None
     raw: Any = None
+    finish: bool = False
+    result: Any = None
 
     @property
     def is_text_only(self) -> bool:
-        return not self.calls
+        return not self.calls and not self.finish

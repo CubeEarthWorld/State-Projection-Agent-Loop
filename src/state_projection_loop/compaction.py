@@ -1,10 +1,15 @@
-﻿"""Compaction — folding overflowed conversation into the summary section
-(spec §10) under the summary contract v1 (§10.2).
+"""Compaction — folding overflowed conversation into the working state
+under fold contract v2.
 
-The agent's continuity is reconstructed every turn from the projection, so
-the summary MUST preserve the *reasons* behind actions and unfinished
-intentions, keep user constraints verbatim, and replace raw data with
-handle references ($hN).
+Contract v1 asked the summarizer to write free prose and hope decision
+reasons survived a later re-fold. Contract v2 instead asks for a small,
+schema-shaped delta that is merged straight into
+:class:`~state_projection_loop.working_state.WorkingState`
+(:meth:`WorkingState.merge_fold`): new facts and decisions are *appended*,
+not re-summarized, so a decision's reason recorded three folds ago is still
+there verbatim. The folded messages themselves are never discarded — they
+remain in the Event Ledger and stay reachable via the ``search_history``
+capability after being dropped from the live projection.
 """
 from __future__ import annotations
 
@@ -12,18 +17,23 @@ import json
 from typing import Optional
 
 from .config import Config
-from .handles import truncate_to_tokens
 from .messages import Message, SYSTEM, USER
 from .tokens import estimate_tokens
+from .working_state import WorkingState
 
-CONTRACT_V1 = """You are the compaction summarizer of an agent loop. Fold the transcript below into a summary that preserves the agent's continuity. Contract v1 — every rule is mandatory:
-1. Write in first person as the agent ("I decided ... because ...").
-2. Preserve chronological order.
-3. For each item keep: the action taken, the gist of the observation, the decision and its reason, and any unfinished intentions.
-4. Keep the user's explicit instructions, constraints and confirmed facts verbatim.
-5. Replace raw data bodies with their handle references ($hN); never copy large data into the summary.
-6. Keep the summary under {max_tokens} tokens (rough estimate is fine).
-Output only the summary text, no preamble."""
+CONTRACT_V2 = """You are the compaction summarizer of an agent loop. Fold the transcript below into a JSON delta that will be merged into a structured working-state record. Contract v2 — every rule is mandatory:
+1. Output ONLY a single JSON object, no prose, no markdown fence.
+2. Fields (all optional, omit what doesn't apply):
+   "goal": string — only if the goal changed or was clarified,
+   "new_facts": array of strings — confirmed facts/user constraints, kept verbatim where the user stated them,
+   "new_decisions": array of {"text": string, "reason": string} — every decision the agent made and WHY, in first person,
+   "new_open_questions": array of strings,
+   "resolved_open_questions": array of strings — exact text of questions that are no longer open,
+   "next_actions": array of strings — REPLACES the previous next_actions list; give the full current list,
+   "artifact_refs": array of strings — any artifact ids mentioned that remain relevant.
+3. Never copy large raw data bodies into a field; reference their artifact id instead.
+4. Preserve chronological order within each array.
+Output only the JSON object."""
 
 
 def render_transcript(messages: list[Message]) -> str:
@@ -37,34 +47,31 @@ def render_transcript(messages: list[Message]) -> str:
                 lines.append(f"[assistant] {text}")
             for tc in m.tool_calls:
                 args = json.dumps(tc.arguments, ensure_ascii=False, default=str)
-                lines.append(f"[assistant→call] {tc.name}({truncate_to_tokens(args, 60)})")
+                lines.append(f"[assistant→call] {tc.name}({_truncate(args, 60)})")
         elif m.role == "tool":
-            lines.append(f"[observation:{m.name}] {truncate_to_tokens(m.text(), 150)}")
+            lines.append(f"[observation:{m.name}] {_truncate(m.text(), 150)}")
         elif m.role == SYSTEM:
             lines.append(f"[runtime] {m.text()}")
     return "\n".join(lines)
 
 
-def deterministic_fold(messages: list[Message], max_tokens: int) -> str:
-    """LLM-free fallback (compaction.model="none").
+def _truncate(text: str, max_tokens: int) -> str:
+    from .artifacts import truncate_to_tokens
 
-    Keeps user messages verbatim (contract rule 4), actions and observation
-    gists in order; cannot reconstruct reasons, so it notes that.
-    """
-    lines: list[str] = ["(mechanical fold — reasons unavailable)"]
+    return truncate_to_tokens(text, max_tokens)
+
+
+def deterministic_fold(messages: list[Message]) -> dict:
+    """LLM-free fallback (compaction.model="none"): mechanical, cannot
+    reconstruct reasons, so it says so explicitly in a fact entry."""
+    facts: list[str] = []
     for m in messages:
         if m.role == USER:
-            lines.append(f'User said (verbatim): "{m.text()}"')
+            facts.append(f'User said (verbatim): "{m.text()}"')
         elif m.role == "assistant":
             for tc in m.tool_calls:
-                lines.append(f"I called {tc.name}.")
-            text = m.text().strip()
-            if text:
-                lines.append(f"I replied: {truncate_to_tokens(text, 60)}")
-        elif m.role == "tool":
-            gist = truncate_to_tokens(m.text(), 40)
-            lines.append(f"→ {m.name}: {gist}")
-    return truncate_to_tokens("\n".join(lines), max_tokens)
+                facts.append(f"(mechanical fold) called {tc.name}")
+    return {"new_facts": facts[:50]}
 
 
 class Compactor:
@@ -78,11 +85,9 @@ class Compactor:
         return estimate_tokens(conversation) > threshold
 
     def split_point(self, conversation: list[Message]) -> int:
-        """Index splitting messages to fold (older half by tokens) from the rest.
-
-        Never orphans tool observations and always leaves at least the last
-        exchange unfolded.
-        """
+        """Index splitting messages to fold (older half by tokens) from the
+        rest. Never orphans tool observations and always leaves at least the
+        last exchange unfolded."""
         total = estimate_tokens(conversation)
         target = total // 2
         acc = 0
@@ -98,20 +103,34 @@ class Compactor:
                 i -= 1
         return i
 
-    def fold(self, conversation: list[Message]) -> tuple[str, list[Message]]:
+    def fold(self, conversation: list[Message], working_state: WorkingState) -> tuple[bool, list[Message]]:
+        """Fold the older half of ``conversation`` into ``working_state`` in
+        place. Returns (folded_anything, remaining_conversation)."""
         i = self.split_point(conversation)
         folded, remaining = conversation[:i], conversation[i:]
         if not folded:
-            return "", conversation
-        folded_tokens = estimate_tokens(folded)
-        max_summary = max(150, int(folded_tokens * self.config.compaction.max_summary_ratio))
+            return False, conversation
         if self.summarizer is None:
-            summary = deterministic_fold(folded, max_summary)
+            delta = deterministic_fold(folded)
         else:
             prompt = [
-                Message(role=SYSTEM, content=CONTRACT_V1.format(max_tokens=max_summary)),
+                Message(role=SYSTEM, content=CONTRACT_V2),
                 Message(role=USER, content=render_transcript(folded)),
             ]
             decision = self.summarizer.complete(prompt, None)
-            summary = truncate_to_tokens(decision.text.strip(), int(max_summary * 1.5))
-        return summary, remaining
+            delta = _parse_delta(decision.text)
+        working_state.merge_fold(delta)
+        return True, remaining
+
+
+def _parse_delta(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {"new_facts": [f"(fold parse failed) {text[:200]}"]}

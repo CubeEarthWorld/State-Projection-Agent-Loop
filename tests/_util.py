@@ -1,4 +1,4 @@
-"""Test helpers: quick tool-definition builders."""
+"""Test helpers: quick capability-definition builders."""
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
@@ -8,7 +8,7 @@ def echo_handler(text: str = "") -> str:
     return f"echo: {text}"
 
 
-def tool_dict(
+def capability_dict(
     name: str,
     *,
     category: str = "misc",
@@ -21,19 +21,24 @@ def tool_dict(
     require_spec: bool = False,
     properties: Optional[dict[str, Any]] = None,
     required: Optional[list[str]] = None,
-    parallel_safe: bool = False,
-    timeout_s: float = 30.0,
+    retry_safety: str = "never_retry",
     retries: int = 0,
+    timeout_s: float = 30.0,
+    effects: Optional[list[tuple[str, str]]] = None,
     max_inline_tokens: Optional[int] = None,
-    overflow: str = "handle",
+    overflow: str = "artifact",
 ) -> dict[str, Any]:
+    """Build a capability definition dict. ``name`` should already be dotted
+    (e.g. ``"demo.echo.say"``); a bare name is namespaced under ``test.``."""
+    if "." not in name:
+        name = f"test.{name}"
     parameters: dict[str, Any] = {"type": "object", "properties": properties or {}}
     if required:
         parameters["required"] = required
     d: dict[str, Any] = {
         "name": name,
         "category": category,
-        "spec": {"description": description or f"{name} tool.", "parameters": parameters},
+        "spec": {"description": description or f"{name} capability.", "parameters": parameters},
         "discovery": {
             "pinned": pinned,
             "no_embed": no_embed,
@@ -43,9 +48,10 @@ def tool_dict(
         "execution": {
             "timeout_s": timeout_s,
             "retries": retries,
-            "parallel_safe": parallel_safe,
+            "retry_safety": retry_safety,
             "output_policy": {"max_inline_tokens": max_inline_tokens, "overflow": overflow},
         },
+        "effects": [{"kind": k, "resource": r} for k, r in (effects or [("none", "*")])],
     }
     if summary is not None or tags is not None:
         d["card"] = {"summary": summary or "", "tags": tags or []}

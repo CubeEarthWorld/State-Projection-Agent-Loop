@@ -12,7 +12,7 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.mode == "chat"
         assert cfg.projection.window_tokens == 30000
-        assert cfg.projection.sections == ["kernel", "toc", "summary", "conversation", "candidates"]
+        assert cfg.projection.sections == ["kernel", "toc", "conversation", "working_state", "candidates"]
         assert cfg.discovery.vector == "auto"
         assert cfg.discovery.k == 8
         assert cfg.discovery.toc is True
@@ -21,11 +21,13 @@ class TestConfigDefaults:
         ]
         assert cfg.compaction.trigger_ratio == 0.8
         assert cfg.compaction.model == "same"
-        assert cfg.compaction.contract == "v1"
+        assert cfg.compaction.contract == "v2"
         assert cfg.budget.max_steps == 50
         assert cfg.budget.max_tokens is None
-        assert cfg.handles.inline_threshold_tokens == 800
+        assert cfg.artifacts.inline_threshold_tokens == 800
         assert cfg.limits.max_validation_retries == 2
+        assert cfg.limits.approval_expires_s == 3600.0
+        assert cfg.persistence.ledger_directory is None
 
     def test_from_dict_nested_override(self):
         cfg = Config.from_dict({

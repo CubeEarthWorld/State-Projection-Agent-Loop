@@ -27,8 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=1.40"]
-embeddings = ["llama-cpp-python>=0.2.90", "huggingface-hub>=0.23"]
+# The package itself is LLM-agnostic (see state_projection_loop.llm.LLMAdapter)
+# and depends on no provider SDK. These extras are only needed to run the
+# example adapters in examples/llm_adapters.py and the example scripts/tests
+# that use them.
+examples = ["openai>=1.40", "anthropic>=0.40", "llama-cpp-python>=0.2.90", "huggingface-hub>=0.23"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

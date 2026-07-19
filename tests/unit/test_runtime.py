@@ -1,5 +1,6 @@
-"""Runtime (§6, §8): validation & self-repair, require_spec gate, parallel
-execution, retries/timeouts, output policy, budget arithmetic."""
+"""Runtime: validation & self-repair, require_spec gate, ordering (P0-1),
+retry-safety-gated retries and OUTCOME_UNKNOWN (P0-2), output policy,
+budget arithmetic."""
 from __future__ import annotations
 
 import asyncio
@@ -8,10 +9,13 @@ from typing import Any
 
 import pytest
 
-from state_projection_loop import Config, Registry, ToolCall, ValueStore
-from state_projection_loop.hooks import Hooks
-from state_projection_loop.logger import SessionLogger
+from state_projection_loop import Config, Registry, ToolCall
+from state_projection_loop.artifacts import ArtifactStore, ref
+from state_projection_loop.capability import ToolContext
+from state_projection_loop.events import InMemoryLedger
+from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.projection import TurnContext
+from state_projection_loop.run import Run
 from state_projection_loop.runtime import (
     BudgetState,
     Runtime,
@@ -19,25 +23,31 @@ from state_projection_loop.runtime import (
     apply_defaults,
     validate_args,
 )
-from state_projection_loop.tooldef import ToolContext
 
-from _util import echo_handler, tool_dict
+from _util import capability_dict, echo_handler
 
 
-def make_runtime(registry: Registry, config: Config | None = None) -> tuple[Runtime, TurnContext, ToolContext]:
+def make_runtime(registry: Registry, config: Config | None = None, *, allow_all: bool = True):
     config = config or Config()
-    store = ValueStore()
-    runtime = Runtime(registry, store, config, Hooks(), SessionLogger())
-    turn = TurnContext(config=config, registry=registry, conversation=[], summary=[], store=store)
-    ctx = ToolContext(registry=registry, store=store, config=config)
-    return runtime, turn, ctx
+    store = ArtifactStore("run_test")
+    runtime = Runtime(registry, store, config)
+    ledger = InMemoryLedger()
+    run = Run("run_test", "ses_test", ledger)
+    policy = PolicyEngine(default_decision="allow" if allow_all else "require_approval")
+    turn = TurnContext(config=config, registry=registry, conversation=[], store=store)
+    ctx = ToolContext(registry=registry, store=store, config=config, ledger=ledger, run=run)
+    return runtime, turn, ctx, run, policy
+
+
+def run_batch(runtime, calls, turn, ctx, run, policy):
+    return asyncio.run(runtime.execute(calls, turn, ctx, run, policy))
 
 
 def echo_registry(**overrides: Any) -> Registry:
     reg = Registry()
     reg.register(
-        tool_dict("echo", description="Echo the text back.",
-                  properties={"text": {"type": "string"}}, required=["text"], **overrides),
+        capability_dict("demo.echo", description="Echo the text back.",
+                         properties={"text": {"type": "string"}}, required=["text"], **overrides),
         handler=echo_handler,
     )
     return reg
@@ -45,131 +55,145 @@ def echo_registry(**overrides: Any) -> Registry:
 
 class TestValidation:
     def test_happy_path(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        [result] = asyncio.run(runtime.execute([ToolCall(name="echo", arguments={"text": "hi"})], turn, ctx))
+        runtime, turn, ctx, run, policy = make_runtime(echo_registry())
+        batch = run_batch(runtime, [ToolCall(name="demo.echo", arguments={"text": "hi"})], turn, ctx, run, policy)
+        [result] = batch.results
         assert result.ok and result.observation == "echo: hi"
+        assert result.outcome == "ok"
 
     def test_type_error_attaches_spec(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        [result] = asyncio.run(runtime.execute([ToolCall(name="echo", arguments={"text": 42})], turn, ctx))
+        runtime, turn, ctx, run, policy = make_runtime(echo_registry())
+        batch = run_batch(runtime, [ToolCall(name="demo.echo", arguments={"text": 42})], turn, ctx, run, policy)
+        [result] = batch.results
         assert not result.ok
         assert "Validation error" in result.observation
-        assert "### echo" in result.observation  # full spec attached (§6 self-repair)
+        assert "### demo.echo" in result.observation
         assert "NOT executed" in result.observation
 
     def test_missing_required(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        [result] = asyncio.run(runtime.execute([ToolCall(name="echo", arguments={})], turn, ctx))
-        assert not result.ok and "required" in result.observation
-
-    def test_consecutive_failures_cut_off(self):
-        config = Config()
-        config.limits.max_validation_retries = 2
-        runtime, turn, ctx = make_runtime(echo_registry(), config)
-        bad = lambda: ToolCall(name="echo", arguments={"text": 1})
-        r1 = asyncio.run(runtime.execute([bad()], turn, ctx))[0]
-        r2 = asyncio.run(runtime.execute([bad()], turn, ctx))[0]
-        r3 = asyncio.run(runtime.execute([bad()], turn, ctx))[0]
-        assert "### echo" in r1.observation and "### echo" in r2.observation
-        assert "giving up" in r3.observation and "### echo" not in r3.observation
-
-    def test_success_resets_failure_streak(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        bad = ToolCall(name="echo", arguments={"text": 1})
-        good = ToolCall(name="echo", arguments={"text": "ok"})
-        asyncio.run(runtime.execute([bad], turn, ctx))
-        asyncio.run(runtime.execute([good], turn, ctx))
-        asyncio.run(runtime.execute([ToolCall(name="echo", arguments={"text": 2})], turn, ctx))
-        result = asyncio.run(runtime.execute([ToolCall(name="echo", arguments={"text": 3})], turn, ctx))[0]
-        assert "### echo" in result.observation  # streak restarted, not cut off
+        runtime, turn, ctx, run, policy = make_runtime(echo_registry())
+        batch = run_batch(runtime, [ToolCall(name="demo.echo", arguments={})], turn, ctx, run, policy)
+        assert not batch.results[0].ok and "required" in batch.results[0].observation
 
     def test_malformed_raw_arguments(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        call = ToolCall(name="echo", arguments={}, raw_arguments='{"text": broken')
-        [result] = asyncio.run(runtime.execute([call], turn, ctx))
-        assert not result.ok and "not valid JSON" in result.observation
+        runtime, turn, ctx, run, policy = make_runtime(echo_registry())
+        call = ToolCall(name="demo.echo", arguments={}, raw_arguments='{"text": broken')
+        batch = run_batch(runtime, [call], turn, ctx, run, policy)
+        assert not batch.results[0].ok and "not valid JSON" in batch.results[0].observation
 
-    def test_defaults_applied(self):
-        reg = Registry()
-        received = {}
-
-        def handler(text: str, times: int = 0) -> str:
-            received["times"] = times
-            return text * times
-
-        reg.register(
-            tool_dict("rep", properties={"text": {"type": "string"},
-                                         "times": {"type": "integer", "default": 2}},
-                      required=["text"]),
-            handler=handler,
-        )
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="rep", arguments={"text": "ab"})], turn, ctx))
-        assert result.ok and received["times"] == 2 and result.observation == "abab"
-
-    def test_unknown_tool_mentions_find_tools(self):
-        runtime, turn, ctx = make_runtime(echo_registry())
-        [result] = asyncio.run(runtime.execute([ToolCall(name="nope", arguments={})], turn, ctx))
-        assert not result.ok
-        assert "find_tools" in result.observation and "misc(1)" in result.observation
+    def test_unknown_capability_mentions_find_tools(self):
+        runtime, turn, ctx, run, policy = make_runtime(echo_registry())
+        batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
+        assert not batch.results[0].ok
+        assert "find_tools" in batch.results[0].observation
 
 
 class TestRequireSpec:
     def test_first_call_bounced_second_runs(self):
         reg = Registry()
         reg.register(
-            tool_dict("danger", require_spec=True,
-                      properties={"target": {"type": "string"}}, required=["target"]),
+            capability_dict("demo.danger", require_spec=True,
+                             properties={"target": {"type": "string"}}, required=["target"]),
             handler=lambda target: f"deleted {target}",
         )
-        runtime, turn, ctx = make_runtime(reg)
-        call = ToolCall(name="danger", arguments={"target": "tmp"})
-        [first] = asyncio.run(runtime.execute([call], turn, ctx))
-        assert not first.ok and "### danger" in first.observation
-        [second] = asyncio.run(runtime.execute([call], turn, ctx))
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        call = ToolCall(name="demo.danger", arguments={"target": "tmp"})
+        first = run_batch(runtime, [call], turn, ctx, run, policy).results[0]
+        assert not first.ok and "### demo.danger" in first.observation
+        second = run_batch(runtime, [call], turn, ctx, run, policy).results[0]
         assert second.ok and second.observation == "deleted tmp"
 
 
-class TestExecution:
-    def test_parallel_safe_calls_run_concurrently(self):
+class TestOrdering:
+    """P0-1: calls execute in the model's stated order; only a contiguous
+    run of read-only capabilities may run concurrently."""
+
+    def test_write_then_read_preserves_order(self):
+        reg = Registry()
+        log: list[str] = []
+
+        def write(value: str) -> str:
+            log.append(f"write:{value}")
+            return "written"
+
+        def read() -> str:
+            log.append("read")
+            return "".join(log)
+
+        reg.register(capability_dict("fs.write", properties={"value": {"type": "string"}},
+                                      required=["value"], effects=[("write", "workspace:*")]),
+                     handler=write)
+        reg.register(capability_dict("fs.read", effects=[("read", "workspace:*")]), handler=read)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        calls = [ToolCall(name="fs.write", arguments={"value": "x"}), ToolCall(name="fs.read", arguments={})]
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
+        assert log == ["write:x", "read"]
+        assert [r.call.name for r in batch.results] == ["fs.write", "fs.read"]
+
+    def test_adjacent_read_only_calls_run_concurrently(self):
         reg = Registry()
 
         async def slow(**kwargs: Any) -> str:
             await asyncio.sleep(0.15)
             return "done"
 
-        for name in ("p1", "p2", "p3"):
-            reg.register(tool_dict(name, parallel_safe=True), handler=slow)
-        runtime, turn, ctx = make_runtime(reg)
-        calls = [ToolCall(name=n, arguments={}) for n in ("p1", "p2", "p3")]
+        for name in ("demo.p1", "demo.p2", "demo.p3"):
+            reg.register(capability_dict(name, effects=[("read", "workspace:*")]), handler=slow)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        calls = [ToolCall(name=n, arguments={}) for n in ("demo.p1", "demo.p2", "demo.p3")]
         start = time.perf_counter()
-        results = asyncio.run(runtime.execute(calls, turn, ctx))
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
         elapsed = time.perf_counter() - start
-        assert all(r.ok for r in results)
-        assert elapsed < 0.4  # 3 × 0.15s would be 0.45s serially
+        assert all(r.ok for r in batch.results)
+        assert elapsed < 0.4  # 3 x 0.15s would be ~0.45s serially
 
-    def test_results_keep_call_order(self):
+    def test_write_breaks_the_parallel_streak(self):
         reg = Registry()
-        reg.register(tool_dict("fast", parallel_safe=True), handler=lambda: "fast")
-        reg.register(tool_dict("slow_serial"), handler=lambda: "slow")
-        runtime, turn, ctx = make_runtime(reg)
-        calls = [ToolCall(name="slow_serial", arguments={}), ToolCall(name="fast", arguments={})]
-        results = asyncio.run(runtime.execute(calls, turn, ctx))
-        assert [r.call.name for r in results] == ["slow_serial", "fast"]
+        reg.register(capability_dict("demo.read1", effects=[("read", "workspace:*")]), handler=lambda: "r1")
+        reg.register(capability_dict("demo.write1", effects=[("write", "workspace:*")]), handler=lambda: "w1")
+        reg.register(capability_dict("demo.read2", effects=[("read", "workspace:*")]), handler=lambda: "r2")
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        calls = [ToolCall(name=n, arguments={}) for n in ("demo.read1", "demo.write1", "demo.read2")]
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
+        assert [r.call.name for r in batch.results] == ["demo.read1", "demo.write1", "demo.read2"]
+        assert [r.value for r in batch.results] == ["r1", "w1", "r2"]
 
-    def test_timeout_becomes_observation(self):
+
+class TestRetrySafety:
+    """P0-2: retries are only permitted for pure/idempotent capabilities;
+    a timeout is OUTCOME_UNKNOWN, never silently 'failed'."""
+
+    def test_timeout_is_outcome_unknown_not_failed(self):
         reg = Registry()
 
         async def sleeper() -> str:
             await asyncio.sleep(1.0)
             return "never"
 
-        reg.register(tool_dict("sleepy", timeout_s=0.1), handler=sleeper)
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="sleepy", arguments={})], turn, ctx))
-        assert not result.ok and "timed out" in result.observation
+        reg.register(capability_dict("demo.sleepy", timeout_s=0.1), handler=sleeper)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        batch = run_batch(runtime, [ToolCall(name="demo.sleepy", arguments={})], turn, ctx, run, policy)
+        result = batch.results[0]
+        assert not result.ok
+        assert result.outcome == "unknown"
+        assert "UNKNOWN" in result.observation
 
-    def test_retry_then_success(self):
+    def test_timeout_on_never_retry_does_not_retry(self):
+        reg = Registry()
+        attempts = {"n": 0}
+
+        async def sleeper() -> str:
+            attempts["n"] += 1
+            await asyncio.sleep(1.0)
+            return "never"
+
+        reg.register(capability_dict("demo.sleepy", timeout_s=0.05, retry_safety="never_retry", retries=0),
+                     handler=sleeper)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        run_batch(runtime, [ToolCall(name="demo.sleepy", arguments={})], turn, ctx, run, policy)
+        assert attempts["n"] == 1
+
+    def test_idempotent_retry_then_success(self):
         reg = Registry()
         attempts = {"n": 0}
 
@@ -179,65 +203,125 @@ class TestExecution:
                 raise ConnectionError("transient")
             return "recovered"
 
-        reg.register(tool_dict("flaky", retries=1), handler=flaky)
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="flaky", arguments={})], turn, ctx))
+        reg.register(capability_dict("demo.flaky", retries=1, retry_safety="idempotent"), handler=flaky)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        batch = run_batch(runtime, [ToolCall(name="demo.flaky", arguments={})], turn, ctx, run, policy)
+        result = batch.results[0]
         assert result.ok and result.observation == "recovered" and attempts["n"] == 2
 
-    def test_exception_becomes_observation(self):
+    def test_command_id_stable_across_retries(self):
+        reg = Registry()
+        seen_ids: list[str] = []
+
+        def flaky(ctx: ToolContext) -> str:
+            seen_ids.append(ctx.command_id)
+            if len(seen_ids) == 1:
+                raise ConnectionError("transient")
+            return "ok"
+
+        reg.register(capability_dict("demo.flaky", retries=1, retry_safety="idempotent"), handler=flaky)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        run_batch(runtime, [ToolCall(name="demo.flaky", arguments={})], turn, ctx, run, policy)
+        assert len(seen_ids) == 2 and seen_ids[0] == seen_ids[1]
+
+    def test_exception_becomes_failed_observation(self):
         reg = Registry()
 
         def boom() -> str:
             raise RuntimeError("kaboom")
 
-        reg.register(tool_dict("boom"), handler=boom)
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="boom", arguments={})], turn, ctx))
-        assert not result.ok and "kaboom" in result.observation
+        reg.register(capability_dict("demo.boom"), handler=boom)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        batch = run_batch(runtime, [ToolCall(name="demo.boom", arguments={})], turn, ctx, run, policy)
+        result = batch.results[0]
+        assert not result.ok and result.outcome == "failed" and "kaboom" in result.observation
 
     def test_ctx_injection(self):
         reg = Registry()
 
         def with_ctx(ctx: ToolContext, key: str) -> str:
-            return f"state[{key}]={ctx.state.get(key)}"
+            return f"state[{key}]={ctx.working_state.extra.get(key)}"
 
-        reg.register(tool_dict("st", properties={"key": {"type": "string"}}, required=["key"]),
+        reg.register(capability_dict("demo.st", properties={"key": {"type": "string"}}, required=["key"]),
                      handler=with_ctx)
-        runtime, turn, ctx = make_runtime(reg)
-        ctx.state["hp"] = 10
-        [result] = asyncio.run(runtime.execute([ToolCall(name="st", arguments={"key": "hp"})], turn, ctx))
-        assert result.observation == "state[hp]=10"
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        from state_projection_loop.working_state import WorkingState
+
+        ctx.working_state = WorkingState(extra={"hp": 10})
+        batch = run_batch(runtime, [ToolCall(name="demo.st", arguments={"key": "hp"})], turn, ctx, run, policy)
+        assert batch.results[0].value == "state[hp]=10"
+
+
+class TestPolicyGating:
+    def test_deny_prevents_execution(self):
+        reg = Registry()
+        called = {"n": 0}
+
+        def handler():
+            called["n"] += 1
+            return "ran"
+
+        reg.register(capability_dict("demo.risky", effects=[("external", "*")]), handler=handler)
+        runtime, turn, ctx, run, policy = make_runtime(reg, allow_all=False)
+        policy.default_decision = "deny"
+        batch = run_batch(runtime, [ToolCall(name="demo.risky", arguments={})], turn, ctx, run, policy)
+        assert not batch.results[0].ok
+        assert batch.results[0].outcome == "denied"
+        assert called["n"] == 0
+
+    def test_require_approval_halts_batch_and_preserves_pending(self):
+        reg = Registry()
+        reg.register(capability_dict("demo.risky", effects=[("external", "*")]), handler=lambda: "ran")
+        reg.register(capability_dict("demo.after"), handler=lambda: "after")
+        runtime, turn, ctx, run, policy = make_runtime(reg, allow_all=False)
+        calls = [ToolCall(name="demo.risky", arguments={}), ToolCall(name="demo.after", arguments={})]
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
+        assert batch.halted is True
+        assert run.state == "WAITING_FOR_APPROVAL"
+        assert [c.name for c in run.pending_calls] == ["demo.risky", "demo.after"]
 
 
 class TestOutputPolicy:
-    def test_large_result_becomes_handle(self):
+    def test_large_result_becomes_artifact(self):
         reg = Registry()
-        reg.register(tool_dict("big", max_inline_tokens=50),
-                     handler=lambda: "data " * 500)
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="big", arguments={})], turn, ctx))
-        assert result.ok and result.handle == "$h1"
-        assert "$h1" in result.observation and "peek" in result.observation
-        assert ctx.store.get("$h1") == "data " * 500
+        reg.register(capability_dict("demo.big", max_inline_tokens=50), handler=lambda: "data " * 500)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        batch = run_batch(runtime, [ToolCall(name="demo.big", arguments={})], turn, ctx, run, policy)
+        result = batch.results[0]
+        assert result.ok and result.artifact_id is not None
+        assert result.artifact_id in result.observation
+        assert ctx.store.get(result.artifact_id) == "data " * 500
 
     def test_truncate_policy(self):
         reg = Registry()
-        reg.register(tool_dict("cut", max_inline_tokens=50, overflow="truncate"),
+        reg.register(capability_dict("demo.cut", max_inline_tokens=50, overflow="truncate"),
                      handler=lambda: "data " * 500)
-        runtime, turn, ctx = make_runtime(reg)
-        [result] = asyncio.run(runtime.execute([ToolCall(name="cut", arguments={})], turn, ctx))
-        assert result.handle is None and "[truncated by output_policy]" in result.observation
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        batch = run_batch(runtime, [ToolCall(name="demo.cut", arguments={})], turn, ctx, run, policy)
+        result = batch.results[0]
+        assert result.artifact_id is None and "[truncated by output_policy]" in result.observation
 
-    def test_handle_argument_resolution(self):
+    def test_artifact_reference_resolution(self):
         reg = Registry()
-        reg.register(tool_dict("length", properties={"data": {}}, required=["data"]),
+        reg.register(capability_dict("demo.length", properties={"data": {}}, required=["data"]),
                      handler=lambda data: f"len={len(data)}")
-        runtime, turn, ctx = make_runtime(reg)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
         record = ctx.store.put([1, 2, 3, 4])
-        [result] = asyncio.run(
-            runtime.execute([ToolCall(name="length", arguments={"data": record.id})], turn, ctx)
+        batch = run_batch(
+            runtime, [ToolCall(name="demo.length", arguments={"data": ref(record.id)})], turn, ctx, run, policy,
         )
-        assert result.observation == "len=4"
+        assert batch.results[0].value == "len=4"
+
+    def test_bare_string_matching_artifact_id_not_resolved(self):
+        reg = Registry()
+        reg.register(capability_dict("demo.echo2", properties={"data": {}}, required=["data"]),
+                     handler=lambda data: data)
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+        record = ctx.store.put([1, 2, 3])
+        batch = run_batch(
+            runtime, [ToolCall(name="demo.echo2", arguments={"data": record.id})], turn, ctx, run, policy,
+        )
+        assert batch.results[0].value == record.id  # literal string passed through
 
 
 class TestMiniValidator:
@@ -269,7 +353,7 @@ class TestMiniValidator:
         ({"q": "ok", "mode": "c"}, "not one of"),
         ({"q": "ok", "items": ["x", 1]}, "expected type"),
         ({"q": "ok", "zzz": 1}, "unexpected properties"),
-        ({"q": "ok", "n": True}, "expected type"),  # bool is not an integer
+        ({"q": "ok", "n": True}, "expected type"),
     ])
     def test_rejects_invalid(self, args, fragment):
         assert fragment in _mini_validate(self.SCHEMA, args)

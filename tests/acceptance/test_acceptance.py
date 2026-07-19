@@ -1,10 +1,13 @@
-"""Acceptance tests mandated by spec §17:
+"""General acceptance tests (carried over from the original design spec):
 
-(a) 1,000 registered tools, default config → per-turn tool-related overhead
-    ≤ 3k tokens (two orders of magnitude below full-spec preloading)
-(b) with vectors disabled, every registered tool remains reachable (I10)
-(c) the self-repair path works: validation failure → spec attached → retry
-(d) the default config alone yields a working chat agent (I11)
+(a) 1,000 registered capabilities, default config -> per-turn tool-related
+    overhead stays small (two orders of magnitude below full-spec preloading)
+(b) with vectors disabled, every registered capability remains reachable
+(c) the self-repair path works: validation failure -> spec attached -> retry
+(d) the default config alone yields a working chat agent
+
+The Codex-review-driven P0/P1 fixes have their own focused suite in
+``test_p0_p1_acceptance.py``.
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ import pytest
 from state_projection_loop import Config, Registry, ScriptedLLM, Session, ToolSearch
 from state_projection_loop.tokens import estimate_tokens
 
-from _util import ok_handler_factory, tool_dict
+from _util import capability_dict, ok_handler_factory
 
 CATEGORIES = [
     "web/search", "web/fetch", "file", "file/edit", "game/flags", "game/media",
@@ -35,8 +38,8 @@ def build_thousand_tool_registry(n: int = 1000) -> Registry:
         cat = CATEGORIES[i % len(CATEGORIES)]
         w1, w2 = rng.choice(WORDS), rng.choice(WORDS)
         reg.register(
-            tool_dict(
-                f"tool_{i:04d}_{cat.replace('/', '_')}",
+            capability_dict(
+                f"demo.tool_{i:04d}",
                 category=cat,
                 description=f"{cat} 用のツール{i}。{w1} と {w2} を行う。",
                 embedding_text=f"{w1} {w2} {cat} ツール{i}",
@@ -82,35 +85,35 @@ class TestA_TokenOverheadAt1000Tools:
 
         assert overhead <= 3000, f"tool overhead {overhead}tk exceeds the 3k budget"
 
-        # two orders of magnitude below preloading every spec (§13 goal)
+        # two orders of magnitude below preloading every spec
         full_preload = sum(estimate_tokens(t.spec_text()) for t in thousand_tools)
         assert full_preload > overhead * 10
-        assert len(captured["tools"]) < 100  # never O(N) native schemas (I1)
+        assert len(captured["tools"]) < 100  # never O(N) native schemas
 
     def test_toc_stays_compact(self, thousand_tools):
-        assert estimate_tokens(thousand_tools.toc_text()) <= 100  # §13: TOC ≤ 100tk
+        assert estimate_tokens(thousand_tools.toc_text()) <= 100
 
 
 class TestB_ReachabilityWithoutVectors:
     def test_every_tool_reachable_via_find_tools(self, thousand_tools):
-        """I10: with vector='off', layer 3 search by name finds every tool."""
+        """With vector='off', layer 3 search by name finds every capability."""
         search = ToolSearch(thousand_tools, vector="off")
         rng = random.Random(7)
         sample = rng.sample(thousand_tools.all(), 150)
-        for td in sample:
-            results = search.search(td.name, layer=3, k=5)
-            assert any(s.tool.name == td.name for s in results), f"{td.name} unreachable"
+        for cap in sample:
+            results = search.search(cap.name, layer=3, k=5)
+            assert any(s.tool.name == cap.name for s in results), f"{cap.name} unreachable"
 
     def test_toc_covers_every_category(self, thousand_tools):
         toc = thousand_tools.toc_text()
-        for td in thousand_tools:
-            assert (td.category or "misc").split("/")[0] in toc
+        for cap in thousand_tools:
+            assert (cap.category or "misc").split("/")[0] in toc
 
     def test_no_embed_tools_still_reachable(self):
         reg = Registry()
-        reg.register(tool_dict("shadow", no_embed=True, summary="shadow tool"))
+        reg.register(capability_dict("demo.shadow", no_embed=True, summary="shadow tool"))
         search = ToolSearch(reg, vector="off")
-        assert any(s.tool.name == "shadow" for s in search.search("shadow", layer=3))
+        assert any(s.tool.name == "demo.shadow" for s in search.search("shadow", layer=3))
 
 
 class TestC_SelfRepairPath:
@@ -123,20 +126,19 @@ class TestC_SelfRepairPath:
             return f"echo: {text}"
 
         reg.register(
-            tool_dict("echo", description="Echo text.",
-                      properties={"text": {"type": "string"}}, required=["text"]),
+            capability_dict("demo.echo", description="Echo text.",
+                             properties={"text": {"type": "string"}}, required=["text"]),
             handler=echo,
         )
 
         def repair_step(messages, tools):
-            # the model "reads" the spec from the latest observation and retries
             last = messages[-1] if messages[-1].role == "tool" else next(
                 m for m in reversed(messages) if m.role == "tool")
-            assert "### echo" in str(last.content)
-            return ScriptedLLM.call("echo", text="fixed")
+            assert "### demo.echo" in str(last.content)
+            return ScriptedLLM.call("demo.echo", text="fixed")
 
         llm = ScriptedLLM([
-            ScriptedLLM.call("echo", text=12345),  # wrong type
+            ScriptedLLM.call("demo.echo", text=12345),  # wrong type
             repair_step,
             "self-repair complete",
         ])
@@ -147,11 +149,11 @@ class TestC_SelfRepairPath:
 
 class TestD_DefaultChatAgent:
     def test_defaults_only_chat(self):
-        """No state, no vectors, no spawn, config untouched — chat works (I11)."""
+        """No policy config, no vectors, no spawn — chat works out of the box."""
         session = Session(ScriptedLLM(["はい、こんにちは!", "元気です。"]))
         assert session.send("こんにちは") == "はい、こんにちは!"
         assert session.send("元気?") == "元気です。"
-        assert session.summary == []
+        assert session.working_state.is_empty()
         assert [m.role for m in session.conversation] == [
             "user", "assistant", "user", "assistant",
         ]

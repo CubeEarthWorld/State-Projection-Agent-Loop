@@ -135,8 +135,8 @@ def build_support_registry(backend: SupportBackend, manuals_dir: Path = MANUALS_
         return {"card_id": card["card_id"], "status": "rendered", "open": open}
 
     registry.register({
-        "name": "search_manual",
-        "category": "support/manuals",
+        "name": "support.manual.search",
+        "category": "support.manuals",
         "spec": {
             "description": "登録製品の説明書を全文検索し、該当セクションを返す。",
             "parameters": {
@@ -152,13 +152,14 @@ def build_support_registry(backend: SupportBackend, manuals_dir: Path = MANUALS_
             "usage_notes": "回答は必ず説明書の記載に基づくこと。見つからなければ推測せずその旨を伝える。",
         },
         "discovery": {"embedding_text": "説明書 マニュアル 使い方 エラー 故障 手順 調べる トラブル 対処"},
-        "execution": {"timeout_s": 10, "parallel_safe": True,
+        "execution": {"timeout_s": 10, "retry_safety": "pure",
                       "output_policy": {"max_inline_tokens": 200, "preview": "head"}},
+        "effects": [{"kind": "none"}],
     }, handler=search_manual)
 
     registry.register({
-        "name": "get_manual_section",
-        "category": "support/manuals",
+        "name": "support.manual.get_section",
+        "category": "support.manuals",
         "spec": {
             "description": "製品IDと見出しを指定して説明書の特定セクションを取得する。",
             "parameters": {
@@ -171,12 +172,13 @@ def build_support_registry(backend: SupportBackend, manuals_dir: Path = MANUALS_
             },
         },
         "discovery": {"embedding_text": "説明書 セクション 章 見出し 該当箇所"},
-        "execution": {"timeout_s": 10, "parallel_safe": True},
+        "execution": {"timeout_s": 10, "retry_safety": "pure"},
+        "effects": [{"kind": "none"}],
     }, handler=get_manual_section)
 
     registry.register({
-        "name": "escalate_to_human",
-        "category": "support/tickets",
+        "name": "support.ticket.escalate",
+        "category": "support.tickets",
         "spec": {
             "description": (
                 "人間のサポート担当者へ引き継ぐ。ユーザーから聞き取ったメールアドレス・電話番号・"
@@ -197,12 +199,13 @@ def build_support_registry(backend: SupportBackend, manuals_dir: Path = MANUALS_
             "require_spec": True,
             "embedding_text": "人間 担当者 オペレーター 引き継ぎ エスカレーション 解決しない 直接話したい",
         },
-        "execution": {"timeout_s": 15},
+        "execution": {"timeout_s": 15, "retry_safety": "never_retry"},
+        "effects": [{"kind": "external", "resource": "support_ticket_system:*"}],
     }, handler=escalate_to_human)
 
     registry.register({
-        "name": "render_chart",
-        "category": "support/artifacts",
+        "name": "support.chart.render",
+        "category": "support.artifacts",
         "spec": {
             "description": "グラフ/チャートカードを描画して表示する(artifacts相当)。カードは既定で開いた状態で表示され、ユーザーが閉じられる。",
             "parameters": {
@@ -217,15 +220,16 @@ def build_support_registry(backend: SupportBackend, manuals_dir: Path = MANUALS_
             },
         },
         "discovery": {"embedding_text": "グラフ チャート 図 可視化 表示 比較 推移"},
-        "execution": {"timeout_s": 10},
+        "execution": {"timeout_s": 10, "retry_safety": "idempotent"},
+        "effects": [{"kind": "write", "resource": "ui:chart"}],
     }, handler=render_chart)
 
     return registry
 
 
 SUPPORT_KERNEL = """あなたは家電メーカーのカスタマーサポートAIです。
-- 回答は必ず search_manual / get_manual_section で説明書を確認してから行う。推測で答えない。
+- 回答は必ず support.manual.search / support.manual.get_section で説明書を確認してから行う。推測で答えない。
 - 解決しない場合や人間の対応を求められた場合は、メールアドレスと電話番号を聞き取り、
-  escalate_to_human で担当者へ引き継ぐ。
-- 数値の比較や推移を示すときは render_chart でチャートカードを表示できる。
-- 丁寧な日本語で簡潔に答える。"""
+  support.ticket.escalate で担当者へ引き継ぐ。
+- 数値の比較や推移を示すときは support.chart.render でチャートカードを表示できる。
+- 丁寧な日本語で簡潔に答える。答え終えたら finish(result) を呼ぶ。"""

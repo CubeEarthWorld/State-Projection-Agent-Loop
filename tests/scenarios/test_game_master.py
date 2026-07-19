@@ -1,33 +1,24 @@
 """Scenario: game master — narration + presentation (BGM/image/expression)
-+ dice + full state management (goal / flags / variables) per spec §7."""
++ dice + full working-state management (goal / flags / variables)."""
 from __future__ import annotations
 
 import pytest
 
 from state_projection_loop import ScriptedLLM, Session, install_state
+from state_projection_loop.policy import PolicyEngine, Rule
 
 from examples.game_master.tools import GM_KERNEL, MediaLog, build_game_registry, initial_seed
 
 
-@pytest.fixture()
-def game():
-    log = MediaLog()
-    session = Session(
-        ScriptedLLM([], strict=False),  # replaced per-test
-        kernel=GM_KERNEL,
-        registry=build_game_registry(log, dice_seed=42),
-        seed=initial_seed(),
-    )
-    install_state(session)
-    return log, session
+def allow_game_and_state() -> PolicyEngine:
+    policy = PolicyEngine(default_decision="allow")
+    return policy
 
 
 def make_session(log, steps, seed=None):
     session = Session(
-        ScriptedLLM(steps),
-        kernel=GM_KERNEL,
-        registry=build_game_registry(log, dice_seed=42),
-        seed=seed or initial_seed(),
+        ScriptedLLM(steps), kernel=GM_KERNEL, registry=build_game_registry(log, dice_seed=42),
+        seed=seed or initial_seed(), policy=allow_game_and_state(),
     )
     install_state(session)
     return session
@@ -38,10 +29,10 @@ class TestPresentation:
         log = MediaLog()
         session = make_session(log, [
             ScriptedLLM.calls(
-                ("show_image", {"scene": "dungeon_door"}),
-                ("play_bgm", {"track": "tension"}),
-                ("set_expression", {"character": "ナビィ", "expression": "surprised"}),
-                ("set_flag", {"name": "door_examined", "value": True}),
+                ("game.media.show_image", {"scene": "dungeon_door"}),
+                ("game.media.play_bgm", {"track": "tension"}),
+                ("game.media.set_expression", {"character": "ナビィ", "expression": "surprised"}),
+                ("state.extra.set", {"path": "flags.door_examined", "value": True}),
             ),
             "重厚な扉だ。表面には古代文字が刻まれている……。",
         ])
@@ -50,18 +41,18 @@ class TestPresentation:
         assert log.images == ["dungeon_door"]
         assert log.bgm == ["tension"]
         assert log.expressions == [{"character": "ナビィ", "expression": "surprised"}]
-        assert session.state["flags"]["door_examined"] is True
+        assert session.working_state.extra["flags"]["door_examined"] is True
 
     def test_invalid_expression_self_repairs(self):
         log = MediaLog()
         session = make_session(log, [
-            ScriptedLLM.call("set_expression", character="ナビィ", expression="grinning"),
-            ScriptedLLM.call("set_expression", character="ナビィ", expression="smile"),
+            ScriptedLLM.call("game.media.set_expression", character="ナビィ", expression="grinning"),
+            ScriptedLLM.call("game.media.set_expression", character="ナビィ", expression="smile"),
             "ナビィはにっこり笑った。",
         ])
         session.send("ナビィを笑わせて")
         obs = [m.content for m in session.conversation if m.role == "tool"]
-        assert "Validation error" in obs[0] and "### set_expression" in obs[0]
+        assert "Validation error" in obs[0] and "### game.media.set_expression" in obs[0]
         assert log.expressions == [{"character": "ナビィ", "expression": "smile"}]
 
 
@@ -69,7 +60,7 @@ class TestDice:
     def test_deterministic_rolls_with_seed(self):
         log = MediaLog()
         session = make_session(log, [
-            ScriptedLLM.call("roll_dice", sides=6, count=2),
+            ScriptedLLM.call("game.dice.roll", sides=6, count=2),
             "ダイスの結果で判定した。",
         ])
         session.send("鍵開けに挑戦する")
@@ -79,7 +70,7 @@ class TestDice:
 
 
 class TestStateManagement:
-    def test_state_view_prevents_goal_drift(self):
+    def test_working_state_prevents_goal_drift(self):
         """The goal is re-projected every turn — structural drift prevention."""
         seen = []
 
@@ -93,36 +84,36 @@ class TestStateManagement:
         session.send("先に進む")
         for joined in seen:
             assert "宝物庫の鍵を見つけて地下迷宮から脱出する" in joined  # goal always visible
-            assert "[State]" in joined
+            assert "[Working state]" in joined
 
     def test_hp_and_inventory_updates(self):
         log = MediaLog()
         session = make_session(log, [
             ScriptedLLM.calls(
-                ("state_set", {"path": "party.hero.hp", "value": 14}),
-                ("state_set", {"path": "party.hero.items", "value": ["たいまつ", "宝物庫の鍵"]}),
-                ("set_flag", {"name": "key_found", "value": True}),
+                ("state.extra.set", {"path": "party.hero.hp", "value": 14}),
+                ("state.extra.set", {"path": "party.hero.items", "value": ["たいまつ", "宝物庫の鍵"]}),
+                ("state.extra.set", {"path": "flags.key_found", "value": True}),
             ),
             "罠でダメージを受けたが、鍵を手に入れた!",
         ])
         session.send("宝箱を開ける")
-        hero = session.state["party"]["hero"]
+        hero = session.working_state.extra["party"]["hero"]
         assert hero["hp"] == 14
         assert "宝物庫の鍵" in hero["items"]
-        assert session.state["flags"]["key_found"] is True
+        assert session.working_state.extra["flags"]["key_found"] is True
 
     def test_goal_completion_flow(self):
         log = MediaLog()
         session = make_session(log, [
             ScriptedLLM.calls(
-                ("show_image", {"scene": "exit_gate"}),
-                ("play_bgm", {"track": "victory"}),
-                ("set_flag", {"name": "cleared", "value": True}),
+                ("game.media.show_image", {"scene": "exit_gate"}),
+                ("game.media.play_bgm", {"track": "victory"}),
+                ("state.extra.set", {"path": "flags.cleared", "value": True}),
             ),
             "扉が開いた!まばゆい光の中、君たちは地上へ帰還した。──完──",
         ])
         reply = session.send("鍵を使って脱出する")
-        assert session.state["flags"]["cleared"] is True
+        assert session.working_state.extra["flags"]["cleared"] is True
         assert log.bgm[-1] == "victory"
         assert "完" in reply
 
