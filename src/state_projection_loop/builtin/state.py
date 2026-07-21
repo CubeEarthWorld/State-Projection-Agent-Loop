@@ -1,11 +1,10 @@
 """Working-state-as-tools: the LLM edits the structured working state
 through a small set of typed capabilities instead of an arbitrary dict.
 
-Editors of the working state are exactly three: user code
-(``session.run.working_state`` / seed), the LLM via these capabilities, and
-compaction folds (`compaction.py`). A game master registers all of this;
-a simple support bot registers none — the core projection is identical
-either way.
+Editors of the working state are exactly two: user code
+(``session.working_state`` / seed) and the LLM via these capabilities.
+A game master registers all of this; a simple support bot registers none
+— the core projection is identical either way.
 """
 from __future__ import annotations
 

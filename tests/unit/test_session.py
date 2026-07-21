@@ -230,31 +230,17 @@ class TestConcurrencyGuard:
         assert await task == "finished"
 
 
-class TestCompactionWiring:
-    def test_session_folds_overflow_into_working_state(self):
-        summarizer = ScriptedLLM(
-            ['{"new_facts": ["topic A was discussed"], "new_decisions": [], "next_actions": []}'] * 10,
-            strict=False,
-        )
-        cfg = Config.from_dict({"projection": {"window_tokens": 700}})
-        llm = ScriptedLLM([f"reply {i}: " + "filler words here " * 40 for i in range(6)])
-        session = Session(llm, config=cfg, summarizer=summarizer)
-        for i in range(6):
-            session.send(f"question {i}")
-        assert session.working_state.confirmed_facts, "overflow should have been folded into working_state"
-        assert summarizer.requests, "the summarizer LLM should have been called"
-        prompt = summarizer.requests[0]["messages"][0].content
-        assert "JSON" in prompt
-
-    def test_compaction_model_none_uses_deterministic_fold(self):
-        cfg = Config.from_dict({"projection": {"window_tokens": 700},
-                                "compaction": {"model": "none"}})
-        llm = ScriptedLLM([f"reply {i}: " + "filler words here " * 40 for i in range(6)])
+class TestFidelityCompression:
+    def test_old_messages_are_compressed_in_projection(self):
+        """With a small window, older messages get fidelity-compressed rather
+        than compacted by an LLM — the projection handles it deterministically."""
+        cfg = Config.from_dict({"projection": {"window_tokens": 2000}})
+        llm = ScriptedLLM([f"reply {i}: " + "filler words here " * 40 for i in range(8)])
         session = Session(llm, config=cfg)
-        for i in range(6):
+        for i in range(8):
             session.send(f"question {i}")
-        assert session.working_state.confirmed_facts
-        assert any("verbatim" in f or "question 0" in f for f in session.working_state.confirmed_facts)
+        assert session.budget.steps == 8
+        assert len(session.conversation) == 16
 
 
 class TestBudgetTokens:
@@ -280,3 +266,68 @@ class TestAsyncGuard:
     async def test_async_api(self):
         session = Session(ScriptedLLM(["async reply"]))
         assert await session.asend("hi") == "async reply"
+
+
+class TestRewind:
+    def test_rewind_cancels_old_run_and_restores_state(self):
+        llm = ScriptedLLM(["reply 0", "reply 1", "reply 2", "after rewind"])
+        session = Session(llm)
+        session.send("msg 0")
+        session.send("msg 1")
+        session.send("msg 2")
+        assert len(session.conversation) == 6
+        old_run_id = session.run.id
+
+        irreversible = session.rewind(to_turn=1)
+
+        assert session.run.id != old_run_id
+        assert session.run.state == "RUNNING"
+        assert len(session.conversation) == 2
+        assert session.conversation[0].content == "msg 0"
+        assert session.conversation[1].content == "reply 0"
+        assert irreversible == []
+
+    def test_rewind_reports_external_effects(self):
+        reg = Registry()
+        reg.register(capability_dict("mail.send", effects=[("external", "smtp:*")]),
+                     handler=lambda: "sent")
+        llm = ScriptedLLM([
+            ScriptedLLM.call("mail.send"),
+            "sent the email",
+            "reply 1",
+        ])
+        session = Session(llm, registry=reg, policy=allow_all_policy())
+        session.send("send the email")
+        session.send("do something else")
+
+        irreversible = session.rewind(to_turn=1)
+        assert any("mail.send" in note for note in irreversible)
+
+    def test_rewind_restores_working_state(self):
+        from state_projection_loop.builtin.state import install_state
+
+        llm = ScriptedLLM([
+            ScriptedLLM.call("state.goal.set", text="find the key"),
+            "goal set",
+            ScriptedLLM.call("state.goal.set", text="escape the room"),
+            "goal changed",
+            "after rewind",
+        ])
+        session = Session(llm, policy=allow_all_policy())
+        install_state(session)
+        session.send("set goal")
+        session.send("change goal")
+        assert session.working_state.goal == "escape the room"
+
+        session.rewind(to_turn=1)
+        assert session.working_state.goal == "find the key"
+
+    def test_conversation_after_rewind_continues_normally(self):
+        llm = ScriptedLLM(["reply 0", "reply 1", "new reply after rewind"])
+        session = Session(llm)
+        session.send("msg 0")
+        session.send("msg 1")
+        session.rewind(to_turn=1)
+        reply = session.send("msg after rewind")
+        assert reply == "new reply after rewind"
+        assert len(session.conversation) == 4

@@ -86,33 +86,6 @@ class WorkingState:
             extra=dict(d.get("extra") or {}),
         )
 
-    def merge_fold(self, delta: dict[str, Any]) -> None:
-        """Apply a compaction-contract-v2 delta (see compaction.py): additive
-        for facts/decisions/artifact_refs, replace-if-present for goal, and
-        add/remove for open_questions."""
-        if delta.get("goal"):
-            self.goal = str(delta["goal"])
-        for key in ("acceptance_criteria", "constraints"):
-            for item in delta.get(key) or []:
-                if item not in getattr(self, key):
-                    getattr(self, key).append(item)
-        for fact in delta.get("new_facts") or []:
-            if fact not in self.confirmed_facts:
-                self.confirmed_facts.append(fact)
-        for d in delta.get("new_decisions") or []:
-            if isinstance(d, dict):
-                self.decisions.append(RecordedDecision.from_dict(d))
-        for q in delta.get("new_open_questions") or []:
-            if q not in self.open_questions:
-                self.open_questions.append(q)
-        for q in delta.get("resolved_open_questions") or []:
-            self.open_questions = [x for x in self.open_questions if x != q]
-        if delta.get("next_actions") is not None:
-            self.next_actions = list(delta["next_actions"])
-        for ref in delta.get("artifact_refs") or []:
-            if ref not in self.artifact_refs:
-                self.artifact_refs.append(ref)
-
     def render(self, *, max_tokens: int = 800) -> str:
         parts: list[str] = []
         if self.goal:

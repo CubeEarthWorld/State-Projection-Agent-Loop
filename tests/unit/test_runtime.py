@@ -34,7 +34,7 @@ def make_runtime(registry: Registry, config: Config | None = None, *, allow_all:
     ledger = InMemoryLedger()
     run = Run("run_test", "ses_test", ledger)
     policy = PolicyEngine(default_decision="allow" if allow_all else "require_approval")
-    turn = TurnContext(config=config, registry=registry, conversation=[], store=store)
+    turn = TurnContext(config=config, registry=registry, ledger=ledger, run_id="run_test", store=store)
     ctx = ToolContext(registry=registry, store=store, config=config, ledger=ledger, run=run)
     return runtime, turn, ctx, run, policy
 

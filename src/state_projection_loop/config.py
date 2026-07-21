@@ -18,7 +18,7 @@ class ProjectionConfig:
     # turn) and must stay last, in that order, after the append-only
     # conversation section.
     sections: list[str] = field(
-        default_factory=lambda: ["kernel", "toc", "conversation", "working_state", "candidates"]
+        default_factory=lambda: ["kernel", "toc", "history", "working_state", "candidates"]
     )
     window_tokens: int = 30000
     # Reserved so the model always has room to answer; counted against the
@@ -44,11 +44,12 @@ class DiscoveryConfig:
 
 
 @dataclass
-class CompactionConfig:
-    trigger_ratio: float = 0.8
-    model: str = "same"  # "same" | "none" (deterministic fallback) | model name
-    contract: str = "v2"
-    max_summary_ratio: float = 0.1  # legacy free-text fallback cap, used only when model="none"
+class CompressionConfig:
+    full_window: int = 6
+    compressed_window: int = 24
+    summary_window: int = 60
+    compressed_max_lines: int = 80
+    observation_max_lines: int = 40
 
 
 @dataclass
@@ -94,7 +95,7 @@ class Config:
     mode: str = "chat"  # "chat" | "job"
     projection: ProjectionConfig = field(default_factory=ProjectionConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
-    compaction: CompactionConfig = field(default_factory=CompactionConfig)
+    compression: CompressionConfig = field(default_factory=CompressionConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     limits: LimitsConfig = field(default_factory=LimitsConfig)

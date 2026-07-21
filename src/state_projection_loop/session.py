@@ -3,8 +3,9 @@ record → continue/wait/complete.
 
 ``Session`` is the conversation container; ``Run`` (``session.run``) is the
 unit of resumable execution it drives. Everything the model sees each turn
-is re-projected from the Event Ledger's derived state (working state +
-conversation), never accumulated ad hoc.
+is re-projected from the Event Ledger with fidelity-graded compression —
+there is no separately maintained conversation list. The ledger IS the
+truth; the projection is a disposable window over it.
 
 Two correctness properties enforced here that a naive loop gets wrong:
 
@@ -27,11 +28,10 @@ from typing import Any, Callable, Optional
 from .artifacts import ArtifactStore
 from .builtin.meta import ensure_meta_tools
 from .capability import Capability, ToolContext
-from .compaction import Compactor
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend
-from .events import EventLedger, InMemoryLedger, JsonlLedger, Snapshot
+from .events import EventLedger, InMemoryLedger, JsonlLedger, Snapshot, RENDERABLE_TYPES, event_to_message
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
 from .messages import ASSISTANT, Message, OBSERVATION, SYSTEM, USER
@@ -82,13 +82,11 @@ class Session:
         embedder: Optional[EmbeddingBackend] = None,
         sections: Optional[list[Section]] = None,
         extra_sections: Optional[dict[str, Section]] = None,
-        summarizer: Optional[LLMAdapter] = None,
         spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
         ledger: Optional[EventLedger] = None,
     ) -> None:
         self.config = config or Config()
         self.llm = llm
-        self.summarizer = summarizer
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
         ensure_meta_tools(self.registry)
@@ -98,7 +96,6 @@ class Session:
         self.run = Run(new_id("run"), self.session_id, self.ledger)
 
         self.policy = policy if policy is not None else self._default_policy()
-        self.hooks_on_change: list[Callable[[str], None]] = []
 
         artifacts_dir = Path(self.config.artifacts.directory) if self.config.artifacts.directory else None
         self.store = ArtifactStore(self.run.id, directory=artifacts_dir)
@@ -112,8 +109,7 @@ class Session:
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
         self.runtime = Runtime(self.registry, self.store, self.config)
-        self.runtime.seen_specs.update(c.name for c in pinned)  # kernel carries their specs
-        self.compactor = Compactor(self.config, self._resolve_summarizer())
+        self.runtime.seen_specs.update(c.name for c in pinned)
 
         self.working_state = WorkingState()
         for key, value in (seed or {}).items():
@@ -122,7 +118,6 @@ class Session:
             else:
                 self.working_state.extra[key] = value
 
-        self.conversation: list[Message] = []
         self.budget = BudgetState()
 
         self._active: "OrderedDict[str, None]" = OrderedDict((c.name, None) for c in pinned)
@@ -134,50 +129,43 @@ class Session:
 
     @staticmethod
     def _default_policy() -> PolicyEngine:
-        """Out-of-the-box posture: effect-free calls (state/meta tools) and
-        workspace reads run automatically; everything else — including any
-        custom capability with a write/external effect — requires an
-        explicit grant or approval. Callers building a real deployment are
-        expected to pass their own :class:`PolicyEngine`."""
         engine = PolicyEngine(default_decision="require_approval")
         engine.apply_preset("auto_safe")
         return engine
 
-    def _resolve_summarizer(self) -> Optional[LLMAdapter]:
-        if self.summarizer is not None:
-            return self.summarizer
-        if self.config.compaction.model == "none":
-            return None
-        return self.llm
-
     # -- public API -------------------------------------------------------------
 
+    @property
+    def conversation(self) -> list[Message]:
+        """Derived view of renderable ledger events as Messages. Read-only;
+        the ledger is the source of truth, this is a convenience accessor."""
+        msgs: list[Message] = []
+        for event in self.ledger.iter_run(self.run.id):
+            msg_dict = event_to_message(event)
+            if msg_dict is not None:
+                msgs.append(Message.from_dict(msg_dict))
+        return msgs
+
     def send(self, text: str) -> Any:
-        """Chat mode: one user message in, the final text reply (or a
-        pending :class:`~state_projection_loop.run.ApprovalRequest`) out."""
         _ensure_no_running_loop()
         return asyncio.run(self.asend(text))
 
     async def asend(self, text: str) -> Any:
         async with self._guarded():
-            self.conversation.append(Message(role=USER, content=text))
             self.ledger.append(self.run.id, "user_input", {"text": text})
+            self._checkpoint()
             return await self._loop()
 
     def run_job(self, task: str) -> Any:
-        """Job mode: run until finish(result), budget exhaustion, interrupt,
-        or an approval pause."""
         _ensure_no_running_loop()
         return asyncio.run(self.arun_job(task))
 
     async def arun_job(self, task: str) -> Any:
         async with self._guarded():
-            self.conversation.append(Message(role=USER, content=task))
             self.ledger.append(self.run.id, "user_input", {"text": task})
             return await self._loop()
 
     def interrupt(self) -> None:
-        """Request the loop to stop at the next iteration boundary."""
         self._interrupted = True
 
     def add_section(self, section: Section, *, before: str = "candidates") -> None:
@@ -186,8 +174,6 @@ class Session:
     # -- approval lifecycle -------------------------------------------------
 
     def resolve_approval(self, decision: str) -> ApprovalRequest:
-        """Approve or deny the run's pending approval. Does not resume
-        execution — call :meth:`resume`/:meth:`aresume` afterward."""
         return self.run.resolve_approval(decision, current_policy_revision=self.policy.revision)
 
     def resume(self) -> Any:
@@ -195,8 +181,6 @@ class Session:
         return asyncio.run(self.aresume())
 
     async def aresume(self) -> Any:
-        """Continue a run paused at ``WAITING_FOR_APPROVAL`` (now resolved)
-        or freshly reconstructed via :meth:`Session.resume_from_ledger`."""
         async with self._guarded():
             if self.run.state != "RUNNING":
                 raise RunStateError(f"Run {self.run.id} is not resumable from state {self.run.state}")
@@ -208,8 +192,7 @@ class Session:
                 return self.run.pending_approval
             return await self._loop()
 
-    # -- direct invocation (bypasses the model, still goes through the same
-    #    validate/authorize/execute/record pipeline) -------------------------
+    # -- direct invocation ---------------------------------------------------
 
     def invoke(self, capability_name: str, **arguments: Any) -> Any:
         _ensure_no_running_loop()
@@ -222,7 +205,7 @@ class Session:
             turn = self._new_turn()
             call = ToolCall(name=capability_name, arguments=arguments)
             batch = await self.runtime.execute([call], turn, self._tool_context(), self.run, self.policy)
-            self._apply_batch(batch, record_conversation=False)
+            self._apply_batch(batch, record=False)
             self._snapshot()
             if batch.halted:
                 return self.run.pending_approval
@@ -231,30 +214,104 @@ class Session:
                 raise RuntimeError(result.observation or result.error or "invoke failed")
             return result.value
 
-    # -- branching (non-destructive rewind) ----------------------------------
+    # -- branching -------------------------------------------------------------
 
     def branch(self, *, at_message: Optional[int] = None) -> tuple["Session", list[str]]:
-        """Create a new Session sharing history up to ``at_message`` (default:
-        current end). The parent's ledger is never modified or truncated —
-        this only ever adds a new run whose own ledger starts with a
-        ``branch_created`` event pointing at the parent.
-
-        Returns ``(new_session, irreversible_effects)`` where the second
-        element lists external effects already committed by the parent run
-        that this branch cannot undo (e.g. a sent email, a git push).
-        """
-        cut = len(self.conversation) if at_message is None else at_message
         new_session = Session(
             self.llm, kernel=self._kernel_text, config=copy.deepcopy(self.config), registry=self.registry,
-            embedder=getattr(self.search, "embedder", None), summarizer=self.summarizer,
+            embedder=getattr(self.search, "embedder", None),
             spawn_llm_factory=self.spawn_llm_factory, policy=self.policy,
         )
-        new_session.conversation = list(self.conversation[:cut])
         new_session.working_state = copy.deepcopy(self.working_state)
+        renderable = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
+        cut = len(renderable) if at_message is None else at_message
+        for event in renderable[:cut]:
+            new_session.ledger.append(new_session.run.id, event.type, dict(event.data))
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
         })
         return new_session, self._irreversible_effects()
+
+    def rewind(self, *, to_turn: int) -> list[str]:
+        """Destructive rewind: cancel the current run and replace it in-place
+        with a new run containing only events up to ``to_turn`` (counted in
+        user-input turns, 0-indexed). The session continues as if everything
+        after that turn never happened.
+
+        Returns a list of irreversible external effects that already executed
+        and cannot be undone (e.g. a sent email). The caller should surface
+        these to the user.
+
+        Unlike :meth:`branch`, this mutates the session: the old run is
+        cancelled, working_state is restored from the checkpoint at the rewind
+        point, and the budget is reset.
+        """
+        irreversible = self._irreversible_effects_up_to(to_turn)
+        all_events = list(self.ledger.iter_run(self.run.id))
+        renderable = [e for e in all_events if e.type in RENDERABLE_TYPES]
+        checkpoints = [e for e in all_events if e.type == "checkpoint"]
+
+        user_turns_seen = 0
+        cut_index = len(renderable)
+        for i, event in enumerate(renderable):
+            if event.type == "user_input":
+                if user_turns_seen == to_turn:
+                    cut_index = i
+                    break
+                user_turns_seen += 1
+
+        kept_renderable = renderable[:cut_index]
+
+        restored_ws = WorkingState()
+        user_count = 0
+        looking_for_checkpoint = False
+        for event in all_events:
+            if event.type == "user_input":
+                if user_count == to_turn:
+                    looking_for_checkpoint = True
+                user_count += 1
+            elif event.type == "checkpoint" and looking_for_checkpoint:
+                restored_ws = WorkingState.from_dict(event.data.get("working_state") or {})
+                break
+
+        old_run_id = self.run.id
+        self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
+        if self.run.state not in ("COMPLETED", "FAILED", "CANCELLED"):
+            self.run.cancel(f"rewound to turn {to_turn}")
+
+        self.run = Run(new_id("run"), self.session_id, self.ledger)
+        for event in kept_renderable:
+            self.ledger.append(self.run.id, event.type, dict(event.data))
+        self.ledger.append(self.run.id, "checkpoint", {"working_state": restored_ws.to_dict()})
+
+        self.working_state = restored_ws
+        self.budget = BudgetState()
+        self._idle_turns = 0
+        self._budget_grace_used = False
+        self._active = OrderedDict((c.name, None) for c in self.registry.pinned())
+        self.runtime.seen_specs = {c.name for c in self.registry.pinned()}
+        self.runtime._consecutive_validation_failures = {}
+
+        return irreversible
+
+    def _irreversible_effects_up_to(self, to_turn: int) -> list[str]:
+        notices: list[str] = []
+        user_count = 0
+        for event in self.ledger.iter_run(self.run.id):
+            if event.type == "user_input":
+                if user_count >= to_turn:
+                    break
+                user_count += 1
+            if event.type != "command_completed":
+                continue
+            command = self.run.commands.get(event.data.get("command_id", ""))
+            if command is None:
+                continue
+            capability_name = command.capability_name.rsplit("@", 1)[0]
+            capability = self.registry.get(capability_name)
+            if capability and any(e.kind == "external" for e in capability.effects):
+                notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
+        return notices
 
     def _irreversible_effects(self) -> list[str]:
         notices: list[str] = []
@@ -276,16 +333,9 @@ class Session:
     def resume_from_ledger(
         cls, llm: LLMAdapter, run_id: str, *, config: Optional[Config] = None,
         registry: Optional[Registry] = None, policy: Optional[PolicyEngine] = None,
-        embedder: Optional[EmbeddingBackend] = None, summarizer: Optional[LLMAdapter] = None,
+        embedder: Optional[EmbeddingBackend] = None,
         spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
     ) -> "Session":
-        """Reconstruct a Session from its last snapshot in a NEW process.
-
-        This is what makes a ``WAITING_FOR_APPROVAL`` run survive a process
-        restart (P1-2): the caller (a new process, possibly hours later)
-        loads the ledger directory, finds the snapshot, and gets back a
-        Session ready for :meth:`resolve_approval` + :meth:`resume`.
-        """
         config = config or Config()
         if not config.persistence.ledger_directory:
             raise RunStateError("resume_from_ledger requires config.persistence.ledger_directory")
@@ -296,12 +346,11 @@ class Session:
 
         session = cls(
             llm, config=config, registry=registry, policy=policy, embedder=embedder,
-            summarizer=summarizer, spawn_llm_factory=spawn_llm_factory, ledger=ledger,
+            spawn_llm_factory=spawn_llm_factory, ledger=ledger,
         )
         session.run = Run.from_snapshot_state(run_id, ledger, snapshot.state)
         session.session_id = snapshot.state.get("session_id", session.session_id)
         session.working_state = WorkingState.from_dict(snapshot.state.get("working_state") or {})
-        session.conversation = [Message.from_dict(d) for d in snapshot.state.get("conversation") or []]
         budget_data = snapshot.state.get("budget") or {}
         session.budget = BudgetState(
             steps=budget_data.get("steps", 0), prompt_tokens=budget_data.get("prompt_tokens", 0),
@@ -316,7 +365,6 @@ class Session:
         state = {
             "session_id": self.session_id,
             "working_state": self.working_state.to_dict(),
-            "conversation": [m.to_dict() for m in self.conversation],
             "budget": {
                 "steps": self.budget.steps, "prompt_tokens": self.budget.prompt_tokens,
                 "completion_tokens": self.budget.completion_tokens, "cost": self.budget.cost,
@@ -352,8 +400,6 @@ class Session:
                 self._snapshot()
                 return stop
 
-            self._maybe_compact()
-
             turn = self._new_turn()
             api_tools = self._api_tools(turn)
             turn.dedupe_candidate_cards = self.config.projection.dedupe_candidate_cards_against_schemas
@@ -371,15 +417,10 @@ class Session:
             self._note_usage(decision, messages)
             self.ledger.append(self.run.id, "model_response", {
                 "text": decision.text[:2000], "finish": decision.finish,
-                "calls": [{"name": c.name, "arguments": c.arguments} for c in decision.calls],
+                "calls": [{"name": c.name, "arguments": c.arguments, "id": c.id} for c in decision.calls],
             })
 
-            self.conversation.append(
-                Message(role=ASSISTANT, content=decision.text, tool_calls=list(decision.calls))
-            )
-
             if decision.finish and decision.calls:
-                # P0-3: reject outright, execute nothing.
                 self.ledger.append(self.run.id, "decision_validated", {
                     "ok": False, "reason": "finish combined with tool calls in the same decision",
                 })
@@ -395,9 +436,6 @@ class Session:
                     self.run.complete(decision.result)
                     self._snapshot()
                     return self.run.result
-                # Chat mode: finish() is just an alternate way to answer this
-                # turn — the run itself stays RUNNING so the conversation
-                # can continue with the next send().
                 return decision.result if decision.result is not None else decision.text
 
             if not decision.calls:
@@ -415,9 +453,9 @@ class Session:
             if batch.halted:
                 return self.run.pending_approval
 
-    def _apply_batch(self, batch, *, record_conversation: bool = True) -> None:
+    def _apply_batch(self, batch, *, record: bool = True) -> None:
         for result in batch.results:
-            if record_conversation:
+            if record:
                 self._observe(result.call.id, result.call.name, result.observation)
             if result.ok:
                 self._activate(result.call.name)
@@ -425,8 +463,6 @@ class Session:
     # -- loop helpers -----------------------------------------------------------
 
     def _enforce_budget(self) -> Optional[Any]:
-        """On overrun, grant exactly one grace turn to wrap up, then stop
-        deterministically."""
         reason = self.budget.exceeded(self.config)
         if reason is None:
             return None
@@ -441,18 +477,9 @@ class Session:
             return self.run.result if self.run.result is not None else self._last_assistant_text()
         return self._last_assistant_text() or "[budget exhausted]"
 
-    def _maybe_compact(self) -> None:
-        window = self.config.projection.window_tokens
-        if not self.compactor.should_compact(self.conversation, window):
-            return
-        folded, remaining = self.compactor.fold(self.conversation, self.working_state)
-        if folded:
-            self.conversation = remaining
-            self.ledger.append(self.run.id, "state_folded", {"working_state": self.working_state.to_dict()})
-
     def _new_turn(self) -> TurnContext:
         turn = TurnContext(
-            config=self.config, registry=self.registry, conversation=self.conversation,
+            config=self.config, registry=self.registry, ledger=self.ledger, run_id=self.run.id,
             working_state=self.working_state, session=self, store=self.store, step=self.budget.steps,
         )
         turn.candidates = self._layer2_candidates()
@@ -477,17 +504,19 @@ class Session:
         return parts
 
     def _last_text(self, role: str) -> str:
-        for message in reversed(self.conversation):
-            if message.role == role and message.text():
-                return message.text()
+        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
+        for event in reversed(events):
+            msg_dict = event_to_message(event)
+            if msg_dict and msg_dict.get("role") == role:
+                content = msg_dict.get("content", "")
+                if isinstance(content, str) and content:
+                    return content
         return ""
 
     def _last_assistant_text(self) -> str:
         return self._last_text(ASSISTANT)
 
     def _api_tools(self, turn: TurnContext) -> list[dict]:
-        """Native tool schemas for this turn: pinned + candidates + recently
-        activated. Bounded, so tool schemas never approach O(N)."""
         names: "OrderedDict[str, None]" = OrderedDict()
         for capability in self.registry.pinned():
             names[capability.name] = None
@@ -497,9 +526,6 @@ class Session:
             names[name] = None
         schemas = [self.registry.get(n).api_schema() for n in names if n in self.registry]
         if self.config.mode == "job":
-            # finish() is not a registered Capability — it's the formal
-            # completion signal handled directly by the loop (P0-3) — but
-            # native tool-calling providers still need its schema to offer it.
             schemas.append(FINISH_SCHEMA)
         return schemas
 
@@ -534,11 +560,13 @@ class Session:
         return _CONTINUE
 
     def _observe(self, call_id: str, name: str, text: str) -> None:
-        """Append a tool observation — structurally distinct role."""
-        self.conversation.append(Message(role=OBSERVATION, content=text, tool_call_id=call_id, name=name))
+        self.ledger.append(self.run.id, "observation", {"call_id": call_id, "name": name, "text": text})
 
     def _notice(self, text: str) -> None:
-        self.conversation.append(Message(role=SYSTEM, content=text))
+        self.ledger.append(self.run.id, "notice", {"text": text})
+
+    def _checkpoint(self) -> None:
+        self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
 
     def _note_usage(self, decision, messages: list[Message]) -> None:
         if decision.usage is not None:

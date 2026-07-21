@@ -40,7 +40,13 @@ EVENT_TYPES = (
     "state_folded",
     "policy_changed",
     "branch_created",
+    "notice",
+    "observation",
+    "checkpoint",
+    "rewound",
 )
+
+RENDERABLE_TYPES = ("user_input", "model_response", "observation", "notice")
 
 
 @dataclass
@@ -200,3 +206,31 @@ class JsonlLedger:
             return None
         d = json.loads(path.read_text(encoding="utf-8"))
         return Snapshot(run_id=d["run_id"], sequence=d["sequence"], ts=d["ts"], state=d["state"])
+
+
+def event_to_message(event: "Event") -> Optional[dict]:
+    """Convert a renderable event into a message dict for projection.
+
+    Returns None for non-renderable event types. The returned dict has the
+    shape needed by :func:`state_projection_loop.messages.Message.from_dict`.
+    """
+    from .messages import ASSISTANT, OBSERVATION, SYSTEM, USER
+
+    if event.type == "user_input":
+        return {"role": USER, "content": event.data.get("text", "")}
+    if event.type == "model_response":
+        calls = [
+            {"name": c.get("name", ""), "arguments": c.get("arguments") or {}, "id": c.get("id", "")}
+            for c in (event.data.get("calls") or [])
+        ]
+        return {"role": ASSISTANT, "content": event.data.get("text", ""), "tool_calls": calls}
+    if event.type == "observation":
+        return {
+            "role": OBSERVATION,
+            "content": event.data.get("text", ""),
+            "tool_call_id": event.data.get("call_id"),
+            "name": event.data.get("name"),
+        }
+    if event.type == "notice":
+        return {"role": SYSTEM, "content": event.data.get("text", "")}
+    return None

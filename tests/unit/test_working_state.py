@@ -1,44 +1,7 @@
-"""WorkingState: structured merge semantics (decisions keep their reason
-through repeated folds — P1-1), rendering, round-trip serialization."""
+"""WorkingState: rendering, round-trip serialization."""
 from __future__ import annotations
 
 from state_projection_loop.working_state import RecordedDecision, WorkingState
-
-
-class TestMergeFold:
-    def test_facts_are_additive_and_deduped(self):
-        ws = WorkingState()
-        ws.merge_fold({"new_facts": ["user wants JSON output"]})
-        ws.merge_fold({"new_facts": ["user wants JSON output", "user is on Windows"]})
-        assert ws.confirmed_facts == ["user wants JSON output", "user is on Windows"]
-
-    def test_decisions_keep_reason_across_repeated_folds(self):
-        ws = WorkingState()
-        ws.merge_fold({"new_decisions": [{"text": "used SQLite", "reason": "no server needed for this scale"}]})
-        ws.merge_fold({"new_decisions": [{"text": "added an index on user_id", "reason": "query was slow"}]})
-        assert len(ws.decisions) == 2
-        assert ws.decisions[0].reason == "no server needed for this scale"
-        assert ws.decisions[1].reason == "query was slow"
-
-    def test_open_questions_add_and_resolve(self):
-        ws = WorkingState()
-        ws.merge_fold({"new_open_questions": ["which timezone?"]})
-        assert ws.open_questions == ["which timezone?"]
-        ws.merge_fold({"resolved_open_questions": ["which timezone?"]})
-        assert ws.open_questions == []
-
-    def test_next_actions_replaced_not_appended(self):
-        ws = WorkingState()
-        ws.merge_fold({"next_actions": ["step 1", "step 2"]})
-        ws.merge_fold({"next_actions": ["step 3"]})
-        assert ws.next_actions == ["step 3"]
-
-    def test_goal_only_updated_when_present(self):
-        ws = WorkingState(goal="original goal")
-        ws.merge_fold({"new_facts": ["irrelevant"]})
-        assert ws.goal == "original goal"
-        ws.merge_fold({"goal": "revised goal"})
-        assert ws.goal == "revised goal"
 
 
 class TestRenderAndSerialize:

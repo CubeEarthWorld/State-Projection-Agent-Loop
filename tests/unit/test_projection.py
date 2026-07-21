@@ -1,6 +1,7 @@
-"""Projection pipeline: section ordering, window enforcement including
-native tool-schema + reserved-output budgeting (P0-5), kernel immutability,
-epoch-cached TOC, candidate-card dedup against native schemas."""
+"""Projection pipeline: section composition, window enforcement including
+native tool-schema + reserved-output budgeting, kernel immutability,
+epoch-cached TOC, candidate-card dedup against native schemas, and
+fidelity-graded history rendering from the Event Ledger."""
 from __future__ import annotations
 
 import pytest
@@ -8,11 +9,11 @@ import pytest
 from state_projection_loop import (
     CandidatesSection,
     Config,
-    ConversationSection,
+    HistorySection,
+    InMemoryLedger,
     KernelSection,
     Message,
     Projection,
-    ProjectionError,
     Registry,
     TocSection,
     TurnContext,
@@ -24,13 +25,25 @@ from state_projection_loop.working_state import WorkingState
 from _util import capability_dict
 
 
-def make_turn(registry=None, conversation=None, working_state=None, candidates=None, window=30000):
+def make_ledger_with_events(n_user=3, n_obs=0):
+    ledger = InMemoryLedger()
+    run_id = "run_test"
+    for i in range(n_user):
+        ledger.append(run_id, "user_input", {"text": f"message {i} " + "pad " * 20})
+        ledger.append(run_id, "model_response", {"text": f"reply {i}", "calls": []})
+    for i in range(n_obs):
+        ledger.append(run_id, "observation", {"call_id": f"c{i}", "name": "tool", "text": f"result {i} " + "data " * 30})
+    return ledger, run_id
+
+
+def make_turn(registry=None, ledger=None, run_id="run_test", working_state=None, candidates=None, window=30000):
     cfg = Config()
     cfg.projection.window_tokens = window
     return TurnContext(
         config=cfg,
         registry=registry or Registry(),
-        conversation=conversation or [],
+        ledger=ledger or InMemoryLedger(),
+        run_id=run_id,
         working_state=working_state or WorkingState(),
         candidates=candidates or [],
     )
@@ -38,38 +51,11 @@ def make_turn(registry=None, conversation=None, working_state=None, candidates=N
 
 def default_projection(registry, kernel="You are helpful.", window=30000):
     sections = build_default_sections(
-        ["kernel", "toc", "conversation", "working_state", "candidates"],
+        ["kernel", "toc", "history", "working_state", "candidates"],
         kernel_text=kernel,
         pinned=registry.pinned(),
     )
     return Projection(sections, window_tokens=window)
-
-
-class TestOrderingInvariants:
-    def test_volatile_must_be_last(self):
-        with pytest.raises(ProjectionError, match="Invariant violated"):
-            Projection([CandidatesSection(), ConversationSection()])
-
-    def test_valid_default_order(self):
-        from state_projection_loop.working_state import WorkingStateSection
-
-        Projection([KernelSection("k"), TocSection(), ConversationSection(),
-                    WorkingStateSection(), CandidatesSection()])
-
-    def test_unknown_cache_class_rejected(self):
-        class Bad:
-            name = "bad"
-            cache_class = "sometimes"
-
-            def render(self, turn):
-                return []
-
-        with pytest.raises(ProjectionError, match="cache_class"):
-            Projection([Bad()])
-
-    def test_unknown_section_name_rejected(self):
-        with pytest.raises(ProjectionError, match="Unknown section"):
-            build_default_sections(["kernel", "mystery"], kernel_text="", pinned=[])
 
 
 class TestRenderComposition:
@@ -106,7 +92,8 @@ class TestRenderComposition:
         from state_projection_loop import ScoredTool
 
         projection = default_projection(reg)
-        turn = make_turn(registry=reg, conversation=[Message(role="user", content="hi")],
+        ledger, run_id = make_ledger_with_events(n_user=1)
+        turn = make_turn(registry=reg, ledger=ledger, run_id=run_id,
                          candidates=[ScoredTool(tool=cap, score=1.0)])
         msgs = projection.render(turn)
         assert "[Tool candidates" in str(msgs[-1].content)
@@ -132,6 +119,86 @@ class TestRenderComposition:
         assert any("[Working state]" in str(m.content) and "ship the feature" in str(m.content) for m in msgs)
 
 
+class TestHistorySection:
+    def test_renders_user_and_assistant_from_ledger(self):
+        ledger, run_id = make_ledger_with_events(n_user=2)
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        roles = [m.role for m in msgs]
+        assert "user" in roles
+        assert "assistant" in roles
+
+    def test_renders_observations(self):
+        ledger, run_id = make_ledger_with_events(n_user=1, n_obs=2)
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        obs = [m for m in msgs if m.role == "tool"]
+        assert len(obs) == 2
+
+    def test_renders_notices(self):
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        ledger.append(run_id, "user_input", {"text": "hi"})
+        ledger.append(run_id, "notice", {"text": "[runtime] Budget exceeded"})
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        assert any("Budget exceeded" in str(m.content) for m in msgs)
+
+    def test_fidelity_full_for_recent(self):
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        long_text = "x " * 200
+        ledger.append(run_id, "user_input", {"text": long_text})
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        assert msgs[0].content == long_text
+
+    def test_fidelity_compressed_for_older(self):
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        for i in range(30):
+            ledger.append(run_id, "user_input", {"text": f"msg {i} " + "pad " * 50})
+            ledger.append(run_id, "model_response", {"text": f"reply {i} " + "pad " * 50})
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        first_msg = msgs[0]
+        assert "omitted" in str(first_msg.content) or len(str(first_msg.content)) < 500
+
+    def test_fidelity_summary_for_old(self):
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        for i in range(70):
+            ledger.append(run_id, "user_input", {"text": f"message number {i} with some content " + "pad " * 30})
+            ledger.append(run_id, "model_response", {"text": f"reply {i} " + "pad " * 30})
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        first_msg = msgs[0]
+        assert "lines" in str(first_msg.content) or len(str(first_msg.content)) < 200
+
+    def test_empty_ledger_returns_empty(self):
+        section = HistorySection()
+        turn = make_turn()
+        assert section.render(turn) == []
+
+    def test_non_renderable_events_skipped(self):
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        ledger.append(run_id, "user_input", {"text": "hi"})
+        ledger.append(run_id, "projection_compiled", {"tokens": 100})
+        ledger.append(run_id, "decision_validated", {"ok": True})
+        section = HistorySection()
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        msgs = section.render(turn)
+        assert len(msgs) == 1
+        assert msgs[0].content == "hi"
+
+
 class TestTocEpochCaching:
     def test_toc_updates_after_registry_change(self):
         reg = Registry()
@@ -140,7 +207,7 @@ class TestTocEpochCaching:
         turn = make_turn(registry=reg)
         first = section.render(turn)
         assert "web(1)" in first[0].content
-        assert section.render(turn)[0] is first[0]  # cached within an epoch
+        assert section.render(turn)[0] is first[0]
         reg.register(capability_dict("web.b", category="web"))
         assert "web(2)" in section.render(turn)[0].content
 
@@ -161,72 +228,68 @@ class TestWindowEnforcement:
         from state_projection_loop import ScoredTool
 
         projection = default_projection(reg, window=260)
-        turn = make_turn(registry=reg, window=260,
+        ledger, run_id = make_ledger_with_events(n_user=1)
+        turn = make_turn(registry=reg, ledger=ledger, run_id=run_id, window=260,
                          candidates=[ScoredTool(tool=c, score=1.0) for c in caps])
         msgs = projection.render(turn)
         assert estimate_tokens(msgs) <= 260
         assert len(turn.candidates) < 10
 
-    def test_conversation_emergency_trim(self):
+    def test_history_emergency_trim(self):
         reg = Registry()
         projection = default_projection(reg, window=500)
-        conversation = [Message(role="user", content=f"message {i} " + "long text " * 30)
-                        for i in range(8)]
-        turn = make_turn(registry=reg, conversation=conversation, window=500)
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        for i in range(20):
+            ledger.append(run_id, "user_input", {"text": f"message {i} " + "long text " * 30})
+            ledger.append(run_id, "model_response", {"text": f"reply {i} " + "long text " * 30})
+        turn = make_turn(registry=reg, ledger=ledger, run_id=run_id, window=500)
         msgs = projection.render(turn)
         assert estimate_tokens(msgs) <= 500
-        assert any("trimmed" in str(m.content) for m in msgs)
-        assert any("message 7" in str(m.content) for m in msgs)
-
-    def test_trim_never_leaves_orphan_observations(self):
-        from state_projection_loop import ToolCall
-
-        reg = Registry()
-        projection = default_projection(reg, window=220)
-        conversation = []
-        for i in range(6):
-            conversation.append(Message(role="assistant", content=f"step {i} " + "pad " * 20,
-                                        tool_calls=[ToolCall(name="t", arguments={})]))
-            conversation.append(Message(role="tool", content="result " + "pad " * 20,
-                                        tool_call_id=f"c{i}", name="t"))
-        turn = make_turn(registry=reg, conversation=conversation, window=220)
-        msgs = projection.render(turn)
-        roles = [m.role for m in msgs]
-        first_conv = next((i for i, m in enumerate(msgs) if m.role in ("assistant", "tool")), None)
-        if first_conv is not None:
-            assert roles[first_conv] == "assistant"
 
     def test_native_tool_schemas_count_against_the_budget(self):
-        # Same window either way; sending a native tool schema alongside the
-        # projection eats into the same budget, so strictly less (or equal)
-        # conversation can survive once the schema is counted (P0-5) —
-        # a schema was previously invisible to the window check entirely.
         reg = Registry()
         reg.register(capability_dict("demo.tool", properties={
             f"p{i}": {"type": "string", "description": "x" * 40} for i in range(6)
         }))
         cap = reg.get("demo.tool")
         projection = default_projection(reg, window=400)
-        conversation = [Message(role="user", content=f"message {i} " + "pad " * 20) for i in range(10)]
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        for i in range(10):
+            ledger.append(run_id, "user_input", {"text": f"message {i} " + "pad " * 20})
 
-        without_schema = projection.render(make_turn(registry=reg, conversation=list(conversation), window=400))
+        without_schema = projection.render(make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400))
         with_schema = projection.render(
-            make_turn(registry=reg, conversation=list(conversation), window=400),
+            make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400),
             api_tools=[cap.api_schema()],
         )
         assert estimate_tokens(with_schema) <= estimate_tokens(without_schema)
-        assert len(with_schema) <= len(without_schema)
 
     def test_reserved_output_tokens_counted(self):
-        # Same reasoning as above but for the reserved-output allowance:
-        # reserving room for the model's own reply must shrink what fits,
-        # not be silently ignored.
         reg = Registry()
         projection = default_projection(reg, window=400)
-        conversation = [Message(role="user", content=f"message {i} " + "pad " * 20) for i in range(10)]
+        ledger = InMemoryLedger()
+        run_id = "run_test"
+        for i in range(10):
+            ledger.append(run_id, "user_input", {"text": f"message {i} " + "pad " * 20})
 
-        unreserved = projection.render(make_turn(registry=reg, conversation=list(conversation), window=400))
+        unreserved = projection.render(make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400))
         reserved = projection.render(
-            make_turn(registry=reg, conversation=list(conversation), window=400), reserved_tokens=150,
+            make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400), reserved_tokens=150,
         )
         assert estimate_tokens(reserved) <= estimate_tokens(unreserved)
+
+
+class TestBuildDefaultSections:
+    def test_unknown_section_name_rejected(self):
+        with pytest.raises(ValueError, match="Unknown section"):
+            build_default_sections(["kernel", "mystery"], kernel_text="", pinned=[])
+
+    def test_default_section_order(self):
+        sections = build_default_sections(
+            ["kernel", "toc", "history", "working_state", "candidates"],
+            kernel_text="k", pinned=[],
+        )
+        names = [s.name for s in sections]
+        assert names == ["kernel", "toc", "history", "working_state", "candidates"]

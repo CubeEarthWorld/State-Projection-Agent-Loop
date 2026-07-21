@@ -1,26 +1,26 @@
 """state-projection-loop — State-Projection Agent Loop.
 
 Truth lives in the append-only Event Ledger, never in the model's context;
-every turn renders a minimal disposable Projection derived from it. The
-loop: Project → Decide → Validate → Plan Effects → Authorize → Execute →
-Record → Continue/Wait/Complete.
+every turn renders a minimal disposable Projection derived from it with
+fidelity-graded compression. The loop: Project → Decide → Validate →
+Authorize → Execute → Record → Continue/Wait/Complete.
 """
 
 from .artifacts import ArtifactStore, ref as artifact_ref
 from .capability import Capability, ToolContext, capability
+from .compression import compress_text, compress_observation, summarize_text, content_hash
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend, HashingEmbedding
-from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, Snapshot
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, Snapshot, event_to_message
 from .llm import LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
 from .messages import Decision, Message, ToolCall, Usage
 from .policy import PolicyEngine, PolicyDecision, Rule
 from .projection import (
     CandidatesSection,
-    ConversationSection,
+    HistorySection,
     KernelSection,
     Projection,
-    ProjectionError,
     Section,
     TocSection,
     TurnContext,
@@ -33,7 +33,7 @@ from .working_state import RecordedDecision, WorkingState, WorkingStateSection
 from .builtin.meta import install_spawn
 from .builtin.state import install_state
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Config",
@@ -45,12 +45,11 @@ __all__ = [
     "ToolContext",
     "capability",
     "Projection",
-    "ProjectionError",
     "Section",
     "TurnContext",
     "KernelSection",
     "TocSection",
-    "ConversationSection",
+    "HistorySection",
     "CandidatesSection",
     "WorkingState",
     "WorkingStateSection",
@@ -74,6 +73,7 @@ __all__ = [
     "InMemoryLedger",
     "JsonlLedger",
     "Snapshot",
+    "event_to_message",
     "ToolSearch",
     "ScoredTool",
     "EmbeddingBackend",
@@ -86,6 +86,10 @@ __all__ = [
     "Message",
     "ToolCall",
     "Usage",
+    "compress_text",
+    "compress_observation",
+    "summarize_text",
+    "content_hash",
     "install_state",
     "install_spawn",
     "__version__",
