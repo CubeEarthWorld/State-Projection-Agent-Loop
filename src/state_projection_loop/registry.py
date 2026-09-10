@@ -61,6 +61,7 @@ class Registry:
         # so bundled tools that self-install (ensure_meta_tools) cannot
         # sneak back in.
         self._disabled: set[str] = set(disabled)
+        self._pinned_cache: tuple[int, list[Capability]] = (-1, [])
 
     # -- mutation -------------------------------------------------------------
 
@@ -233,7 +234,13 @@ class Registry:
         return list(self)
 
     def pinned(self) -> list[Capability]:
-        return [c for c in self if c.discovery.pinned]
+        """Cached by epoch: this is read several times per turn (native
+        schemas, the kernel section, the layer-2 exclusion set)."""
+        epoch, cached = self._pinned_cache
+        if epoch != self._epoch:
+            cached = [c for c in self if c.discovery.pinned]
+            self._pinned_cache = (self._epoch, cached)
+        return cached
 
     def categories(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -252,11 +259,6 @@ class Registry:
                 pinned[cat] = pinned.get(cat, 0) + 1
         return {cat: (totals[cat], pinned.get(cat, 0)) for cat in sorted(totals)}
 
-    def in_category(self, category: str) -> list[Capability]:
-        return [
-            c for c in self
-            if (c.category or "misc") == category or (c.category or "").startswith(category.rstrip("/") + "/")
-        ]
 
     # -- layer 1: table of contents -------------------------------------------
 

@@ -232,7 +232,7 @@ class Runtime:
     # -- public ---------------------------------------------------------------
 
     async def execute(
-        self, calls: list[ToolCall], turn: TurnContext, ctx: ToolContext, run: Run, policy: PolicyEngine,
+        self, calls: list[ToolCall], ctx: ToolContext, run: Run, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
         """Validate, authorize and run a batch of calls, in order (P0-1).
 
@@ -290,7 +290,7 @@ class Runtime:
         return ExecuteBatchResult(results=results, halted=False)
 
     async def resume_pending(
-        self, run: Run, ctx: ToolContext, policy: PolicyEngine, turn: TurnContext,
+        self, run: Run, ctx: ToolContext, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
         """Continue a run's ``pending_calls`` after its approval was resolved.
 
@@ -334,7 +334,7 @@ class Runtime:
             args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
             results.append(await self._execute_one(capability, args, ctx, run, first_call, command=approved))
         run.pending_calls = []
-        rest = await self.execute(pending[1:], turn, ctx, run, policy)
+        rest = await self.execute(pending[1:], ctx, run, policy)
         results.extend(rest.results)
         if rest.halted:
             return ExecuteBatchResult(results=results, halted=True)

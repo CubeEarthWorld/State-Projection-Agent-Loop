@@ -199,7 +199,7 @@ class Session:
             if self.run.state != "RUNNING":
                 raise RunStateError(f"Run {self.run.id} is not resumable from state {self.run.state}")
             turn = self._new_turn()
-            batch = await self.runtime.resume_pending(self.run, self._tool_context(), self.policy, turn)
+            batch = await self.runtime.resume_pending(self.run, self._tool_context(), self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:
@@ -218,7 +218,7 @@ class Session:
         async with self._guarded():
             turn = self._new_turn()
             call = ToolCall(name=capability_name, arguments=arguments)
-            batch = await self.runtime.execute([call], turn, self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute([call], self._tool_context(), self.run, self.policy)
             self._apply_batch(batch, record=False)
             self._snapshot()
             if batch.halted:
@@ -261,7 +261,7 @@ class Session:
         cancelled, working_state is restored from the checkpoint at the rewind
         point, and the budget is reset.
         """
-        irreversible = self._irreversible_effects_up_to(to_turn)
+        irreversible = self._irreversible_effects(up_to_turn=to_turn)
         all_events = list(self.ledger.iter_run(self.run.id))
         renderable = [e for e in all_events if e.type in RENDERABLE_TYPES]
         checkpoints = [e for e in all_events if e.type == "checkpoint"]
@@ -310,12 +310,16 @@ class Session:
 
         return irreversible
 
-    def _irreversible_effects_up_to(self, to_turn: int) -> list[str]:
+    def _irreversible_effects(self, *, up_to_turn: Optional[int] = None) -> list[str]:
+        """External effects this run already committed — a sent email, a
+        pushed commit. Neither branching nor rewinding can undo them, so both
+        report them; ``up_to_turn`` stops the scan at the cut point.
+        """
         notices: list[str] = []
         user_count = 0
         for event in self.ledger.iter_run(self.run.id):
-            if event.type == "user_input":
-                if user_count >= to_turn:
+            if event.type == "user_input" and up_to_turn is not None:
+                if user_count >= up_to_turn:
                     break
                 user_count += 1
             if event.type != "command_completed":
@@ -323,22 +327,7 @@ class Session:
             command = self.run.commands.get(event.data.get("command_id", ""))
             if command is None:
                 continue
-            capability_name = command.capability_name.rsplit("@", 1)[0]
-            capability = self.registry.get(capability_name)
-            if capability and any(e.kind == "external" for e in capability.effects):
-                notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
-        return notices
-
-    def _irreversible_effects(self) -> list[str]:
-        notices: list[str] = []
-        for event in self.ledger.iter_run(self.run.id):
-            if event.type != "command_completed":
-                continue
-            command = self.run.commands.get(event.data.get("command_id", ""))
-            if command is None:
-                continue
-            capability_name = command.capability_name.rsplit("@", 1)[0]
-            capability = self.registry.get(capability_name)
+            capability = self.registry.get(command.capability_name.rsplit("@", 1)[0])
             if capability and any(e.kind == "external" for e in capability.effects):
                 notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
         return notices
@@ -466,7 +455,7 @@ class Session:
 
             self._idle_turns = 0
             self.ledger.append(self.run.id, "decision_validated", {"ok": True, "finish": False})
-            batch = await self.runtime.execute(decision.calls, turn, self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute(decision.calls, self._tool_context(), self.run, self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:

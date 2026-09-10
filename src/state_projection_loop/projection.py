@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable
 
-from .compression import compress_observation, compress_text, summarize_text
+from .compression import compress_text, summarize_text
 from .config import Config
 from .events import Event, EventLedger, RENDERABLE_TYPES, event_to_message
 from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM, USER
@@ -229,7 +229,7 @@ class HistorySection:
                     pass
                 elif age < cfg.compressed_window:
                     if msg_dict["role"] == OBSERVATION:
-                        content = compress_observation(content, max_lines=cfg.observation_max_lines)
+                        content = compress_text(content, max_lines=cfg.observation_max_lines)
                     else:
                         content = compress_text(content, max_lines=cfg.compressed_max_lines)
                 elif age < cfg.summary_window:

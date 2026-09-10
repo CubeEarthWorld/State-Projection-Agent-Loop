@@ -125,7 +125,6 @@ class WorkingStateSection:
     """Projects the working state each turn (volatile — always near the tail)."""
 
     name = "working_state"
-    cache_class = "volatile"
 
     def __init__(self, *, max_tokens: int = 800) -> None:
         self.max_tokens = max_tokens

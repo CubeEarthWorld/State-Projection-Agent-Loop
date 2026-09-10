@@ -6,13 +6,11 @@ Tests verify:
 - Head+tail truncation preserves first and last lines
 - summarize_text produces a single line
 - Empty/whitespace inputs never crash
-- compress_observation is at least as aggressive as compress_text
 - content_hash is stable and collision-resistant for distinct inputs
 """
 from __future__ import annotations
 
 from state_projection_loop.compression import (
-    compress_observation,
     compress_text,
     content_hash,
     first_meaningful_line,
@@ -133,21 +131,20 @@ class TestCompressText:
         assert "real line 0" in result
 
 
-class TestCompressObservation:
-    def test_more_aggressive_than_compress_text(self):
-        lines = [f"build output {i}" for i in range(100)]
-        text = "\n".join(lines)
-        obs = compress_observation(text)
-        regular = compress_text(text)
-        assert len(obs) <= len(regular)
+class TestObservationCompression:
+    """Observations are compressed by the same function, with the tighter
+    line budget the config gives them."""
+
+    def test_a_tighter_line_budget_produces_less(self):
+        text = "\n".join(f"build output {i}" for i in range(100))
+        assert len(compress_text(text, max_lines=40)) <= len(compress_text(text, max_lines=80))
 
     def test_empty_input(self):
-        assert compress_observation("") == ""
+        assert compress_text("", max_lines=40) == ""
 
     def test_preserves_first_line(self):
         text = "ERROR: something failed\n" + "\n".join(f"  at line {i}" for i in range(100))
-        result = compress_observation(text)
-        assert "ERROR: something failed" in result
+        assert "ERROR: something failed" in compress_text(text, max_lines=40)
 
 
 class TestSummarizeText:

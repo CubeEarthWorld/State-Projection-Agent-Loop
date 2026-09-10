@@ -121,14 +121,40 @@ class ArtifactStore:
             json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8"
         )
 
-    def get(self, aid: str) -> Any:
-        return self._records[aid].value
+    def _load(self, aid: str) -> Optional[ArtifactRecord]:
+        """Recover a persisted record written by an earlier process.
+
+        Only the serialized text survives a restart, so the recovered value
+        is that text — enough for meta.artifact.peek, which is the whole
+        point of persisting: a resumed run can still inspect a payload that
+        was too large to keep in the ledger body.
+        """
+        if self.directory is None:
+            return None
+        path = self.directory / self.run_id / f"{aid}.json"
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        record = ArtifactRecord(
+            id=payload["id"], run_id=payload["run_id"], value=payload["text"],
+            text=payload["text"], type_name=payload.get("type_name", "str"),
+            tokens=estimate_tokens(payload["text"]), source=payload.get("source", ""),
+            created=payload.get("created", 0.0),
+        )
+        self._records[aid] = record
+        return record
 
     def get_record(self, aid: str) -> ArtifactRecord:
-        return self._records[aid]
+        record = self._records.get(aid) or self._load(aid)
+        if record is None:
+            raise KeyError(aid)
+        return record
+
+    def get(self, aid: str) -> Any:
+        return self.get_record(aid).value
 
     def exists(self, aid: str) -> bool:
-        return aid in self._records
+        return aid in self._records or self._load(aid) is not None
 
     def move(self, record: ArtifactRecord, *, source: str = "") -> ArtifactRecord:
         """Explicitly import a record from another store's namespace into
@@ -165,7 +191,7 @@ class ArtifactStore:
             known = ", ".join(sorted(self._records)) or "(none)"
             shown = repr(aid)[:80]
             return f"Error: unknown artifact {shown}. Known artifacts: {known}"
-        record = self._records[aid]
+        record = self.get_record(aid)
         if range_:
             result = self._peek_range(record, range_)
         elif query:

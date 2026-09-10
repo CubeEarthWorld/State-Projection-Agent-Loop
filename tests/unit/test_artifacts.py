@@ -74,3 +74,23 @@ class TestNamespacing:
         assert moved.id != child_record.id
         assert parent.get(moved.id) == {"result": 42}
         assert not parent.exists(child_record.id)
+
+
+class TestPersistenceRoundTrip:
+    """Persisted artifacts are for a resumed run to read back; a store that
+    only ever writes them is a promise the docstring cannot keep."""
+
+    def test_a_new_store_recovers_a_persisted_artifact(self, tmp_path):
+        first = ArtifactStore("run_1", directory=tmp_path)
+        record = first.put("payload " * 500, source="demo.tool")
+
+        second = ArtifactStore("run_1", directory=tmp_path)
+        assert second.exists(record.id)
+        assert "payload" in second.peek(record.id)
+
+    def test_another_run_still_cannot_see_it(self, tmp_path):
+        first = ArtifactStore("run_1", directory=tmp_path)
+        record = first.put("payload", source="demo.tool")
+        other = ArtifactStore("run_2", directory=tmp_path)
+        assert not other.exists(record.id)
+        assert "unknown artifact" in other.peek(record.id)

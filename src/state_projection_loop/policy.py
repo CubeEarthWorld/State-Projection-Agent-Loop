@@ -210,11 +210,3 @@ class PolicyEngine:
                                per_effect=per_effect)
 
 
-@dataclass
-class ApprovalExpiry:
-    """Small helper so callers don't hardcode a bare number of seconds."""
-
-    seconds: float = 3600.0
-
-    def at(self, *, now: Optional[float] = None) -> float:
-        return (now if now is not None else time.time()) + self.seconds

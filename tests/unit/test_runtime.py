@@ -41,7 +41,7 @@ def make_runtime(registry: Registry, config: Config | None = None, *, allow_all:
 
 
 def run_batch(runtime, calls, turn, ctx, run, policy):
-    return asyncio.run(runtime.execute(calls, turn, ctx, run, policy))
+    return asyncio.run(runtime.execute(calls, ctx, run, policy))
 
 
 def echo_registry(**overrides: Any) -> Registry:
