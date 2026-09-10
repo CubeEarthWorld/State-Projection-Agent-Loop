@@ -12,7 +12,7 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.mode == "chat"
         assert cfg.projection.window_tokens == 30000
-        assert cfg.projection.sections == ["kernel", "toc", "history", "working_state", "candidates"]
+        assert cfg.projection.sections == ["kernel", "toc", "history", "working_state", "checklists", "candidates"]
         assert cfg.discovery.vector == "auto"
         assert cfg.discovery.k == 8
         assert cfg.discovery.toc is True

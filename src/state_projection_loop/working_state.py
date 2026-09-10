@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from .messages import Message, SYSTEM
 from .tokens import estimate_tokens
+from .checklists import ChecklistStore
 
 
 @dataclass
@@ -52,11 +53,12 @@ class WorkingState:
     # `extra` are the same three as before: user code, the LLM (via the
     # state.extra.* capabilities), and the session seed.
     extra: dict[str, Any] = field(default_factory=dict)
+    checklists: ChecklistStore = field(default_factory=ChecklistStore)
 
     def is_empty(self) -> bool:
         return not any([
             self.goal, self.acceptance_criteria, self.constraints, self.confirmed_facts,
-            self.decisions, self.open_questions, self.next_actions, self.artifact_refs, self.extra,
+            self.decisions, self.open_questions, self.next_actions, self.artifact_refs, self.extra, self.checklists,
         ])
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,6 +72,7 @@ class WorkingState:
             "next_actions": list(self.next_actions),
             "artifact_refs": list(self.artifact_refs),
             "extra": dict(self.extra),
+            "checklists": self.checklists.to_dict(),
         }
 
     @classmethod
@@ -84,6 +87,7 @@ class WorkingState:
             next_actions=list(d.get("next_actions") or []),
             artifact_refs=list(d.get("artifact_refs") or []),
             extra=dict(d.get("extra") or {}),
+            checklists=ChecklistStore.from_dict(d["checklists"]) if "checklists" in d else ChecklistStore(),
         )
 
     def render(self, *, max_tokens: int = 800) -> str:
@@ -130,4 +134,5 @@ class WorkingStateSection:
         ws: Optional[WorkingState] = getattr(turn, "working_state", None)
         if ws is None or ws.is_empty():
             return []
-        return [Message(role=SYSTEM, content="[Working state]\n" + ws.render(max_tokens=self.max_tokens))]
+        body = ws.render(max_tokens=self.max_tokens)
+        return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []

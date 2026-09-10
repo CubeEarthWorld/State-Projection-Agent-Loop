@@ -144,7 +144,7 @@ SPAWN_DEF: dict[str, Any] = {
     "spec": {
         "description": (
             "Run a sub-agent with its own independent context on the given task. Parent and child share "
-            "ONLY the task string (input) and the result (output); artifacts must be explicitly moved."
+            "the task string and result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved."
         ),
         "parameters": {
             "type": "object",
@@ -157,6 +157,8 @@ SPAWN_DEF: dict[str, Any] = {
                 },
                 "model": {"type": ["string", "null"], "description": "子で使うモデル名(spawn_llm_factory が必要)"},
                 "max_steps": {"type": "integer", "default": 15, "minimum": 1, "maximum": 100},
+                "checklist_ids": {"type": "array", "items": {"type": "string"},
+                    "description": "Explicitly copy these checklist ULIDs to the child. Returns result plus a checklists export document. Parent plans are never auto-merged."},
             },
             "required": ["task"],
         },
@@ -168,9 +170,9 @@ SPAWN_DEF: dict[str, Any] = {
 }
 
 
-def _spawn(
+async def _spawn(
     ctx: ToolContext, task: str, kernel: Optional[str] = None, tool_scope: Optional[list[str]] = None,
-    model: Optional[str] = None, max_steps: int = 15,
+    model: Optional[str] = None, max_steps: int = 15, checklist_ids: Optional[list[str]] = None,
 ) -> Any:
     from ..session import Session
 
@@ -179,6 +181,9 @@ def _spawn(
         raise RuntimeError("spawn requires a session context")
     if model is not None and parent.spawn_llm_factory is None:
         raise RuntimeError("spawn(model=...) requires Session(spawn_llm_factory=...)")
+    documents = [parent.checklists.execute("export", id=i)["checklists"][0] for i in (checklist_ids or [])]
+    if len(set(checklist_ids or [])) != len(checklist_ids or []):
+        raise ValueError("Duplicate checklist_ids")
     llm = parent.spawn_llm_factory(model) if parent.spawn_llm_factory else parent.llm
 
     child_registry = parent.registry.subset(tool_scope) if tool_scope else Registry()
@@ -198,10 +203,13 @@ def _spawn(
         config=child_config,
         registry=child_registry,
         embedder=getattr(parent.search, "embedder", None),
-        summarizer=parent.summarizer,
+        seed={"checklists": {"version": 1, "checklists": documents}},
         policy=parent.policy,
     )
-    return child.run_job(task)
+    result = await child.arun_job(task)
+    if checklist_ids is not None:
+        return {"result": result, "checklists": child.checklists.to_dict()}
+    return result
 
 
 def ensure_meta_tools(registry: Registry) -> None:

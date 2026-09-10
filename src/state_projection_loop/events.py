@@ -44,6 +44,7 @@ EVENT_TYPES = (
     "observation",
     "checkpoint",
     "rewound",
+    "checklists_changed",
 )
 
 RENDERABLE_TYPES = ("user_input", "model_response", "observation", "notice")

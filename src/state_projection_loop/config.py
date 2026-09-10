@@ -18,7 +18,7 @@ class ProjectionConfig:
     # turn) and must stay last, in that order, after the append-only
     # conversation section.
     sections: list[str] = field(
-        default_factory=lambda: ["kernel", "toc", "history", "working_state", "candidates"]
+        default_factory=lambda: ["kernel", "toc", "history", "working_state", "checklists", "candidates"]
     )
     window_tokens: int = 30000
     # Reserved so the model always has room to answer; counted against the

@@ -27,6 +27,8 @@ from typing import Any, Callable, Optional
 
 from .artifacts import ArtifactStore
 from .builtin.meta import ensure_meta_tools
+from .builtin.checklist import ensure_checklist_tool
+from .checklists import ChecklistStore
 from .capability import Capability, ToolContext
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
@@ -90,6 +92,7 @@ class Session:
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
         ensure_meta_tools(self.registry)
+        ensure_checklist_tool(self.registry)
 
         self.session_id = new_id("session")
         self.ledger = ledger if ledger is not None else _make_ledger(self.config)
@@ -113,6 +116,9 @@ class Session:
 
         self.working_state = WorkingState()
         for key, value in (seed or {}).items():
+            if key == "checklists":
+                self.working_state.checklists = ChecklistStore.from_dict(value)
+                continue
             if hasattr(self.working_state, key):
                 setattr(self.working_state, key, value)
             else:
@@ -126,6 +132,7 @@ class Session:
         self._budget_grace_used = False
         self._lock = asyncio.Lock()
         self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
+        self._snapshot()
 
     @staticmethod
     def _default_policy() -> PolicyEngine:
@@ -134,6 +141,10 @@ class Session:
         return engine
 
     # -- public API -------------------------------------------------------------
+
+    @property
+    def checklists(self) -> ChecklistStore:
+        return self.working_state.checklists
 
     @property
     def conversation(self) -> list[Message]:
@@ -163,6 +174,7 @@ class Session:
     async def arun_job(self, task: str) -> Any:
         async with self._guarded():
             self.ledger.append(self.run.id, "user_input", {"text": task})
+            self._checkpoint()
             return await self._loop()
 
     def interrupt(self) -> None:
@@ -230,6 +242,7 @@ class Session:
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
         })
+        new_session._snapshot()
         return new_session, self._irreversible_effects()
 
     def rewind(self, *, to_turn: int) -> list[str]:
@@ -291,6 +304,7 @@ class Session:
         self._active = OrderedDict((c.name, None) for c in self.registry.pinned())
         self.runtime.seen_specs = {c.name for c in self.registry.pinned()}
         self.runtime._consecutive_validation_failures = {}
+        self._snapshot()
 
         return irreversible
 
@@ -351,6 +365,9 @@ class Session:
         session.run = Run.from_snapshot_state(run_id, ledger, snapshot.state)
         session.session_id = snapshot.state.get("session_id", session.session_id)
         session.working_state = WorkingState.from_dict(snapshot.state.get("working_state") or {})
+        for event in ledger.iter_run(run_id, after=snapshot.sequence):
+            if event.type == "checklists_changed":
+                session.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
         budget_data = snapshot.state.get("budget") or {}
         session.budget = BudgetState(
             steps=budget_data.get("steps", 0), prompt_tokens=budget_data.get("prompt_tokens", 0),

@@ -119,6 +119,10 @@ class PolicyEngine:
         if preset not in PRESETS:
             raise ValueError(f"Unknown preset {preset!r}; expected one of {PRESETS}")
         self.clear_layer(layer)
+        if preset in ("auto_safe", "auto_workspace_dev"):
+            self.add_rule(layer, Rule(decision="allow", capability_pattern="planning.checklist.manage",
+                                     effect_kind="write", resource_pattern="working_state:checklists",
+                                     reason="preset:local_checklists"))
         if preset == "deny_all":
             self.add_rule(layer, Rule(decision="deny", reason="preset:deny_all"))
         elif preset == "approve_all_effects":

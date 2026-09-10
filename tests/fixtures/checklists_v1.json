@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "checklists": [
+    {
+      "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "name": "言語間の受け渡し 🚀",
+      "include_in_context": true,
+      "context_mode": "full",
+      "revision": 7,
+      "items": [
+        {
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          "text": "実装",
+          "status": "completed",
+          "notes": "検証済み"
+        },
+        {
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+          "text": "テスト",
+          "status": "in_progress",
+          "notes": "確認中"
+        },
+        {
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "text": "不要な作業",
+          "status": "cancelled",
+          "notes": "仕様変更"
+        }
+      ]
+    }
+  ]
+}

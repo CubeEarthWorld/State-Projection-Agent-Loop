@@ -1,5 +1,11 @@
 # state-projection-loop
 
+**v0.4: Built-in planning checklists.** Every session includes one unified
+`planning.checklist.manage` tool for named ULID plans, item edits, progress,
+context visibility and JSON handoff. Plans use the same in-memory or JSONL
+storage as the conversation and survive history compression and completion.
+See [the checklist specification and Python/Dart examples](docs/checklists.md).
+
 **State-Projection Agent Loop** — a vendor-agnostic, resumable LLM agent
 runtime built on two principles:
 

@@ -10,6 +10,7 @@ from .artifacts import ArtifactStore, ref as artifact_ref
 from .capability import Capability, ToolContext, capability
 from .compression import compress_text, compress_observation, summarize_text, content_hash
 from .config import Config
+from .checklists import ChecklistStore
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend, HashingEmbedding
 from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, Snapshot, event_to_message
@@ -18,6 +19,7 @@ from .messages import Decision, Message, ToolCall, Usage
 from .policy import PolicyEngine, PolicyDecision, Rule
 from .projection import (
     CandidatesSection,
+    ChecklistSection,
     HistorySection,
     KernelSection,
     Projection,
@@ -33,10 +35,12 @@ from .working_state import RecordedDecision, WorkingState, WorkingStateSection
 from .builtin.meta import install_spawn
 from .builtin.state import install_state
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Config",
+    "ChecklistStore",
+    "ChecklistSection",
     "Session",
     "ConcurrencyError",
     "Registry",
