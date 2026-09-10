@@ -177,6 +177,33 @@ class TocSection:
         return list(self._cached)
 
 
+def pair_tool_calls(messages: list[Message]) -> list[Message]:
+    """Enforce the one invariant every native tool-calling provider requires:
+    an assistant message's ``tool_calls`` and their results appear together,
+    or neither appears.
+
+    Three things in this pipeline can break that pair — a decision still
+    waiting on an approval, age-based exclusion crossing the boundary
+    between a decision and its results, and the emergency window trim — and
+    a provider answers a broken pair with a 400, not a degraded reply. One
+    rule applied to the finished message list covers all three.
+    """
+    result_ids = {m.tool_call_id for m in messages if m.role == OBSERVATION and m.tool_call_id}
+    kept_call_ids: set[str] = set()
+    kept: list[Message] = []
+    for message in messages:
+        if message.role == ASSISTANT and message.tool_calls:
+            call_ids = {tc.id for tc in message.tool_calls}
+            if not call_ids <= result_ids:
+                continue  # an incomplete decision is dropped whole
+            kept_call_ids |= call_ids
+        kept.append(message)
+    return [
+        m for m in kept
+        if not (m.role == OBSERVATION and m.tool_call_id and m.tool_call_id not in kept_call_ids)
+    ]
+
+
 class HistorySection:
     """Derives conversation messages from the Event Ledger with fidelity-graded
     compression. Replaces the old ConversationSection + Compactor."""
@@ -211,7 +238,7 @@ class HistorySection:
                     continue
                 msg_dict = {**msg_dict, "content": content}
             messages.append(Message.from_dict(msg_dict))
-        return messages
+        return pair_tool_calls(messages)
 
 
 class CandidatesSection:
@@ -299,8 +326,8 @@ class Projection:
                     rendered[idx] = (sec, ChecklistSection(max_chars=chars).render(turn))
 
         flat: list[Message] = []
-        for _, msgs in rendered:
-            flat.extend(msgs)
+        for section, msgs in rendered:
+            flat.extend(pair_tool_calls(msgs) if section.name == "history" else msgs)
         return flat
 
 

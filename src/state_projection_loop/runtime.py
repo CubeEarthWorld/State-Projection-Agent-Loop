@@ -309,14 +309,22 @@ class Runtime:
         approved = run.commands.get(resolved.command_id) if resolved and resolved.resolution == "approved" else None
         if resolved is not None and resolved.resolution == "denied":
             denied_command = run.commands.get(resolved.command_id)
-            observation = f"Approval denied: {denied_command.capability_name if denied_command else first_call.name} was not executed."
+            denied_name = denied_command.capability_name if denied_command else first_call.name
             run.pending_calls = []
-            return ExecuteBatchResult(
-                results=[ToolResult(call=first_call, ok=False, outcome="denied", error="approval_denied",
-                                     observation=observation,
-                                     command_id=denied_command.id if denied_command else None)],
-                halted=False,
-            )
+            # Every parked call needs its own result: the denial cancels the
+            # rest of the decision too, and a call left without one would
+            # take the whole decision out of the projection.
+            results = [ToolResult(
+                call=first_call, ok=False, outcome="denied", error="approval_denied",
+                observation=f"Approval denied: {denied_name} was not executed.",
+                command_id=denied_command.id if denied_command else None,
+            )]
+            results += [
+                ToolResult(call=call, ok=False, outcome="denied", error="approval_denied",
+                           observation=f"Not executed: the approval for {denied_name} was denied.")
+                for call in pending[1:]
+            ]
+            return ExecuteBatchResult(results=results, halted=False)
         capability = self.registry.get(approved.capability_name) if approved else self.registry.get(first_call.name)
         results: list[ToolResult] = []
         if capability is None:

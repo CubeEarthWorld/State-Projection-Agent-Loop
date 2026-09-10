@@ -474,7 +474,12 @@ class Session:
 
     def _apply_batch(self, batch, *, record: bool = True) -> None:
         for result in batch.results:
-            if record:
+            # A call parked on an approval has no result yet. Recording a
+            # placeholder observation would either be overwritten by the real
+            # one on resume (two results for one call) or stand in for a call
+            # that never ran; instead the whole decision stays out of the
+            # projection until it completes — see pair_tool_calls.
+            if record and result.outcome != "waiting_approval":
                 self._observe(result.call.id, result.call.name, result.observation)
             if result.ok:
                 self._activate(result.call.name)

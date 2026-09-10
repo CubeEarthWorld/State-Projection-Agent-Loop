@@ -456,3 +456,54 @@ class TestStateToolsDeclareTheirWrites:
         install_state(session)
         capability = session.registry.get("state.goal.set")
         assert session.policy.evaluate(capability, {"text": "x"}).decision == "allow"
+
+
+class TestApprovalKeepsTheDecisionIntact:
+    """A decision parked on an approval is either shown with all of its
+    results or not shown at all. Anything in between is a 400 from a native
+    tool-calling provider."""
+
+    def _session(self, steps):
+        registry = Registry()
+        registry.register(capability_dict("demo.write", effects=[("external", "*")]),
+                          handler=lambda: "written")
+        registry.register(capability_dict("demo.second", effects=[("external", "*")]),
+                          handler=lambda: "second")
+        return Session(ScriptedLLM(steps), registry=registry,
+                       policy=PolicyEngine(default_decision="require_approval"))
+
+    @staticmethod
+    def _observations(session):
+        return [(e.data["call_id"], e.data["text"]) for e in session.ledger.iter_run(session.run.id)
+                if e.type == "observation"]
+
+    def test_a_parked_decision_is_not_projected_at_all(self):
+        session = self._session([ScriptedLLM.call("demo.write")])
+        session.send("do it")
+        assert session.run.state == "WAITING_FOR_APPROVAL"
+        assert self._observations(session) == []
+        assert not any(m.role == "assistant" and m.tool_calls
+                       for m in session.projection.get("history").render(session._new_turn()))
+
+    def test_approval_produces_exactly_one_result_per_call(self):
+        session = self._session([ScriptedLLM.call("demo.write"), "done"])
+        session.send("do it")
+        session.resolve_approval("approved")
+        session.resume()
+        call_ids = [cid for cid, _ in self._observations(session)]
+        assert len(call_ids) == len(set(call_ids)) == 1
+        assert "written" in self._observations(session)[0][1]
+
+    def test_denial_answers_every_parked_call(self):
+        session = self._session([
+            ScriptedLLM.calls(("demo.write", {}), ("demo.second", {})), "done",
+        ])
+        session.send("do both")
+        session.resolve_approval("denied")
+        session.resume()
+        observations = self._observations(session)
+        assert len(observations) == 2, f"both parked calls need a result, got {observations}"
+        assert all("denied" in text.lower() or "not executed" in text.lower()
+                   for _, text in observations)
+        history = session.projection.get("history").render(session._new_turn())
+        assert any(m.role == "assistant" and m.tool_calls for m in history)
