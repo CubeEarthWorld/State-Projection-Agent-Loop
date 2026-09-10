@@ -17,7 +17,7 @@ of the live projection.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
 from .messages import Message, SYSTEM
@@ -136,3 +136,8 @@ class WorkingStateSection:
             return []
         body = ws.render(max_tokens=self.max_tokens)
         return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []
+
+
+# The typed fields of WorkingState, i.e. the keys from_dict understands.
+# Anything else a caller seeds is app-specific state and belongs in `extra`.
+WORKING_STATE_FIELDS = frozenset(f.name for f in fields(WorkingState))

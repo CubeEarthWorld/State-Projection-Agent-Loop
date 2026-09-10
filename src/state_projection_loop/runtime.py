@@ -216,9 +216,12 @@ class BudgetState:
 # ---------------------------------------------------------------------------
 
 class Runtime:
-    def __init__(self, registry: Registry, store: ArtifactStore, config: Config) -> None:
+    # No artifact store of its own: it uses ctx.store, the session's current
+    # one. A resumed run installs a fresh store for its new run id, and a
+    # second copy captured here would silently keep writing artifacts the
+    # session (and therefore meta.artifact.peek) could no longer read.
+    def __init__(self, registry: Registry, config: Config) -> None:
         self.registry = registry
-        self.store = store
         self.config = config
         # Capabilities whose full spec has already been projected into the
         # conversation. Used by the require_spec gate; pinned capabilities
@@ -278,7 +281,7 @@ class Runtime:
                     observation=f"Approval required: {decision.reason}", command_id=command.id,
                 ))
                 return ExecuteBatchResult(results=results, halted=True)
-            if self._is_read_only(capability):
+            if self.is_read_only(capability):
                 buffer.append((call, capability, args))
             else:
                 await flush()
@@ -393,7 +396,7 @@ class Runtime:
         return capability, args
 
     @staticmethod
-    def _is_read_only(capability: Capability) -> bool:
+    def is_read_only(capability: Capability) -> bool:
         # Mirrors PolicyEngine.evaluate: undeclared effects are treated as
         # the most restrictive kind, so an author who forgot to declare
         # effects doesn't also get free parallel execution.
@@ -417,7 +420,7 @@ class Runtime:
                 call=call, ok=False, outcome="failed", error="no_handler", command_id=command.id,
                 observation=f"Error: capability {capability.name!r} has no executable handler registered.",
             )
-        resolved = self.store.resolve_args(args) if capability.execution.resolve_handles else args
+        resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
         start = time.time()
         last_error = ""
@@ -430,7 +433,7 @@ class Runtime:
                     timeout=capability.execution.timeout_s,
                 )
                 elapsed = time.time() - start
-                observation, artifact_id = self._observation_for(capability, value)
+                observation, artifact_id = self._observation_for(capability, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id)
                 return ToolResult(
                     call=call, ok=True, value=value, outcome="ok", command_id=command.id,
@@ -472,7 +475,9 @@ class Runtime:
 
     # -- output policy --------------------------------------------------------
 
-    def _observation_for(self, capability: Capability, value: Any) -> tuple[str, Optional[str]]:
+    def _observation_for(
+        self, capability: Capability, value: Any, store: ArtifactStore,
+    ) -> tuple[str, Optional[str]]:
         text = serialize_value(value)
         policy = capability.execution.output_policy
         threshold = policy.max_inline_tokens or self.config.artifacts.inline_threshold_tokens
@@ -481,8 +486,13 @@ class Runtime:
             return text if text else "(empty result)", None
         if policy.overflow == "truncate":
             return truncate_to_tokens(text, threshold) + "\n…[truncated by output_policy]", None
-        record = self.store.put(value, source=capability.name)
-        ref_text = self.store.ref_text(
+        record = store.put(value, source=capability.name)
+        ref_text = store.ref_text(
             record, preview=policy.preview, preview_tokens=self.config.artifacts.preview_tokens,
         )
-        return ref_text + f"\nUse peek(artifact={{\"$artifact\": \"{record.id}\"}}, query=..., range=...) to inspect further.", record.id
+        if "meta.artifact.peek" in self.registry:
+            ref_text += (
+                f'\nUse meta.artifact.peek(artifact={{"$artifact": "{record.id}"}}, '
+                "query=..., range=...) to inspect further."
+            )
+        return ref_text, record.id

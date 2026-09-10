@@ -387,3 +387,72 @@ class TestDisabledCapabilitiesAreInvisible:
         prompt, tools = self._sent(session)
         assert "planning__checklist__manage" not in tools
         assert "planning.checklist.manage" not in prompt
+
+
+class TestResumedRunArtifacts:
+    """A resumed run installs a fresh ArtifactStore for its new run id.
+
+    The runtime must write into that one, not into a copy captured when it
+    was constructed, or every artifact produced after the resume becomes
+    unreachable to meta.artifact.peek.
+    """
+
+    def test_artifacts_produced_after_resume_are_readable(self, tmp_path):
+        import re
+
+        from state_projection_loop import Config
+        from state_projection_loop.artifacts import is_ref
+
+        registry = Registry()
+        registry.register(capability_dict("demo.big", properties={}, max_inline_tokens=1),
+                          handler=lambda: "x" * 4000)
+        config = Config.from_dict({
+            "mode": "job",
+            "persistence": {"ledger_directory": str(tmp_path)},
+            "artifacts": {"directory": str(tmp_path / "artifacts")},
+        })
+        first = Session(ScriptedLLM([ScriptedLLM.finish(result="ok")]), registry=registry,
+                        config=config, policy=allow_all_policy())
+        first.run_job("nothing")
+
+        resumed = Session.resume_from_ledger(
+            ScriptedLLM([ScriptedLLM.call("demo.big"), ScriptedLLM.finish(result="done")]),
+            first.run.id, config=config, registry=registry, policy=allow_all_policy(),
+        )
+        assert resumed.store is not None
+        resumed.run.state = "RUNNING"
+        resumed.run_job("make a big result")
+
+        observations = "\n".join(e.data["text"] for e in resumed.ledger.iter_run(resumed.run.id)
+                                 if e.type == "observation")
+        ids = re.findall(r"art_[0-9A-Z]+", observations)
+        assert ids, f"expected the oversized result to become an artifact, got {observations!r}"
+        assert is_ref({"$artifact": ids[0]})
+        # The store the session hands to meta.artifact.peek must be the one
+        # the runtime just wrote to.
+        assert "xxx" in resumed.store.peek(ids[0])
+
+
+class TestStateToolsDeclareTheirWrites:
+    """state.* mutates the working state, so it must not be declared as
+    effect-free: the runtime uses that declaration to decide what may run
+    concurrently, and a mislabelled write loses the model's stated order."""
+
+    def test_mutating_state_tools_are_not_read_only(self):
+        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop.runtime import Runtime
+
+        session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all_policy())
+        install_state(session)
+        mutating = [c for c in session.registry if c.name.startswith("state.") and not c.name.endswith(".get")]
+        assert mutating, "expected the bundled state tools to be installed"
+        for capability in mutating:
+            assert not Runtime.is_read_only(capability), f"{capability.name} claims to be read-only"
+
+    def test_state_writes_are_auto_allowed_by_the_default_policy(self):
+        from state_projection_loop.builtin.state import install_state
+
+        session = Session(ScriptedLLM([]), registry=Registry())  # default (auto_safe) policy
+        install_state(session)
+        capability = session.registry.get("state.goal.set")
+        assert session.policy.evaluate(capability, {"text": "x"}).decision == "allow"

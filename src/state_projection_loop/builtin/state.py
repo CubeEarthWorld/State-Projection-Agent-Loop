@@ -92,7 +92,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
         },
         "discovery": {"embedding_text": "目標 ゴール クリア条件 目的 goal objective"},
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.fact.add",
@@ -103,7 +103,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
         },
         "discovery": {"embedding_text": "事実 記録 確認 remember fact constraint"},
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.constraint.add",
@@ -113,7 +113,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         },
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.decision.record",
@@ -128,7 +128,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
         },
         "discovery": {"embedding_text": "判断 決定 理由 decision reason record"},
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.question.add",
@@ -138,7 +138,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         },
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.question.resolve",
@@ -148,7 +148,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         },
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.next_actions.set",
@@ -162,7 +162,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
             },
         },
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.extra.set",
@@ -177,7 +177,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
         },
         "discovery": {"embedding_text": "状態 変数 フラグ 保存 記録 セット flag variable"},
         "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "write", "resource": "working_state:*"}],
     },
     {
         "name": "state.extra.get",
@@ -187,7 +187,7 @@ STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
         },
         "execution": {"timeout_s": 5, "retry_safety": "pure"},
-        "effects": [{"kind": "none"}],
+        "effects": [{"kind": "read", "resource": "working_state:*"}],
     },
 ]
 

@@ -43,7 +43,7 @@ from .registry import Registry
 from .run import ApprovalRequest, Run, RunStateError
 from .runtime import BudgetState, Runtime
 from .tokens import estimate_tokens
-from .working_state import WorkingState
+from .working_state import WORKING_STATE_FIELDS, WorkingState
 
 _ACTIVE_TOOL_CAP = 48
 
@@ -110,17 +110,18 @@ class Session:
                 self.config.projection.sections, kernel_text=kernel, extra=extra_sections,
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
-        self.runtime = Runtime(self.registry, self.store, self.config)
+        self.runtime = Runtime(self.registry, self.config)
 
-        self.working_state = WorkingState()
-        for key, value in (seed or {}).items():
-            if key == "checklists":
-                self.working_state.checklists = ChecklistStore.from_dict(value)
-                continue
-            if hasattr(self.working_state, key):
-                setattr(self.working_state, key, value)
-            else:
-                self.working_state.extra[key] = value
+        # Typed fields go through the same parser snapshots use, so a seeded
+        # `decisions` becomes RecordedDecision objects rather than raw dicts
+        # that blow up on the next to_dict(). Anything else is app-specific
+        # state and lands in `extra`, the documented escape hatch.
+        seed = dict(seed or {})
+        known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
+        self.working_state = WorkingState.from_dict(known)
+        self.working_state.extra.update(
+            {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
+        )
 
         self.budget = BudgetState()
 

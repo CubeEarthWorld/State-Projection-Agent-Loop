@@ -23,3 +23,30 @@ class TestRenderAndSerialize:
         )
         restored = WorkingState.from_dict(ws.to_dict())
         assert restored.to_dict() == ws.to_dict()
+
+
+class TestSeeding:
+    """Seeded typed fields go through the same parser snapshots use."""
+
+    def test_seeded_decisions_survive_a_round_trip(self):
+        from state_projection_loop import ScriptedLLM, Session
+
+        session = Session(ScriptedLLM([]), seed={
+            "goal": "g",
+            "decisions": [{"text": "use sqlite", "reason": "single writer"}],
+        })
+        assert session.working_state.to_dict()["decisions"] == [
+            {"text": "use sqlite", "reason": "single writer"}
+        ]
+
+    def test_seeded_extra_is_not_nested_under_itself(self):
+        from state_projection_loop import ScriptedLLM, Session
+
+        session = Session(ScriptedLLM([]), seed={"extra": {"flags": {}}})
+        assert session.working_state.extra == {"flags": {}}
+
+    def test_unknown_keys_fall_back_to_extra(self):
+        from state_projection_loop import ScriptedLLM, Session
+
+        session = Session(ScriptedLLM([]), seed={"campaign": {"chapter": 2}})
+        assert session.working_state.extra == {"campaign": {"chapter": 2}}

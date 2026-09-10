@@ -31,7 +31,7 @@ from _util import capability_dict, echo_handler
 def make_runtime(registry: Registry, config: Config | None = None, *, allow_all: bool = True):
     config = config or Config()
     store = ArtifactStore("run_test")
-    runtime = Runtime(registry, store, config)
+    runtime = Runtime(registry, config)
     ledger = InMemoryLedger()
     run = Run("run_test", "ses_test", ledger)
     policy = PolicyEngine(default_decision="allow" if allow_all else "require_approval")
