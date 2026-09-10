@@ -53,7 +53,6 @@ def default_projection(registry, kernel="You are helpful.", window=30000):
     sections = build_default_sections(
         ["kernel", "toc", "history", "working_state", "candidates"],
         kernel_text=kernel,
-        pinned=registry.pinned(),
     )
     return Projection(sections, window_tokens=window)
 
@@ -211,14 +210,21 @@ class TestTocEpochCaching:
         reg.register(capability_dict("web.b", category="web"))
         assert "web(2)" in section.render(turn)[0].content
 
-    def test_kernel_is_immutable_across_registry_changes(self):
+    def test_kernel_is_stable_while_the_registry_is_unchanged(self):
         reg = Registry()
         reg.register(capability_dict("demo.p", pinned=True))
-        section = KernelSection("kernel", reg.pinned())
+        section = KernelSection("kernel")
+        first = section.render(make_turn(registry=reg))[0].content
+        assert section.render(make_turn(registry=reg))[0].content == first
+
+    def test_kernel_picks_up_a_capability_pinned_later(self):
+        reg = Registry()
+        reg.register(capability_dict("demo.p", pinned=True))
+        section = KernelSection("kernel")
         before = section.render(make_turn(registry=reg))[0].content
+        assert "demo.late_pin" not in before
         reg.register(capability_dict("demo.late_pin", pinned=True))
-        after = section.render(make_turn(registry=reg))[0].content
-        assert before == after
+        assert "demo.late_pin" in section.render(make_turn(registry=reg))[0].content
 
 
 class TestWindowEnforcement:
@@ -284,12 +290,12 @@ class TestWindowEnforcement:
 class TestBuildDefaultSections:
     def test_unknown_section_name_rejected(self):
         with pytest.raises(ValueError, match="Unknown section"):
-            build_default_sections(["kernel", "mystery"], kernel_text="", pinned=[])
+            build_default_sections(["kernel", "mystery"], kernel_text="")
 
     def test_default_section_order(self):
         sections = build_default_sections(
             ["kernel", "toc", "history", "working_state", "candidates"],
-            kernel_text="k", pinned=[],
+            kernel_text="k",
         )
         names = [s.name for s in sections]
         assert names == ["kernel", "toc", "history", "working_state", "candidates"]

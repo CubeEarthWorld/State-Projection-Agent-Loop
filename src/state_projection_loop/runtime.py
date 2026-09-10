@@ -221,8 +221,8 @@ class Runtime:
         self.store = store
         self.config = config
         # Capabilities whose full spec has already been projected into the
-        # conversation (pinned specs live in the kernel → pre-seeded by the
-        # session). Used by the require_spec gate.
+        # conversation. Used by the require_spec gate; pinned capabilities
+        # are exempt because their spec is always in the kernel section.
         self.seen_specs: set[str] = set()
         self._consecutive_validation_failures: dict[str, int] = {}
 
@@ -335,15 +335,24 @@ class Runtime:
         capability = self.registry.get(call.name)
         if capability is None:
             toc = self.registry.toc_text()
+            # Never point at a search tool that is itself absent or disabled:
+            # a capability the model cannot reach must not be advertised.
+            hint = (
+                " Use meta.tool.find(query) to locate the right one."
+                if "meta.tool.find" in self.registry else ""
+            )
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="unknown_capability",
                 observation=(
                     f"Error: capability {call.name!r} is not registered. "
-                    f"Tool index: {toc or '(empty)'}. Use find_tools(query) to locate the right one."
+                    f"Tool index: {toc or '(empty)'}.{hint}"
                 ),
             )
 
-        if capability.discovery.require_spec and capability.name not in self.seen_specs:
+        # A pinned capability's full spec is already in the kernel section,
+        # so the gate is satisfied by construction — no pre-seeding needed.
+        needs_spec = capability.discovery.require_spec and not capability.discovery.pinned
+        if needs_spec and capability.name not in self.seen_specs:
             self.seen_specs.add(capability.name)
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="require_spec",

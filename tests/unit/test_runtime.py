@@ -16,6 +16,7 @@ from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.projection import TurnContext
 from state_projection_loop.run import Run
+from state_projection_loop.builtin.meta import ensure_meta_tools
 from state_projection_loop.runtime import (
     BudgetState,
     Runtime,
@@ -81,11 +82,19 @@ class TestValidation:
         batch = run_batch(runtime, [call], turn, ctx, run, policy)
         assert not batch.results[0].ok and "not valid JSON" in batch.results[0].observation
 
-    def test_unknown_capability_mentions_find_tools(self):
+    def test_unknown_capability_mentions_the_search_tool_when_present(self):
+        registry = echo_registry()
+        ensure_meta_tools(registry)
+        runtime, turn, ctx, run, policy = make_runtime(registry)
+        batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
+        assert not batch.results[0].ok
+        assert "meta.tool.find" in batch.results[0].observation
+
+    def test_unknown_capability_never_advertises_an_absent_search_tool(self):
         runtime, turn, ctx, run, policy = make_runtime(echo_registry())
         batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
         assert not batch.results[0].ok
-        assert "find_tools" in batch.results[0].observation
+        assert "meta.tool.find" not in batch.results[0].observation
 
 
 class TestRequireSpec:

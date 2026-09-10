@@ -331,3 +331,59 @@ class TestRewind:
         reply = session.send("msg after rewind")
         assert reply == "new reply after rewind"
         assert len(session.conversation) == 4
+
+
+class TestDisabledCapabilitiesAreInvisible:
+    """The point of disabling: the model can neither see nor call the tool.
+
+    Asserted against what actually reaches the adapter — the rendered
+    messages and the native tool schemas — because that is the only view
+    the model has, and every surface (schemas, pinned specs, runtime notes,
+    tool index, candidates) lands in exactly one of those two.
+    """
+
+    def _session(self, *disabled: str, steps=None) -> Session:
+        registry = Registry(disabled=disabled)
+        registry.register(capability_dict("demo.echo", description="Echo the text back.",
+                                          properties={"text": {"type": "string"}},
+                                          required=["text"],
+                                          embedding_text="echo repeat say"), handler=echo_handler)
+        return Session(ScriptedLLM(steps if steps is not None else ["hi"]), kernel="K",
+                       registry=registry, policy=allow_all_policy())
+
+    @staticmethod
+    def _sent(session: Session) -> tuple[str, list[str]]:
+        request = session.llm.requests[-1]
+        prompt = "\n".join(m.content for m in request["messages"] if isinstance(m.content, str))
+        return prompt, [t["function"]["name"] for t in request["tools"]]
+
+    def test_bundled_checklist_tool_can_be_disabled(self):
+        session = self._session("planning.checklist.manage")
+        session.send("hello")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" not in tools
+        assert "planning.checklist.manage" not in prompt  # no pinned spec, no runtime note
+        assert "planning" not in prompt                    # and no tool-index entry
+
+    def test_disabled_tool_is_not_discoverable(self):
+        session = self._session("demo.echo")
+        assert session.search.search("echo repeat", k=5, layer=3) == []
+        assert session.registry.get("demo.echo") is None
+
+    def test_disabled_tool_cannot_be_executed(self):
+        session = self._session("demo.echo", steps=[ScriptedLLM.call("demo.echo", text="x"), "done"])
+        session.send("use echo")
+        observations = [e.data for e in session.ledger.iter_run(session.run.id) if e.type == "observation"]
+        assert any("not registered" in str(o) for o in observations)
+
+    def test_disabling_mid_session_takes_effect_on_the_next_turn(self):
+        session = self._session(steps=["one", "two"])
+        session.send("hello")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" in tools and "planning.checklist.manage" in prompt
+
+        session.registry.disable("planning.checklist.manage")
+        session.send("hello again")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" not in tools
+        assert "planning.checklist.manage" not in prompt

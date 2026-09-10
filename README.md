@@ -222,6 +222,31 @@ folds ago is still there verbatim. The original messages are never lost —
 they stay in the Event Ledger, searchable via `meta.history.search` even
 after being folded out of the live projection.
 
+## Disabling tools
+
+Any capability can be hidden from the model — bundled ones included:
+
+```python
+registry = Registry(disabled=["planning.checklist.manage", "debug/*"])
+session = Session(llm, registry=registry)
+
+session.registry.disable("my.dangerous.tool")   # mid-session, e.g. per sub-agent
+session.registry.enable("my.dangerous.tool")
+```
+
+Entries match a capability name, a category, or a category prefix
+(`"cat/*"`) — the same rule `subset()` uses, so `subset()` is the allow-list
+and `disable()` the deny-list.
+
+A disabled capability is gone from **every** surface the model can see: the
+native tool schemas, the pinned specs and runtime notes in the kernel, the
+tool index, layer-2 candidates, `meta.tool.find`, and execution (it fails as
+`unknown_capability`). Both `Registry.__iter__` and `Registry.get()` skip
+disabled entries and everything else derives from those two, so there is no
+surface left to leak through. The deny-list is by *name*, not by registered
+object, so a bundled tool that installs itself (`ensure_meta_tools`) cannot
+re-appear by registering again.
+
 ## Sub-agents (opt-in)
 
 ```python

@@ -9,8 +9,7 @@ CHECKLIST_DEF = json.loads(r'''
   "name": "planning.checklist.manage",
   "category": "planning",
   "card": {
-    "summary": "Create, inspect, revise and hand off versioned checklists.",
-    "signature": "planning.checklist.manage(action, id?, expected_revision?, ...) -> checklist"
+    "summary": "Create, inspect, revise and hand off versioned checklists."
   },
   "spec": {
     "description": "Manage durable plans. create requires name; list/get inspect progress; update replaces supplied fields (items is an ordered full replacement). add_item requires item.text; update_item patches text/status/notes by item_id; delete_item removes by item_id. All edits and delete require id and expected_revision from get. export takes optional id; import takes document. Only use arguments relevant to the action. Keep at most one item in_progress per checklist. Mark completed only after verification, blocked with notes explaining why. include_in_context controls automatic projection, not access or history. Export/import copies plans without shared state; imported IDs must not exist locally.",

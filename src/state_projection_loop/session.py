@@ -105,14 +105,12 @@ class Session:
         self.search = ToolSearch(self.registry, embedder=embedder, vector=self.config.discovery.vector)
 
         self._kernel_text = kernel
-        pinned = self.registry.pinned()
         if sections is None:
             sections = build_default_sections(
-                self.config.projection.sections, kernel_text=kernel, pinned=pinned, extra=extra_sections,
+                self.config.projection.sections, kernel_text=kernel, extra=extra_sections,
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
         self.runtime = Runtime(self.registry, self.store, self.config)
-        self.runtime.seen_specs.update(c.name for c in pinned)
 
         self.working_state = WorkingState()
         for key, value in (seed or {}).items():
@@ -126,7 +124,10 @@ class Session:
 
         self.budget = BudgetState()
 
-        self._active: "OrderedDict[str, None]" = OrderedDict((c.name, None) for c in pinned)
+        # Recently used non-pinned tools (an LRU). Pinned capabilities are
+        # added by _api_tools straight from the registry, so they are never
+        # tracked here and can never be evicted.
+        self._active: "OrderedDict[str, None]" = OrderedDict()
         self._interrupted = False
         self._idle_turns = 0
         self._budget_grace_used = False
@@ -301,8 +302,8 @@ class Session:
         self.budget = BudgetState()
         self._idle_turns = 0
         self._budget_grace_used = False
-        self._active = OrderedDict((c.name, None) for c in self.registry.pinned())
-        self.runtime.seen_specs = {c.name for c in self.registry.pinned()}
+        self._active = OrderedDict()
+        self.runtime.seen_specs = set()
         self.runtime._consecutive_validation_failures = {}
         self._snapshot()
 
@@ -549,14 +550,8 @@ class Session:
     def _activate(self, name: str) -> None:
         self._active[name] = None
         self._active.move_to_end(name)
-        pinned = {c.name for c in self.registry.pinned()}
         while len(self._active) > _ACTIVE_TOOL_CAP:
-            for candidate in self._active:
-                if candidate not in pinned:
-                    del self._active[candidate]
-                    break
-            else:
-                break
+            self._active.popitem(last=False)
 
     def _activate_tools(self, names: list[str]) -> None:
         for name in names:

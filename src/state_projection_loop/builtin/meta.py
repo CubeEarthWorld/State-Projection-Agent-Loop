@@ -21,7 +21,6 @@ FIND_TOOLS_DEF: dict[str, Any] = {
     "category": "meta",
     "card": {
         "summary": "ツール台帳を自然文で検索し、該当ツールのカード一覧を返す",
-        "signature": "find_tools(query: str, category: str | None = None, k: int = 8) -> list[ToolCard]",
         "tags": ["meta", "検索"],
     },
     "spec": {
@@ -61,7 +60,6 @@ PEEK_DEF: dict[str, Any] = {
     "category": "meta",
     "card": {
         "summary": "アーティファクト参照の中身を部分閲覧する",
-        "signature": 'peek(artifact: {"$artifact": str}, query: str | null = None, range: str | null = None) -> str',
         "tags": ["meta", "参照"],
     },
     "spec": {
@@ -96,7 +94,6 @@ SEARCH_HISTORY_DEF: dict[str, Any] = {
     "category": "meta",
     "card": {
         "summary": "折り畳まれた過去の会話をイベント台帳から検索する",
-        "signature": "search_history(query: str, k: int = 10) -> list[str]",
         "tags": ["meta", "検索", "履歴"],
     },
     "spec": {
@@ -138,7 +135,6 @@ SPAWN_DEF: dict[str, Any] = {
     "category": "meta",
     "card": {
         "summary": "サブエージェントを起動しタスクを委任、結果アーティファクトを受け取る",
-        "signature": "spawn(task: str, kernel: str | None = None, tool_scope: list | None = None, model: str | None = None, max_steps: int = 15) -> Any",
         "tags": ["meta", "swarm", "サブエージェント"],
     },
     "spec": {

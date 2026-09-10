@@ -88,8 +88,8 @@ class ToolContext:
 @dataclass
 class CapabilityCard:
     summary: str = ""
-    signature: str = ""
     tags: list[str] = field(default_factory=list)
+    signature: str = ""  # derived by Capability.derive_card(); never authored
 
 
 @dataclass
@@ -274,11 +274,12 @@ class Capability:
             examples=list(spec_d.get("examples") or []),
         )
         card_d = dict(data.get("card") or {})
-        card = CapabilityCard(
-            summary=card_d.get("summary", ""),
-            signature=card_d.get("signature", ""),
-            tags=list(card_d.get("tags") or []),
-        )
+        if "signature" in card_d:
+            raise ValueError(
+                f"Capability {data['name']!r}: card.signature is derived from the name and "
+                "parameters, not authored — remove it from the definition"
+            )
+        card = CapabilityCard(summary=card_d.get("summary", ""), tags=list(card_d.get("tags") or []))
         disc_d = dict(data.get("discovery") or {})
         discovery = CapabilityDiscovery(
             pinned=bool(disc_d.get("pinned", False)),
@@ -333,8 +334,10 @@ class Capability:
     def derive_card(self) -> None:
         if not self.card.summary:
             self.card.summary = _first_sentence(self.spec.description) or self.name
-        if not self.card.signature:
-            self.card.signature = synthesize_signature(self.name, self.spec.parameters, self.spec.returns)
+        # The signature is always derived, never authored: it is the one
+        # line telling the model how to call this capability, and a
+        # hand-written one drifts from the real name and parameters.
+        self.card.signature = synthesize_signature(self.name, self.spec.parameters, self.spec.returns)
 
     # -- projections ------------------------------------------------------
 

@@ -29,13 +29,38 @@ class ToolProvider(Protocol):
         ...
 
 
+def scope_matches(entry: str, name: str, category: str) -> bool:
+    """One scope entry against one capability.
+
+    An entry matches a capability name exactly, a category exactly, or a
+    category prefix written as ``"cat/*"``. Shared by ``subset()`` (an
+    allow-list for sub-agents) and ``disable()`` (a deny-list).
+    """
+    if entry == name or entry == category:
+        return True
+    return entry.endswith("/*") and category.startswith(entry[:-1])
+
+
 class Registry:
-    def __init__(self) -> None:
+    """Every capability in the system, and the single gate the model sees it through.
+
+    Both ``__iter__`` and ``get()`` skip disabled capabilities, and every
+    other surface — the TOC, pinned specs, native tool schemas, layer-2
+    candidates, ``meta.tool.find``, and execution — derives from those two.
+    Disabling therefore removes a capability from all of them at once.
+    """
+
+    def __init__(self, *, disabled: Iterable[str] = ()) -> None:
         self._capabilities: dict[str, Capability] = {}  # keyed by qualified_name
         self._latest: dict[str, str] = {}  # name -> qualified_name of highest version
         self._epoch = 0
         self._providers: list[ToolProvider] = []
         self._provider_tools: dict[int, set[str]] = {}
+        # A deny-list of names/categories, not of registered objects: a
+        # disabled name stays disabled however it is registered afterwards,
+        # so bundled tools that self-install (ensure_meta_tools) cannot
+        # sneak back in.
+        self._disabled: set[str] = set(disabled)
 
     # -- mutation -------------------------------------------------------------
 
@@ -124,6 +149,37 @@ class Registry:
             self._recompute_latest()
             self._epoch += 1
 
+    # -- disabling ------------------------------------------------------------
+
+    @property
+    def disabled(self) -> frozenset[str]:
+        return frozenset(self._disabled)
+
+    def disable(self, *names: str) -> None:
+        """Hide capabilities from the model entirely.
+
+        Entries follow :func:`scope_matches`. A disabled capability is gone
+        from the tool index, pinned specs, native schemas, search and
+        execution alike — the model can neither see it nor call it.
+        """
+        added = set(names) - self._disabled
+        if added:
+            self._disabled |= added
+            self._epoch += 1
+
+    def enable(self, *names: str) -> None:
+        """Undo :meth:`disable` for the given entries."""
+        removed = self._disabled & set(names)
+        if removed:
+            self._disabled -= removed
+            self._epoch += 1
+
+    def _is_disabled(self, capability: Capability) -> bool:
+        if not self._disabled:
+            return False
+        category = capability.category or "misc"
+        return any(scope_matches(e, capability.name, category) for e in self._disabled)
+
     # -- lookup ---------------------------------------------------------------
 
     @property
@@ -131,11 +187,18 @@ class Registry:
         return self._epoch
 
     def get(self, name: str) -> Optional[Capability]:
-        """Resolve by ``name@version`` (exact) or bare ``name`` (latest)."""
-        if name in self._capabilities:
-            return self._capabilities[name]
-        qname = self._latest.get(name)
-        return self._capabilities.get(qname) if qname else None
+        """Resolve by ``name@version`` (exact) or bare ``name`` (latest).
+
+        Disabled capabilities resolve to ``None``, exactly like unregistered
+        ones — that is what makes them unreachable from the runtime.
+        """
+        capability = self._capabilities.get(name)
+        if capability is None:
+            qname = self._latest.get(name)
+            capability = self._capabilities.get(qname) if qname else None
+        if capability is None or self._is_disabled(capability):
+            return None
+        return capability
 
     def resolve_api_name(self, name: str) -> str:
         """Translate a provider-safe ``api_name`` (see ``Capability.api_name``)
@@ -147,10 +210,10 @@ class Registry:
         "unknown capability" error path still reports the name the model
         actually sent.
         """
-        if name in self._capabilities or name in self._latest:
+        if self.get(name) is not None:
             return name
         dotted = from_api_name(name)
-        if dotted in self._capabilities or dotted in self._latest:
+        if self.get(dotted) is not None:
             return dotted
         return name
 
@@ -158,10 +221,13 @@ class Registry:
         return self.get(name) is not None
 
     def __len__(self) -> int:
-        return len(self._latest)
+        return sum(1 for _ in self)
 
     def __iter__(self) -> Iterator[Capability]:
-        return (self._capabilities[q] for q in self._latest.values())
+        return (
+            c for c in (self._capabilities[q] for q in self._latest.values())
+            if not self._is_disabled(c)
+        )
 
     def all(self) -> list[Capability]:
         return list(self)
@@ -228,21 +294,16 @@ class Registry:
     def subset(self, scope: Iterable[str]) -> "Registry":
         """New registry containing only the named capabilities/categories.
 
-        Scope entries match a capability name exactly, a category exactly,
-        or a category prefix written as ``"cat/*"``.
+        Scope entries follow :func:`scope_matches`. Capabilities disabled
+        here are already invisible to the iteration, and the deny-list
+        carries over so they stay disabled in the child.
         """
         scope = list(scope)
-        sub = Registry()
+        sub = Registry(disabled=self._disabled)
         for c in self:
             cat = c.category or "misc"
-            for entry in scope:
-                if entry == c.name or entry == cat:
-                    break
-                if entry.endswith("/*") and cat.startswith(entry[:-1]):
-                    break
-            else:
-                continue
-            sub._capabilities[c.qualified_name] = c
+            if any(scope_matches(entry, c.name, cat) for entry in scope):
+                sub._capabilities[c.qualified_name] = c
         sub._recompute_latest()
         sub._epoch = 1
         return sub
