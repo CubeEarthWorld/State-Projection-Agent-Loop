@@ -210,7 +210,7 @@ stays sent/pushed regardless of which branch you're on now.
 from state_projection_loop import Session, install_state
 
 session = Session(llm, kernel=GM_KERNEL, seed={"goal": "escape the dungeon", "extra": {"flags": {}}})
-install_state(session)   # state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
+install_state(session.registry)   # state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
 ```
 
 `WorkingState` is a finite record — goal, acceptance criteria, constraints,

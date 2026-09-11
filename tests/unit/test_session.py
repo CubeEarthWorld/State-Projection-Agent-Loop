@@ -314,7 +314,7 @@ class TestRewind:
             "after rewind",
         ])
         session = Session(llm, policy=allow_all_policy())
-        install_state(session)
+        install_state(session.registry)
         session.send("set goal")
         session.send("change goal")
         assert session.working_state.goal == "escape the room"
@@ -443,7 +443,7 @@ class TestStateToolsDeclareTheirWrites:
         from state_projection_loop.runtime import Runtime
 
         session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all_policy())
-        install_state(session)
+        install_state(session.registry)
         mutating = [c for c in session.registry if c.name.startswith("state.") and not c.name.endswith(".get")]
         assert mutating, "expected the bundled state tools to be installed"
         for capability in mutating:
@@ -453,7 +453,7 @@ class TestStateToolsDeclareTheirWrites:
         from state_projection_loop.builtin.state import install_state
 
         session = Session(ScriptedLLM([]), registry=Registry())  # default (auto_safe) policy
-        install_state(session)
+        install_state(session.registry)
         capability = session.registry.get("state.goal.set")
         assert session.policy.evaluate(capability, {"text": "x"}).decision == "allow"
 

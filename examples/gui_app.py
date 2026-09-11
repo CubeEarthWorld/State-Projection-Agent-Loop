@@ -467,7 +467,7 @@ class MainWindow(QMainWindow):
             registry=registry,
             seed=initial_seed(),
         )
-        install_state(self.session)
+        install_state(self.session.registry)
         self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
         self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
         self._scenario_backend = log

@@ -78,3 +78,33 @@ class TestSerialization:
     @pytest.mark.parametrize("case", cases("serialization", "estimate_tokens"))
     def test_estimate_tokens(self, case):
         assert estimate_tokens(case["value"]) == case["expected"]
+
+
+class TestBundledDefinitions:
+    """The bundled definitions are data, shipped as package data and shared
+    with the Dart port. A missing or malformed file is a packaging bug that
+    only shows up when a session is constructed."""
+
+    @pytest.mark.parametrize("name", ["meta", "spawn", "state", "checklist"])
+    def test_loads(self, name):
+        from state_projection_loop.builtin.defs import load
+
+        assert load(name)
+
+    def test_every_bundled_capability_has_a_handler(self):
+        from state_projection_loop import Registry
+        from state_projection_loop.builtin.checklist import ensure_checklist_tool
+        from state_projection_loop.builtin.meta import ensure_meta_tools, install_spawn
+        from state_projection_loop.builtin.state import install_state
+
+        registry = Registry()
+        ensure_meta_tools(registry)
+        ensure_checklist_tool(registry)
+        install_spawn(registry)
+        install_state(registry)
+
+        assert list(registry)
+        for capability in registry:
+            assert capability.execution.handler is not None, (
+                f"{capability.name} would fail at call time with no_handler"
+            )
