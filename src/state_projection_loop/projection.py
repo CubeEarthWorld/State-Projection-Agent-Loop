@@ -25,6 +25,7 @@ from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM, USER
 from .registry import Registry
 from .tokens import estimate_tokens
 from .working_state import WorkingState
+from .serialization import dumps
 
 
 @dataclass
@@ -279,7 +280,7 @@ class Projection:
     def schema_tokens(self, api_tools: list[dict[str, Any]]) -> int:
         if not api_tools:
             return 0
-        return estimate_tokens(json.dumps(api_tools, ensure_ascii=False, default=str))
+        return estimate_tokens(dumps(api_tools))
 
     def render(
         self, turn: TurnContext, *, api_tools: Optional[list[dict[str, Any]]] = None,

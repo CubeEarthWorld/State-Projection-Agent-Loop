@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from .ids import new_id
 from .tokens import estimate_tokens
+from .serialization import dumps
 
 REF_KEY = "$artifact"
 
@@ -33,7 +34,7 @@ def serialize_value(value: Any) -> str:
     if isinstance(value, str):
         return value
     try:
-        return json.dumps(value, ensure_ascii=False, indent=None, default=str)
+        return dumps(value)
     except (TypeError, ValueError):
         return str(value)
 
@@ -118,7 +119,7 @@ class ArtifactStore:
             "source": record.source, "created": record.created, "text": record.text,
         }
         (run_dir / f"{record.id}.json").write_text(
-            json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8"
+            dumps(payload), encoding="utf-8"
         )
 
     def _load(self, aid: str) -> Optional[ArtifactRecord]:

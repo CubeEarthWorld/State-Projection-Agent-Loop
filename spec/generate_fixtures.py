@@ -1,0 +1,115 @@
+"""Regenerate spec/fixtures/*.json from the Python implementation.
+
+The fixtures are the cross-language contract: both packages' test suites
+read the same files and must produce the same outputs. Python is the
+reference implementation, so the expectations are generated from it — run
+this after deliberately changing one of the covered functions, and never to
+paper over an unexplained diff.
+
+    python spec/generate_fixtures.py
+"""
+from __future__ import annotations
+
+import fnmatch
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from state_projection_loop.capability import synthesize_signature, to_api_name  # noqa: E402
+from state_projection_loop.compression import (  # noqa: E402
+    content_hash,
+    head_tail_truncate,
+    strip_noise,
+    summarize_text,
+)
+from state_projection_loop.serialization import dumps  # noqa: E402
+from state_projection_loop.tokens import estimate_tokens  # noqa: E402
+
+TEXTS = [
+    "",
+    "hello",
+    "L0\nL1\n",
+    "日本語🎌テスト",
+    "a" * 300,
+    "\n".join(f"line {i}" for i in range(30)),
+    "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+    "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+    "\x1b[31mred\x1b[0m plain",
+]
+
+GLOBS = [
+    ("bcd", "[^a]*"), ("^bc", "[^a]*"), ("abc", "[!a]*"), ("bbc", "[!a]*"),
+    ("a\nb", "a*b"), ("a.c", "a?c"), ("x[y", "x[[]y"), ("a]b", "a[]]b"),
+    ("web.search.query", "web.*"), ("web.search.query", "web.search.query"),
+    ("state.goal.set", "state.*"), ("planning.checklist.manage", "state.*"),
+]
+
+SIGNATURES = [
+    ("demo.tool.run", {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "k": {"type": "integer", "default": 8},
+            "mode": {"enum": ["a", "b"]},
+            "cat": {"type": ["string", "null"]},
+            "flag": {"type": "boolean", "default": True},
+            "anything": {},
+        },
+        "required": ["query"],
+    }),
+    ("meta.tool.find", {"type": "object", "properties": {}}),
+]
+
+JSON_VALUES = [
+    {"a": 1, "b": [1, 2, {"c": None}]},
+    {"日本語": "🎌", "n": 1.5, "t": True},
+    [],
+    {},
+]
+
+
+def main() -> None:
+    out = ROOT / "spec" / "fixtures"
+    out.mkdir(parents=True, exist_ok=True)
+
+    (out / "compression.json").write_text(json.dumps({
+        "content_hash": [{"text": t, "expected": content_hash(t)} for t in TEXTS],
+        "strip_noise": [{"text": t, "expected": strip_noise(t)} for t in TEXTS],
+        "summarize_text": [{"text": t, "expected": summarize_text(t)} for t in TEXTS],
+        "head_tail_truncate": [
+            {"text": t, "max_lines": n, "expected": head_tail_truncate(t, n)}
+            for t in TEXTS for n in (4, 7, 10, 40)
+        ],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    (out / "policy_glob.json").write_text(json.dumps({
+        "glob_match": [
+            {"value": v, "pattern": p, "expected": fnmatch.fnmatchcase(v, p)}
+            for v, p in GLOBS
+        ],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    (out / "capability.json").write_text(json.dumps({
+        "synthesize_signature": [
+            {"name": n, "parameters": p, "expected": synthesize_signature(n, p)}
+            for n, p in SIGNATURES
+        ],
+        "api_name": [
+            {"name": n, "expected": to_api_name(n)}
+            for n in ("meta.tool.find", "planning.checklist.manage", "a.b.c.d.e")
+        ],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    (out / "serialization.json").write_text(json.dumps({
+        "dumps": [{"value": v, "expected": dumps(v)} for v in JSON_VALUES],
+        "estimate_tokens": [{"value": t, "expected": estimate_tokens(t)} for t in TEXTS],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    print(f"wrote {len(list(out.glob('*.json')))} fixture files to {out}")
+
+
+if __name__ == "__main__":
+    main()

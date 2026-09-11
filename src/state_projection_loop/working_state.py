@@ -23,6 +23,7 @@ from typing import Any, Optional
 from .messages import Message, SYSTEM
 from .tokens import estimate_tokens
 from .checklists import ChecklistStore
+from .serialization import dumps
 
 
 @dataclass
@@ -111,7 +112,7 @@ class WorkingState:
         if self.artifact_refs:
             parts.append("artifact_refs: " + ", ".join(self.artifact_refs))
         if self.extra:
-            parts.append("extra: " + json.dumps(self.extra, ensure_ascii=False, default=str))
+            parts.append("extra: " + dumps(self.extra))
         body = "\n".join(parts)
         if estimate_tokens(body) > max_tokens:
             # Truncate the least time-critical sections first: facts, then

@@ -127,5 +127,5 @@ class TestStateManagement:
         log = MediaLog()
         session = make_session(log, [check])
         session.send("ゲームを始めよう")
-        assert '"hp": 20' in captured["joined"]        # party seeded
+        assert '"hp":20' in captured["joined"]        # party seeded
         assert "dungeon_entrance" in captured["joined"]  # scene seeded

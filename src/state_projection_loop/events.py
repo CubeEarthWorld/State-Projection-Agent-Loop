@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional, Protocol, runtime_checkable
 
 from .ids import new_id
+from .serialization import dumps
 
 EVENT_TYPES = (
     "user_input",
@@ -60,13 +61,10 @@ class Event:
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_line(self) -> str:
-        return json.dumps(
-            {
-                "id": self.id, "run_id": self.run_id, "sequence": self.sequence,
-                "type": self.type, "ts": self.ts, "data": self.data,
-            },
-            ensure_ascii=False, default=str,
-        )
+        return dumps({
+            "id": self.id, "run_id": self.run_id, "sequence": self.sequence,
+            "type": self.type, "ts": self.ts, "data": self.data,
+        })
 
     @classmethod
     def from_line(cls, line: str) -> "Event":
@@ -198,7 +196,7 @@ class JsonlLedger:
             "ts": snapshot.ts, "state": snapshot.state,
         }
         tmp = self._snapshot_path(snapshot.run_id).with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
+        tmp.write_text(dumps(payload), encoding="utf-8")
         tmp.replace(self._snapshot_path(snapshot.run_id))
 
     def load_snapshot(self, run_id: str) -> Optional[Snapshot]:

@@ -25,6 +25,7 @@ import re
 from typing import Any, Callable, Optional, Protocol, Union, runtime_checkable
 
 from .messages import Decision, Message, ToolCall
+from .serialization import dumps
 
 FINISH_NAME = "finish"
 
@@ -96,7 +97,7 @@ def parse_text_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
             return ""
         args = data.get("arguments") or data.get("args") or {}
         if not isinstance(args, dict):
-            calls.append(ToolCall(name=name, arguments={}, raw_arguments=json.dumps(args)))
+            calls.append(ToolCall(name=name, arguments={}, raw_arguments=dumps(args)))
         else:
             calls.append(ToolCall(name=name, arguments=args))
         return ""

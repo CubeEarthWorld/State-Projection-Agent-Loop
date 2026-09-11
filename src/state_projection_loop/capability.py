@@ -26,6 +26,8 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from .serialization import dumps
+
 # ---------------------------------------------------------------------------
 # Effects & retry safety — the vocabulary the policy engine and runtime share
 # ---------------------------------------------------------------------------
@@ -134,37 +136,34 @@ class CapabilityExecution:
             )
 
 
-_JSON_TO_PY = {
-    "string": "str", "integer": "int", "number": "float", "boolean": "bool",
-    "array": "list", "object": "dict", "null": "None",
-}
-
-
 def _type_str(schema: dict[str, Any]) -> str:
+    """Render a parameter's type for the signature line.
+
+    Deliberately the JSON Schema vocabulary, not a language's: the model
+    sees the same type names here and in the full spec below, and the Python
+    and Dart ports render one identical string instead of two dialects.
+    """
     t = schema.get("type")
     if isinstance(t, list):
-        return " | ".join(_JSON_TO_PY.get(x, str(x)) for x in t)
+        return " | ".join(str(x) for x in t)
     if isinstance(t, str):
-        return _JSON_TO_PY.get(t, t)
+        return t
     if "enum" in schema:
-        return "Literal[" + ", ".join(repr(v) for v in schema["enum"]) + "]"
-    return "Any"
+        return "Literal[" + ", ".join(dumps(v) for v in schema["enum"]) + "]"
+    return "any"
 
 
 def synthesize_signature(name: str, parameters: dict[str, Any], returns: Optional[dict] = None) -> str:
-    """Build a python-ish signature string from a JSON Schema."""
+    """Build a signature string from a JSON Schema."""
     props = parameters.get("properties", {}) or {}
     required = set(parameters.get("required", []) or [])
     parts = []
     for pname, sch in props.items():
         piece = f"{pname}: {_type_str(sch if isinstance(sch, dict) else {})}"
         if pname not in required:
-            if isinstance(sch, dict) and "default" in sch:
-                piece += f" = {sch['default']!r}"
-            else:
-                piece += " = None"
+            piece += f" = {dumps(sch['default'])}" if isinstance(sch, dict) and "default" in sch else " = null"
         parts.append(piece)
-    ret = _type_str(returns) if isinstance(returns, dict) else "Any"
+    ret = _type_str(returns) if isinstance(returns, dict) else "any"
     return f"{name}({', '.join(parts)}) -> {ret}"
 
 
@@ -322,15 +321,15 @@ class Capability:
         lines = [f"### {self.qualified_name}", self.card.signature]
         if self.spec.description:
             lines.append(self.spec.description)
-        lines.append("Parameters (JSON Schema): " + _json.dumps(self.spec.parameters, ensure_ascii=False))
+        lines.append("Parameters (JSON Schema): " + dumps(self.spec.parameters))
         if self.spec.returns:
-            lines.append("Returns: " + _json.dumps(self.spec.returns, ensure_ascii=False))
+            lines.append("Returns: " + dumps(self.spec.returns))
         if self.effects:
             lines.append("Effects: " + ", ".join(f"{e.kind}:{e.resource}" for e in self.effects))
         if self.spec.usage_notes:
             lines.append("Usage notes: " + self.spec.usage_notes)
         for ex in self.spec.examples:
-            call = _json.dumps(ex.get("call", {}), ensure_ascii=False)
+            call = dumps(ex.get("call", {}))
             note = ex.get("note", "")
             lines.append(f"Example: {self.name}({call})" + (f" — {note}" if note else ""))
         return "\n".join(lines)
