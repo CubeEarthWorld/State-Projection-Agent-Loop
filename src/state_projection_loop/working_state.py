@@ -17,12 +17,13 @@ of the live projection.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
 from .messages import Message, SYSTEM
 from .tokens import estimate_tokens
 from .checklists import ChecklistStore
+from .serialization import dumps
 
 
 @dataclass
@@ -111,7 +112,7 @@ class WorkingState:
         if self.artifact_refs:
             parts.append("artifact_refs: " + ", ".join(self.artifact_refs))
         if self.extra:
-            parts.append("extra: " + json.dumps(self.extra, ensure_ascii=False, default=str))
+            parts.append("extra: " + dumps(self.extra))
         body = "\n".join(parts)
         if estimate_tokens(body) > max_tokens:
             # Truncate the least time-critical sections first: facts, then
@@ -125,7 +126,6 @@ class WorkingStateSection:
     """Projects the working state each turn (volatile — always near the tail)."""
 
     name = "working_state"
-    cache_class = "volatile"
 
     def __init__(self, *, max_tokens: int = 800) -> None:
         self.max_tokens = max_tokens
@@ -136,3 +136,8 @@ class WorkingStateSection:
             return []
         body = ws.render(max_tokens=self.max_tokens)
         return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []
+
+
+# The typed fields of WorkingState, i.e. the keys from_dict understands.
+# Anything else a caller seeds is app-specific state and belongs in `extra`.
+WORKING_STATE_FIELDS = frozenset(f.name for f in fields(WorkingState))

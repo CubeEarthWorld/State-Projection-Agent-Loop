@@ -2,10 +2,9 @@
 
 A Capability is not just a function signature — it is a full contract the
 runtime and policy engine can reason about *without* running the handler:
-what it touches (``effects``), whether it is safe to retry after a timeout
-(``retry_safety``), and whether it may run alongside other calls
-(``concurrency``). The LLM only ever sees the projected card/spec text; it
-never gets to assert any of these properties itself.
+what it touches (``effects``) and whether it is safe to retry after a
+timeout (``retry_safety``). The LLM only ever sees the projected card/spec
+text; it never gets to assert any of these properties itself.
 
 Naming: capabilities live in a dotted namespace 3-5 levels deep, mirroring a
 stable service/resource/operation shape rather than an org chart, e.g.::
@@ -27,13 +26,14 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from .serialization import dumps
+
 # ---------------------------------------------------------------------------
 # Effects & retry safety — the vocabulary the policy engine and runtime share
 # ---------------------------------------------------------------------------
 
 EFFECT_KINDS = ("none", "read", "write", "external")
 RETRY_SAFETY = ("pure", "idempotent", "check_then_retry", "never_retry")
-CONCURRENCY_POLICIES = ("parallel_safe", "sequential_only", "exclusive_resource")
 
 
 @dataclass(frozen=True)
@@ -88,8 +88,8 @@ class ToolContext:
 @dataclass
 class CapabilityCard:
     summary: str = ""
-    signature: str = ""
     tags: list[str] = field(default_factory=list)
+    signature: str = ""  # derived by Capability.derive_card(); never authored
 
 
 @dataclass
@@ -117,28 +117,14 @@ class OutputPolicy:
 
 
 @dataclass
-class ConcurrencyPolicy:
-    mode: str = "sequential_only"  # one of CONCURRENCY_POLICIES
-    resource_key: Optional[str] = None  # required when mode == "exclusive_resource"
-
-    def __post_init__(self) -> None:
-        if self.mode not in CONCURRENCY_POLICIES:
-            raise ValueError(f"concurrency.mode must be one of {CONCURRENCY_POLICIES}, got {self.mode!r}")
-        if self.mode == "exclusive_resource" and not self.resource_key:
-            raise ValueError("concurrency.mode='exclusive_resource' requires resource_key")
-
-
-@dataclass
 class CapabilityExecution:
     handler: Optional[Callable[..., Any]] = None
     handler_ref: str = ""
     timeout_s: float = 30.0
     retries: int = 0
     retry_safety: str = "never_retry"  # one of RETRY_SAFETY
-    concurrency: ConcurrencyPolicy = field(default_factory=ConcurrencyPolicy)
     resolve_handles: bool = True  # False for tools that take artifact refs literally (e.g. peek)
     output_policy: OutputPolicy = field(default_factory=OutputPolicy)
-    compensation: Optional[str] = None  # qualified name of a compensating capability, if any
 
     def __post_init__(self) -> None:
         if self.retry_safety not in RETRY_SAFETY:
@@ -150,37 +136,34 @@ class CapabilityExecution:
             )
 
 
-_JSON_TO_PY = {
-    "string": "str", "integer": "int", "number": "float", "boolean": "bool",
-    "array": "list", "object": "dict", "null": "None",
-}
-
-
 def _type_str(schema: dict[str, Any]) -> str:
+    """Render a parameter's type for the signature line.
+
+    Deliberately the JSON Schema vocabulary, not a language's: the model
+    sees the same type names here and in the full spec below, and the Python
+    and Dart ports render one identical string instead of two dialects.
+    """
     t = schema.get("type")
     if isinstance(t, list):
-        return " | ".join(_JSON_TO_PY.get(x, str(x)) for x in t)
+        return " | ".join(str(x) for x in t)
     if isinstance(t, str):
-        return _JSON_TO_PY.get(t, t)
+        return t
     if "enum" in schema:
-        return "Literal[" + ", ".join(repr(v) for v in schema["enum"]) + "]"
-    return "Any"
+        return "Literal[" + ", ".join(dumps(v) for v in schema["enum"]) + "]"
+    return "any"
 
 
 def synthesize_signature(name: str, parameters: dict[str, Any], returns: Optional[dict] = None) -> str:
-    """Build a python-ish signature string from a JSON Schema."""
+    """Build a signature string from a JSON Schema."""
     props = parameters.get("properties", {}) or {}
     required = set(parameters.get("required", []) or [])
     parts = []
     for pname, sch in props.items():
         piece = f"{pname}: {_type_str(sch if isinstance(sch, dict) else {})}"
         if pname not in required:
-            if isinstance(sch, dict) and "default" in sch:
-                piece += f" = {sch['default']!r}"
-            else:
-                piece += " = None"
+            piece += f" = {dumps(sch['default'])}" if isinstance(sch, dict) and "default" in sch else " = null"
         parts.append(piece)
-    ret = _type_str(returns) if isinstance(returns, dict) else "Any"
+    ret = _type_str(returns) if isinstance(returns, dict) else "any"
     return f"{name}({', '.join(parts)}) -> {ret}"
 
 
@@ -205,7 +188,7 @@ API_NAME_SEPARATOR = "__"
 
 
 def validate_capability_name(name: str) -> None:
-    """Enforce the 3-5 level dotted namespace convention (service.resource.op)."""
+    """Enforce the 2-5 level dotted namespace convention (service.resource.op)."""
     if not _NAME_RE.match(name):
         raise ValueError(
             f"Capability name {name!r} must be 2-5 lowercase dotted segments, "
@@ -238,7 +221,6 @@ class Capability:
     discovery: CapabilityDiscovery = field(default_factory=CapabilityDiscovery)
     execution: CapabilityExecution = field(default_factory=CapabilityExecution)
     effects: list[Effect] = field(default_factory=list)
-    permission: str = ""  # opaque permission-requirement tag consumed by PolicyEngine
     wants_ctx: bool = False
 
     def __post_init__(self) -> None:
@@ -252,12 +234,6 @@ class Capability:
     def api_name(self) -> str:
         """Provider-safe function name for native tool-calling schemas."""
         return to_api_name(self.name)
-
-    @property
-    def is_pure(self) -> bool:
-        # Undeclared effects are NOT treated as pure — see PolicyEngine.evaluate
-        # and Runtime._is_read_only for the same conservative default.
-        return bool(self.effects) and all(e.kind == "none" for e in self.effects)
 
     # -- construction ---------------------------------------------------
 
@@ -274,11 +250,12 @@ class Capability:
             examples=list(spec_d.get("examples") or []),
         )
         card_d = dict(data.get("card") or {})
-        card = CapabilityCard(
-            summary=card_d.get("summary", ""),
-            signature=card_d.get("signature", ""),
-            tags=list(card_d.get("tags") or []),
-        )
+        if "signature" in card_d:
+            raise ValueError(
+                f"Capability {data['name']!r}: card.signature is derived from the name and "
+                "parameters, not authored — remove it from the definition"
+            )
+        card = CapabilityCard(summary=card_d.get("summary", ""), tags=list(card_d.get("tags") or []))
         disc_d = dict(data.get("discovery") or {})
         discovery = CapabilityDiscovery(
             pinned=bool(disc_d.get("pinned", False)),
@@ -288,24 +265,18 @@ class Capability:
         )
         exe_d = dict(data.get("execution") or {})
         op_d = dict(exe_d.get("output_policy") or {})
-        conc_d = dict(exe_d.get("concurrency") or {})
         execution = CapabilityExecution(
             handler=handler,
             handler_ref=exe_d.get("handler", "") if isinstance(exe_d.get("handler"), str) else "",
             timeout_s=float(exe_d.get("timeout_s", 30.0)),
             retries=int(exe_d.get("retries", 0)),
             retry_safety=exe_d.get("retry_safety", "never_retry"),
-            concurrency=ConcurrencyPolicy(
-                mode=conc_d.get("mode", "sequential_only"),
-                resource_key=conc_d.get("resource_key"),
-            ),
             resolve_handles=bool(exe_d.get("resolve_handles", True)),
             output_policy=OutputPolicy(
                 max_inline_tokens=op_d.get("max_inline_tokens"),
                 overflow=op_d.get("overflow", "artifact"),
                 preview=op_d.get("preview", "head"),
             ),
-            compensation=exe_d.get("compensation"),
         )
         if execution.handler is None and callable(exe_d.get("handler")):
             execution.handler = exe_d["handler"]
@@ -324,7 +295,6 @@ class Capability:
             discovery=discovery,
             execution=execution,
             effects=effects,
-            permission=data.get("permission", ""),
         )
         cap.derive_card()
         cap.wants_ctx = _handler_wants_ctx(cap.execution.handler)
@@ -333,8 +303,10 @@ class Capability:
     def derive_card(self) -> None:
         if not self.card.summary:
             self.card.summary = _first_sentence(self.spec.description) or self.name
-        if not self.card.signature:
-            self.card.signature = synthesize_signature(self.name, self.spec.parameters, self.spec.returns)
+        # The signature is always derived, never authored: it is the one
+        # line telling the model how to call this capability, and a
+        # hand-written one drifts from the real name and parameters.
+        self.card.signature = synthesize_signature(self.name, self.spec.parameters, self.spec.returns)
 
     # -- projections ------------------------------------------------------
 
@@ -349,15 +321,15 @@ class Capability:
         lines = [f"### {self.qualified_name}", self.card.signature]
         if self.spec.description:
             lines.append(self.spec.description)
-        lines.append("Parameters (JSON Schema): " + _json.dumps(self.spec.parameters, ensure_ascii=False))
+        lines.append("Parameters (JSON Schema): " + dumps(self.spec.parameters))
         if self.spec.returns:
-            lines.append("Returns: " + _json.dumps(self.spec.returns, ensure_ascii=False))
+            lines.append("Returns: " + dumps(self.spec.returns))
         if self.effects:
             lines.append("Effects: " + ", ".join(f"{e.kind}:{e.resource}" for e in self.effects))
         if self.spec.usage_notes:
             lines.append("Usage notes: " + self.spec.usage_notes)
         for ex in self.spec.examples:
-            call = _json.dumps(ex.get("call", {}), ensure_ascii=False)
+            call = dumps(ex.get("call", {}))
             note = ex.get("note", "")
             lines.append(f"Example: {self.name}({call})" + (f" — {note}" if note else ""))
         return "\n".join(lines)
@@ -503,16 +475,12 @@ def build_capability_from_function(
     timeout_s: float = 30.0,
     retries: int = 0,
     retry_safety: str = "never_retry",
-    concurrency: str = "sequential_only",
-    concurrency_resource: Optional[str] = None,
     effects: Optional[list[tuple[str, str]]] = None,
-    permission: str = "",
     max_inline_tokens: Optional[int] = None,
     overflow: str = "artifact",
     preview: str = "head",
     usage_notes: str = "",
     examples: Optional[list[dict[str, Any]]] = None,
-    compensation: Optional[str] = None,
 ) -> Capability:
     description, param_docs = _parse_docstring(fn.__doc__ or "")
     try:
@@ -561,16 +529,13 @@ def build_capability_from_function(
             "timeout_s": timeout_s,
             "retries": retries,
             "retry_safety": retry_safety,
-            "concurrency": {"mode": concurrency, "resource_key": concurrency_resource},
             "output_policy": {
                 "max_inline_tokens": max_inline_tokens,
                 "overflow": overflow,
                 "preview": preview,
             },
-            "compensation": compensation,
         },
         "effects": [{"kind": k, "resource": r} for k, r in (effects or [])],
-        "permission": permission,
     }
     return Capability.from_dict(data, handler=fn)
 

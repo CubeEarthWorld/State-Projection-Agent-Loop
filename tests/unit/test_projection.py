@@ -31,6 +31,13 @@ def make_ledger_with_events(n_user=3, n_obs=0):
     for i in range(n_user):
         ledger.append(run_id, "user_input", {"text": f"message {i} " + "pad " * 20})
         ledger.append(run_id, "model_response", {"text": f"reply {i}", "calls": []})
+    if n_obs:
+        # Observations only ever follow the decision that asked for them; the
+        # projection drops a result whose call is not there (and vice versa).
+        ledger.append(run_id, "model_response", {
+            "text": "",
+            "calls": [{"name": "tool", "arguments": {}, "id": f"c{i}"} for i in range(n_obs)],
+        })
     for i in range(n_obs):
         ledger.append(run_id, "observation", {"call_id": f"c{i}", "name": "tool", "text": f"result {i} " + "data " * 30})
     return ledger, run_id
@@ -53,7 +60,6 @@ def default_projection(registry, kernel="You are helpful.", window=30000):
     sections = build_default_sections(
         ["kernel", "toc", "history", "working_state", "candidates"],
         kernel_text=kernel,
-        pinned=registry.pinned(),
     )
     return Projection(sections, window_tokens=window)
 
@@ -211,14 +217,21 @@ class TestTocEpochCaching:
         reg.register(capability_dict("web.b", category="web"))
         assert "web(2)" in section.render(turn)[0].content
 
-    def test_kernel_is_immutable_across_registry_changes(self):
+    def test_kernel_is_stable_while_the_registry_is_unchanged(self):
         reg = Registry()
         reg.register(capability_dict("demo.p", pinned=True))
-        section = KernelSection("kernel", reg.pinned())
+        section = KernelSection("kernel")
+        first = section.render(make_turn(registry=reg))[0].content
+        assert section.render(make_turn(registry=reg))[0].content == first
+
+    def test_kernel_picks_up_a_capability_pinned_later(self):
+        reg = Registry()
+        reg.register(capability_dict("demo.p", pinned=True))
+        section = KernelSection("kernel")
         before = section.render(make_turn(registry=reg))[0].content
+        assert "demo.late_pin" not in before
         reg.register(capability_dict("demo.late_pin", pinned=True))
-        after = section.render(make_turn(registry=reg))[0].content
-        assert before == after
+        assert "demo.late_pin" in section.render(make_turn(registry=reg))[0].content
 
 
 class TestWindowEnforcement:
@@ -284,12 +297,72 @@ class TestWindowEnforcement:
 class TestBuildDefaultSections:
     def test_unknown_section_name_rejected(self):
         with pytest.raises(ValueError, match="Unknown section"):
-            build_default_sections(["kernel", "mystery"], kernel_text="", pinned=[])
+            build_default_sections(["kernel", "mystery"], kernel_text="")
 
     def test_default_section_order(self):
         sections = build_default_sections(
             ["kernel", "toc", "history", "working_state", "candidates"],
-            kernel_text="k", pinned=[],
+            kernel_text="k",
         )
         names = [s.name for s in sections]
         assert names == ["kernel", "toc", "history", "working_state", "candidates"]
+
+
+class TestToolCallPairing:
+    """A native tool-calling provider rejects an assistant message whose
+    tool_calls have no matching results, and a result with no call. The
+    projection must never emit either, whatever produced the gap."""
+
+    @staticmethod
+    def _decision(ledger, run_id, *call_ids, text=""):
+        ledger.append(run_id, "model_response", {
+            "text": text,
+            "calls": [{"name": "demo.tool", "arguments": {}, "id": cid} for cid in call_ids],
+        })
+
+    @staticmethod
+    def _result(ledger, run_id, call_id, text="ok"):
+        ledger.append(run_id, "observation", {"call_id": call_id, "name": "demo.tool", "text": text})
+
+    def _render(self, ledger, run_id, **cfg):
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        for key, value in cfg.items():
+            setattr(turn.config.compression, key, value)
+        return HistorySection().render(turn)
+
+    def test_a_decision_still_awaiting_its_results_is_hidden(self):
+        ledger, run_id = InMemoryLedger(), "run_test"
+        ledger.append(run_id, "user_input", {"text": "hi"})
+        self._decision(ledger, run_id, "c0")  # parked on an approval: no result yet
+        msgs = self._render(ledger, run_id)
+        assert [m.role for m in msgs] == ["user"]
+
+    def test_a_partly_answered_decision_is_hidden_whole(self):
+        ledger, run_id = InMemoryLedger(), "run_test"
+        ledger.append(run_id, "user_input", {"text": "hi"})
+        self._decision(ledger, run_id, "c0", "c1")
+        self._result(ledger, run_id, "c0")
+        msgs = self._render(ledger, run_id)
+        assert [m.role for m in msgs] == ["user"]
+
+    def test_a_complete_decision_is_kept(self):
+        ledger, run_id = InMemoryLedger(), "run_test"
+        ledger.append(run_id, "user_input", {"text": "hi"})
+        self._decision(ledger, run_id, "c0", "c1")
+        self._result(ledger, run_id, "c0")
+        self._result(ledger, run_id, "c1")
+        msgs = self._render(ledger, run_id)
+        assert [m.role for m in msgs] == ["user", "assistant", "tool", "tool"]
+
+    def test_age_based_exclusion_never_orphans_a_result(self):
+        """The oldest events fall out of the window one at a time; the cut
+        must not land between a decision and its results."""
+        ledger, run_id = InMemoryLedger(), "run_test"
+        self._decision(ledger, run_id, "c0")
+        self._result(ledger, run_id, "c0")
+        for i in range(4):
+            ledger.append(run_id, "user_input", {"text": f"later {i}"})
+        # summary_window=4 puts the decision out of the window but not its result.
+        msgs = self._render(ledger, run_id, full_window=1, compressed_window=2, summary_window=4)
+        assert not any(m.role == "assistant" and m.tool_calls for m in msgs)
+        assert not any(m.role == "tool" for m in msgs)

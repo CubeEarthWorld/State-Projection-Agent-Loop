@@ -87,7 +87,6 @@ class PersistenceConfig:
     # Directory for the JSONL event ledger + snapshots. None keeps the
     # ledger in-memory only (no cross-process resume).
     ledger_directory: Optional[str] = None
-    snapshot_every_n_events: int = 20
 
 
 @dataclass

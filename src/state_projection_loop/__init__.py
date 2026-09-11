@@ -8,7 +8,7 @@ Authorize → Execute → Record → Continue/Wait/Complete.
 
 from .artifacts import ArtifactStore, ref as artifact_ref
 from .capability import Capability, ToolContext, capability
-from .compression import compress_text, compress_observation, summarize_text, content_hash
+from .compression import compress_text, summarize_text, content_hash
 from .config import Config
 from .checklists import ChecklistStore
 from .discovery import ScoredTool, ToolSearch
@@ -91,7 +91,6 @@ __all__ = [
     "ToolCall",
     "Usage",
     "compress_text",
-    "compress_observation",
     "summarize_text",
     "content_hash",
     "install_state",

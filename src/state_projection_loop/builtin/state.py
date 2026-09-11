@@ -12,6 +12,7 @@ import json
 from typing import Any, Optional
 
 from ..capability import ToolContext
+from .defs import load
 
 
 def _walk_extra(extra: dict, path: str, *, create: bool = False) -> tuple[Any, str]:
@@ -82,116 +83,8 @@ def _extra_get(ctx: ToolContext, path: str) -> Any:
         return f"(not set: {path})"
 
 
-STATE_CAPABILITY_DEFS: list[dict[str, Any]] = [
-    {
-        "name": "state.goal.set",
-        "category": "state",
-        "spec": {
-            "description": "現在の目標(ゴール)を設定する。working_stateとcandidate検索クエリに反映される。",
-            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        },
-        "discovery": {"embedding_text": "目標 ゴール クリア条件 目的 goal objective"},
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.fact.add",
-        "category": "state",
-        "spec": {
-            "description": "確認済みの事実・ユーザーの制約を working_state に追記する。",
-            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        },
-        "discovery": {"embedding_text": "事実 記録 確認 remember fact constraint"},
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.constraint.add",
-        "category": "state",
-        "spec": {
-            "description": "制約を working_state に追記する。",
-            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        },
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.decision.record",
-        "category": "state",
-        "spec": {
-            "description": "判断とその理由を working_state.decisions に記録する。理由は必ず埋めること。",
-            "parameters": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}, "reason": {"type": "string", "default": ""}},
-                "required": ["text"],
-            },
-        },
-        "discovery": {"embedding_text": "判断 決定 理由 decision reason record"},
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.question.add",
-        "category": "state",
-        "spec": {
-            "description": "未解決の疑問を working_state.open_questions に追加する。",
-            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        },
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.question.resolve",
-        "category": "state",
-        "spec": {
-            "description": "working_state.open_questions から該当項目を削除する(完全一致)。",
-            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-        },
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.next_actions.set",
-        "category": "state",
-        "spec": {
-            "description": "working_state.next_actions を丸ごと置き換える。",
-            "parameters": {
-                "type": "object",
-                "properties": {"actions": {"type": "array", "items": {"type": "string"}}},
-                "required": ["actions"],
-            },
-        },
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.extra.set",
-        "category": "state",
-        "spec": {
-            "description": "working_state.extra にパス指定で任意のアプリ固有状態(フラグ・変数)を書き込む。",
-            "parameters": {
-                "type": "object",
-                "properties": {"path": {"type": "string"}, "value": {"description": "任意のJSON値"}},
-                "required": ["path", "value"],
-            },
-        },
-        "discovery": {"embedding_text": "状態 変数 フラグ 保存 記録 セット flag variable"},
-        "execution": {"timeout_s": 5, "retry_safety": "idempotent"},
-        "effects": [{"kind": "none"}],
-    },
-    {
-        "name": "state.extra.get",
-        "category": "state",
-        "spec": {
-            "description": "working_state.extra からパス指定で値を読む。",
-            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-        },
-        "execution": {"timeout_s": 5, "retry_safety": "pure"},
-        "effects": [{"kind": "none"}],
-    },
-]
 
-_HANDLERS = {
+STATE_HANDLERS = {
     "state.goal.set": _set_goal,
     "state.fact.add": _add_fact,
     "state.constraint.add": _add_constraint,
@@ -204,10 +97,15 @@ _HANDLERS = {
 }
 
 
-def install_state(session) -> None:
-    """Register the bundled working-state capabilities. The working state
-    is projected automatically by ``WorkingStateSection`` whenever it is
-    part of ``config.projection.sections`` (the default)."""
-    for definition in STATE_CAPABILITY_DEFS:
-        if definition["name"] not in session.registry:
-            session.registry.register(definition, handler=_HANDLERS[definition["name"]])
+def install_state(registry) -> None:
+    """Register the bundled working-state capabilities.
+
+    Takes a Registry, not a Session: nothing here needs the session, and the
+    Dart port takes a Registry for the same reason.
+
+    The working state is projected automatically by ``WorkingStateSection``
+    whenever it is part of ``config.projection.sections`` (the default).
+    """
+    for definition in load("state"):
+        if definition["name"] not in registry:
+            registry.register(definition, handler=STATE_HANDLERS[definition["name"]])

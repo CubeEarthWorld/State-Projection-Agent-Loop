@@ -1,0 +1,62 @@
+{
+  "synthesize_signature": [
+    {
+      "name": "demo.tool.run",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "k": {
+            "type": "integer",
+            "default": 8
+          },
+          "mode": {
+            "enum": [
+              "a",
+              "b"
+            ]
+          },
+          "cat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flag": {
+            "type": "boolean",
+            "default": true
+          },
+          "anything": {}
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "expected": "demo.tool.run(query: string, k: integer = 8, mode: Literal[\"a\", \"b\"] = null, cat: string | null = null, flag: boolean = true, anything: any = null) -> any"
+    },
+    {
+      "name": "meta.tool.find",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "expected": "meta.tool.find() -> any"
+    }
+  ],
+  "api_name": [
+    {
+      "name": "meta.tool.find",
+      "expected": "meta__tool__find"
+    },
+    {
+      "name": "planning.checklist.manage",
+      "expected": "planning__checklist__manage"
+    },
+    {
+      "name": "a.b.c.d.e",
+      "expected": "a__b__c__d__e"
+    }
+  ]
+}

@@ -1,12 +1,12 @@
 """Capability contracts: naming, retry-safety/retries coupling, effects,
-concurrency policy, decorator-based construction."""
+decorator-based construction."""
 from __future__ import annotations
 
 import pytest
 
+from state_projection_loop.runtime import Runtime
 from state_projection_loop.capability import (
     Capability,
-    ConcurrencyPolicy,
     Effect,
     build_capability_from_function,
     capability,
@@ -45,29 +45,20 @@ class TestRetrySafetyGate:
         CapabilityExecution(retries=2, retry_safety="idempotent")
 
 
-class TestConcurrencyPolicy:
-    def test_exclusive_resource_requires_key(self):
-        with pytest.raises(ValueError, match="resource_key"):
-            ConcurrencyPolicy(mode="exclusive_resource")
-        ConcurrencyPolicy(mode="exclusive_resource", resource_key="db:accounts")
+class TestReadOnlyClassification:
+    """The runtime treats undeclared effects as the most restrictive kind,
+    so a capability that forgot to declare them never gets free parallel
+    execution."""
 
-    def test_invalid_mode(self):
-        with pytest.raises(ValueError):
-            ConcurrencyPolicy(mode="whenever")
+    def test_no_effects_declared_is_not_read_only(self):
+        assert Runtime.is_read_only(Capability(name="demo.thing")) is False
 
+    def test_none_effect_is_read_only(self):
+        assert Runtime.is_read_only(Capability(name="demo.thing", effects=[Effect(kind="none")])) is True
 
-class TestIsPure:
-    def test_no_effects_declared_is_not_pure(self):
-        cap = Capability(name="demo.thing")
-        assert cap.is_pure is False
-
-    def test_none_effect_is_pure(self):
-        cap = Capability(name="demo.thing", effects=[Effect(kind="none")])
-        assert cap.is_pure is True
-
-    def test_write_effect_is_not_pure(self):
+    def test_write_effect_is_not_read_only(self):
         cap = Capability(name="demo.thing", effects=[Effect(kind="write", resource="workspace:*")])
-        assert cap.is_pure is False
+        assert Runtime.is_read_only(cap) is False
 
 
 class TestDecorator:

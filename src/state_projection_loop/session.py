@@ -43,7 +43,7 @@ from .registry import Registry
 from .run import ApprovalRequest, Run, RunStateError
 from .runtime import BudgetState, Runtime
 from .tokens import estimate_tokens
-from .working_state import WorkingState
+from .working_state import WORKING_STATE_FIELDS, WorkingState
 
 _ACTIVE_TOOL_CAP = 48
 
@@ -105,28 +105,30 @@ class Session:
         self.search = ToolSearch(self.registry, embedder=embedder, vector=self.config.discovery.vector)
 
         self._kernel_text = kernel
-        pinned = self.registry.pinned()
         if sections is None:
             sections = build_default_sections(
-                self.config.projection.sections, kernel_text=kernel, pinned=pinned, extra=extra_sections,
+                self.config.projection.sections, kernel_text=kernel, extra=extra_sections,
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
-        self.runtime = Runtime(self.registry, self.store, self.config)
-        self.runtime.seen_specs.update(c.name for c in pinned)
+        self.runtime = Runtime(self.registry, self.config)
 
-        self.working_state = WorkingState()
-        for key, value in (seed or {}).items():
-            if key == "checklists":
-                self.working_state.checklists = ChecklistStore.from_dict(value)
-                continue
-            if hasattr(self.working_state, key):
-                setattr(self.working_state, key, value)
-            else:
-                self.working_state.extra[key] = value
+        # Typed fields go through the same parser snapshots use, so a seeded
+        # `decisions` becomes RecordedDecision objects rather than raw dicts
+        # that blow up on the next to_dict(). Anything else is app-specific
+        # state and lands in `extra`, the documented escape hatch.
+        seed = dict(seed or {})
+        known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
+        self.working_state = WorkingState.from_dict(known)
+        self.working_state.extra.update(
+            {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
+        )
 
         self.budget = BudgetState()
 
-        self._active: "OrderedDict[str, None]" = OrderedDict((c.name, None) for c in pinned)
+        # Recently used non-pinned tools (an LRU). Pinned capabilities are
+        # added by _api_tools straight from the registry, so they are never
+        # tracked here and can never be evicted.
+        self._active: "OrderedDict[str, None]" = OrderedDict()
         self._interrupted = False
         self._idle_turns = 0
         self._budget_grace_used = False
@@ -197,7 +199,7 @@ class Session:
             if self.run.state != "RUNNING":
                 raise RunStateError(f"Run {self.run.id} is not resumable from state {self.run.state}")
             turn = self._new_turn()
-            batch = await self.runtime.resume_pending(self.run, self._tool_context(), self.policy, turn)
+            batch = await self.runtime.resume_pending(self.run, self._tool_context(), self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:
@@ -216,7 +218,7 @@ class Session:
         async with self._guarded():
             turn = self._new_turn()
             call = ToolCall(name=capability_name, arguments=arguments)
-            batch = await self.runtime.execute([call], turn, self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute([call], self._tool_context(), self.run, self.policy)
             self._apply_batch(batch, record=False)
             self._snapshot()
             if batch.halted:
@@ -259,7 +261,7 @@ class Session:
         cancelled, working_state is restored from the checkpoint at the rewind
         point, and the budget is reset.
         """
-        irreversible = self._irreversible_effects_up_to(to_turn)
+        irreversible = self._irreversible_effects(up_to_turn=to_turn)
         all_events = list(self.ledger.iter_run(self.run.id))
         renderable = [e for e in all_events if e.type in RENDERABLE_TYPES]
         checkpoints = [e for e in all_events if e.type == "checkpoint"]
@@ -301,19 +303,23 @@ class Session:
         self.budget = BudgetState()
         self._idle_turns = 0
         self._budget_grace_used = False
-        self._active = OrderedDict((c.name, None) for c in self.registry.pinned())
-        self.runtime.seen_specs = {c.name for c in self.registry.pinned()}
+        self._active = OrderedDict()
+        self.runtime.seen_specs = set()
         self.runtime._consecutive_validation_failures = {}
         self._snapshot()
 
         return irreversible
 
-    def _irreversible_effects_up_to(self, to_turn: int) -> list[str]:
+    def _irreversible_effects(self, *, up_to_turn: Optional[int] = None) -> list[str]:
+        """External effects this run already committed — a sent email, a
+        pushed commit. Neither branching nor rewinding can undo them, so both
+        report them; ``up_to_turn`` stops the scan at the cut point.
+        """
         notices: list[str] = []
         user_count = 0
         for event in self.ledger.iter_run(self.run.id):
-            if event.type == "user_input":
-                if user_count >= to_turn:
+            if event.type == "user_input" and up_to_turn is not None:
+                if user_count >= up_to_turn:
                     break
                 user_count += 1
             if event.type != "command_completed":
@@ -321,22 +327,7 @@ class Session:
             command = self.run.commands.get(event.data.get("command_id", ""))
             if command is None:
                 continue
-            capability_name = command.capability_name.rsplit("@", 1)[0]
-            capability = self.registry.get(capability_name)
-            if capability and any(e.kind == "external" for e in capability.effects):
-                notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
-        return notices
-
-    def _irreversible_effects(self) -> list[str]:
-        notices: list[str] = []
-        for event in self.ledger.iter_run(self.run.id):
-            if event.type != "command_completed":
-                continue
-            command = self.run.commands.get(event.data.get("command_id", ""))
-            if command is None:
-                continue
-            capability_name = command.capability_name.rsplit("@", 1)[0]
-            capability = self.registry.get(capability_name)
+            capability = self.registry.get(command.capability_name.rsplit("@", 1)[0])
             if capability and any(e.kind == "external" for e in capability.effects):
                 notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
         return notices
@@ -427,7 +418,7 @@ class Session:
                 "candidates": [s.tool.name for s in turn.candidates],
             })
 
-            decision = extract_finish(self.llm.complete(messages, api_tools or None))
+            decision = extract_finish(await self.llm.complete(messages, api_tools or None))
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
             self.budget.steps += 1
@@ -464,7 +455,7 @@ class Session:
 
             self._idle_turns = 0
             self.ledger.append(self.run.id, "decision_validated", {"ok": True, "finish": False})
-            batch = await self.runtime.execute(decision.calls, turn, self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute(decision.calls, self._tool_context(), self.run, self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:
@@ -472,7 +463,12 @@ class Session:
 
     def _apply_batch(self, batch, *, record: bool = True) -> None:
         for result in batch.results:
-            if record:
+            # A call parked on an approval has no result yet. Recording a
+            # placeholder observation would either be overwritten by the real
+            # one on resume (two results for one call) or stand in for a call
+            # that never ran; instead the whole decision stays out of the
+            # projection until it completes — see pair_tool_calls.
+            if record and result.outcome != "waiting_approval":
                 self._observe(result.call.id, result.call.name, result.observation)
             if result.ok:
                 self._activate(result.call.name)
@@ -549,14 +545,8 @@ class Session:
     def _activate(self, name: str) -> None:
         self._active[name] = None
         self._active.move_to_end(name)
-        pinned = {c.name for c in self.registry.pinned()}
         while len(self._active) > _ACTIVE_TOOL_CAP:
-            for candidate in self._active:
-                if candidate not in pinned:
-                    del self._active[candidate]
-                    break
-            else:
-                break
+            self._active.popitem(last=False)
 
     def _activate_tools(self, names: list[str]) -> None:
         for name in names:

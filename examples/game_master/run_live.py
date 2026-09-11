@@ -33,7 +33,7 @@ def main() -> None:
     # Interactive multi-turn narration: chat mode, so the run stays RUNNING
     # across many send() calls instead of terminating on the first finish().
     session = Session(llm, kernel=GM_KERNEL, registry=build_game_registry(log), seed=initial_seed())
-    install_state(session)
+    install_state(session.registry)
     # A single-player narrative game: media cues and dice rolls are the
     # only effects, and they're the whole point of the game master — grant
     # them instead of pausing the story to ask for approval.

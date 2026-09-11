@@ -20,7 +20,7 @@ def make_session(log, steps, seed=None):
         ScriptedLLM(steps), kernel=GM_KERNEL, registry=build_game_registry(log, dice_seed=42),
         seed=seed or initial_seed(), policy=allow_game_and_state(),
     )
-    install_state(session)
+    install_state(session.registry)
     return session
 
 
@@ -127,5 +127,5 @@ class TestStateManagement:
         log = MediaLog()
         session = make_session(log, [check])
         session.send("ゲームを始めよう")
-        assert '"hp": 20' in captured["joined"]        # party seeded
+        assert '"hp":20' in captured["joined"]        # party seeded
         assert "dungeon_entrance" in captured["joined"]  # scene seeded

@@ -56,7 +56,6 @@ _PREFIXES = {
     "command": "cmd",
     "approval": "apr",
     "artifact": "art",
-    "branch": "brn",
 }
 
 
@@ -68,10 +67,4 @@ def new_id(kind: str) -> str:
     return f"{prefix}_{new_ulid()}"
 
 
-def kind_of(entity_id: str) -> str:
-    """Reverse-lookup the entity kind from a prefixed id (for assertions/logging)."""
-    prefix, _, _ = entity_id.partition("_")
-    for kind, p in _PREFIXES.items():
-        if p == prefix:
-            return kind
-    return "unknown"
+

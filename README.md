@@ -31,7 +31,7 @@ exactly where it left off.
 ## The package is LLM-agnostic
 
 `state_projection_loop` depends on **no LLM provider SDK**. It defines only
-a two-method `LLMAdapter` Protocol (`complete(messages, tools) -> Decision`)
+a one-method `LLMAdapter` Protocol (`async complete(messages, tools) -> Decision`)
 and a scripted test double (`ScriptedLLM`) for deterministic tests. Talking
 to a real model — OpenAI, Anthropic, DeepSeek, a local server, anything — is
 entirely your own adapter, implementing that Protocol however you like.
@@ -210,7 +210,7 @@ stays sent/pushed regardless of which branch you're on now.
 from state_projection_loop import Session, install_state
 
 session = Session(llm, kernel=GM_KERNEL, seed={"goal": "escape the dungeon", "extra": {"flags": {}}})
-install_state(session)   # state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
+install_state(session.registry)   # state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
 ```
 
 `WorkingState` is a finite record — goal, acceptance criteria, constraints,
@@ -221,6 +221,31 @@ it instead of re-summarizing prose, so a decision's reason recorded three
 folds ago is still there verbatim. The original messages are never lost —
 they stay in the Event Ledger, searchable via `meta.history.search` even
 after being folded out of the live projection.
+
+## Disabling tools
+
+Any capability can be hidden from the model — bundled ones included:
+
+```python
+registry = Registry(disabled=["planning.checklist.manage", "debug/*"])
+session = Session(llm, registry=registry)
+
+session.registry.disable("my.dangerous.tool")   # mid-session, e.g. per sub-agent
+session.registry.enable("my.dangerous.tool")
+```
+
+Entries match a capability name, a category, or a category prefix
+(`"cat/*"`) — the same rule `subset()` uses, so `subset()` is the allow-list
+and `disable()` the deny-list.
+
+A disabled capability is gone from **every** surface the model can see: the
+native tool schemas, the pinned specs and runtime notes in the kernel, the
+tool index, layer-2 candidates, `meta.tool.find`, and execution (it fails as
+`unknown_capability`). Both `Registry.__iter__` and `Registry.get()` skip
+disabled entries and everything else derives from those two, so there is no
+surface left to leak through. The deny-list is by *name*, not by registered
+object, so a bundled tool that installs itself (`ensure_meta_tools`) cannot
+re-appear by registering again.
 
 ## Sub-agents (opt-in)
 

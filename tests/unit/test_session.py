@@ -314,7 +314,7 @@ class TestRewind:
             "after rewind",
         ])
         session = Session(llm, policy=allow_all_policy())
-        install_state(session)
+        install_state(session.registry)
         session.send("set goal")
         session.send("change goal")
         assert session.working_state.goal == "escape the room"
@@ -331,3 +331,215 @@ class TestRewind:
         reply = session.send("msg after rewind")
         assert reply == "new reply after rewind"
         assert len(session.conversation) == 4
+
+
+class TestDisabledCapabilitiesAreInvisible:
+    """The point of disabling: the model can neither see nor call the tool.
+
+    Asserted against what actually reaches the adapter — the rendered
+    messages and the native tool schemas — because that is the only view
+    the model has, and every surface (schemas, pinned specs, runtime notes,
+    tool index, candidates) lands in exactly one of those two.
+    """
+
+    def _session(self, *disabled: str, steps=None) -> Session:
+        registry = Registry(disabled=disabled)
+        registry.register(capability_dict("demo.echo", description="Echo the text back.",
+                                          properties={"text": {"type": "string"}},
+                                          required=["text"],
+                                          embedding_text="echo repeat say"), handler=echo_handler)
+        return Session(ScriptedLLM(steps if steps is not None else ["hi"]), kernel="K",
+                       registry=registry, policy=allow_all_policy())
+
+    @staticmethod
+    def _sent(session: Session) -> tuple[str, list[str]]:
+        request = session.llm.requests[-1]
+        prompt = "\n".join(m.content for m in request["messages"] if isinstance(m.content, str))
+        return prompt, [t["function"]["name"] for t in request["tools"]]
+
+    def test_bundled_checklist_tool_can_be_disabled(self):
+        session = self._session("planning.checklist.manage")
+        session.send("hello")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" not in tools
+        assert "planning.checklist.manage" not in prompt  # no pinned spec, no runtime note
+        assert "planning" not in prompt                    # and no tool-index entry
+
+    def test_disabled_tool_is_not_discoverable(self):
+        session = self._session("demo.echo")
+        assert session.search.search("echo repeat", k=5, layer=3) == []
+        assert session.registry.get("demo.echo") is None
+
+    def test_disabled_tool_cannot_be_executed(self):
+        session = self._session("demo.echo", steps=[ScriptedLLM.call("demo.echo", text="x"), "done"])
+        session.send("use echo")
+        observations = [e.data for e in session.ledger.iter_run(session.run.id) if e.type == "observation"]
+        assert any("not registered" in str(o) for o in observations)
+
+    def test_disabling_mid_session_takes_effect_on_the_next_turn(self):
+        session = self._session(steps=["one", "two"])
+        session.send("hello")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" in tools and "planning.checklist.manage" in prompt
+
+        session.registry.disable("planning.checklist.manage")
+        session.send("hello again")
+        prompt, tools = self._sent(session)
+        assert "planning__checklist__manage" not in tools
+        assert "planning.checklist.manage" not in prompt
+
+
+class TestResumedRunArtifacts:
+    """A resumed run installs a fresh ArtifactStore for its new run id.
+
+    The runtime must write into that one, not into a copy captured when it
+    was constructed, or every artifact produced after the resume becomes
+    unreachable to meta.artifact.peek.
+    """
+
+    def test_artifacts_produced_after_resume_are_readable(self, tmp_path):
+        import re
+
+        from state_projection_loop import Config
+        from state_projection_loop.artifacts import is_ref
+
+        registry = Registry()
+        registry.register(capability_dict("demo.big", properties={}, max_inline_tokens=1),
+                          handler=lambda: "x" * 4000)
+        config = Config.from_dict({
+            "mode": "job",
+            "persistence": {"ledger_directory": str(tmp_path)},
+            "artifacts": {"directory": str(tmp_path / "artifacts")},
+        })
+        first = Session(ScriptedLLM([ScriptedLLM.finish(result="ok")]), registry=registry,
+                        config=config, policy=allow_all_policy())
+        first.run_job("nothing")
+
+        resumed = Session.resume_from_ledger(
+            ScriptedLLM([ScriptedLLM.call("demo.big"), ScriptedLLM.finish(result="done")]),
+            first.run.id, config=config, registry=registry, policy=allow_all_policy(),
+        )
+        assert resumed.store is not None
+        resumed.run.state = "RUNNING"
+        resumed.run_job("make a big result")
+
+        observations = "\n".join(e.data["text"] for e in resumed.ledger.iter_run(resumed.run.id)
+                                 if e.type == "observation")
+        ids = re.findall(r"art_[0-9A-Z]+", observations)
+        assert ids, f"expected the oversized result to become an artifact, got {observations!r}"
+        assert is_ref({"$artifact": ids[0]})
+        # The store the session hands to meta.artifact.peek must be the one
+        # the runtime just wrote to.
+        assert "xxx" in resumed.store.peek(ids[0])
+
+
+class TestStateToolsDeclareTheirWrites:
+    """state.* mutates the working state, so it must not be declared as
+    effect-free: the runtime uses that declaration to decide what may run
+    concurrently, and a mislabelled write loses the model's stated order."""
+
+    def test_mutating_state_tools_are_not_read_only(self):
+        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop.runtime import Runtime
+
+        session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all_policy())
+        install_state(session.registry)
+        mutating = [c for c in session.registry if c.name.startswith("state.") and not c.name.endswith(".get")]
+        assert mutating, "expected the bundled state tools to be installed"
+        for capability in mutating:
+            assert not Runtime.is_read_only(capability), f"{capability.name} claims to be read-only"
+
+    def test_state_writes_are_auto_allowed_by_the_default_policy(self):
+        from state_projection_loop.builtin.state import install_state
+
+        session = Session(ScriptedLLM([]), registry=Registry())  # default (auto_safe) policy
+        install_state(session.registry)
+        capability = session.registry.get("state.goal.set")
+        assert session.policy.evaluate(capability, {"text": "x"}).decision == "allow"
+
+
+class TestApprovalKeepsTheDecisionIntact:
+    """A decision parked on an approval is either shown with all of its
+    results or not shown at all. Anything in between is a 400 from a native
+    tool-calling provider."""
+
+    def _session(self, steps):
+        registry = Registry()
+        registry.register(capability_dict("demo.write", effects=[("external", "*")]),
+                          handler=lambda: "written")
+        registry.register(capability_dict("demo.second", effects=[("external", "*")]),
+                          handler=lambda: "second")
+        return Session(ScriptedLLM(steps), registry=registry,
+                       policy=PolicyEngine(default_decision="require_approval"))
+
+    @staticmethod
+    def _observations(session):
+        return [(e.data["call_id"], e.data["text"]) for e in session.ledger.iter_run(session.run.id)
+                if e.type == "observation"]
+
+    def test_a_parked_decision_is_not_projected_at_all(self):
+        session = self._session([ScriptedLLM.call("demo.write")])
+        session.send("do it")
+        assert session.run.state == "WAITING_FOR_APPROVAL"
+        assert self._observations(session) == []
+        assert not any(m.role == "assistant" and m.tool_calls
+                       for m in session.projection.get("history").render(session._new_turn()))
+
+    def test_approval_produces_exactly_one_result_per_call(self):
+        session = self._session([ScriptedLLM.call("demo.write"), "done"])
+        session.send("do it")
+        session.resolve_approval("approved")
+        session.resume()
+        call_ids = [cid for cid, _ in self._observations(session)]
+        assert len(call_ids) == len(set(call_ids)) == 1
+        assert "written" in self._observations(session)[0][1]
+
+    def test_denial_answers_every_parked_call(self):
+        session = self._session([
+            ScriptedLLM.calls(("demo.write", {}), ("demo.second", {})), "done",
+        ])
+        session.send("do both")
+        session.resolve_approval("denied")
+        session.resume()
+        observations = self._observations(session)
+        assert len(observations) == 2, f"both parked calls need a result, got {observations}"
+        assert all("denied" in text.lower() or "not executed" in text.lower()
+                   for _, text in observations)
+        history = session.projection.get("history").render(session._new_turn())
+        assert any(m.role == "assistant" and m.tool_calls for m in history)
+
+
+class TestTheLoopDoesNotBlock:
+    """The provider round-trip is the longest wait in a turn. A synchronous
+    adapter call would hold the event loop for its whole duration, freezing
+    every other task in the host application."""
+
+    def test_other_tasks_run_while_the_model_is_thinking(self):
+        import asyncio
+
+        class SlowLLM:
+            async def complete(self, messages, tools=None):
+                from state_projection_loop.llm import Decision
+
+                await asyncio.sleep(0.05)
+                return Decision(text="done")
+
+        ticks = 0
+
+        async def scenario():
+            nonlocal ticks
+
+            async def ticker():
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.005)
+                    ticks += 1
+
+            task = asyncio.create_task(ticker())
+            try:
+                await Session(SlowLLM()).asend("hello")
+            finally:
+                task.cancel()
+
+        asyncio.run(scenario())
+        assert ticks > 2, f"the loop was blocked while the adapter ran (ticks={ticks})"

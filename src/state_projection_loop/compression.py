@@ -100,16 +100,4 @@ def summarize_text(text: str) -> str:
     return first + suffix
 
 
-def compress_observation(text: str, *, max_lines: int = 40) -> str:
-    """Aggressive compression for tool observations at 'compressed' fidelity.
 
-    Tool outputs tend to be noisier than user/assistant text (build logs,
-    diffs, stack traces), so we use a tighter line budget and the same
-    noise-stripping pipeline.
-    """
-    return compress_text(text, max_lines=max_lines)
-
-
-def dedupe_key(content: str) -> str:
-    """Content-addressed key for detecting repeated observations."""
-    return content_hash(content)

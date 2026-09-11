@@ -1,0 +1,298 @@
+{
+  "content_hash": [
+    {
+      "text": "",
+      "expected": "e3b0c44298fc1c14"
+    },
+    {
+      "text": "hello",
+      "expected": "2cf24dba5fb0a30e"
+    },
+    {
+      "text": "L0\nL1\n",
+      "expected": "58e80875085e9eb8"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "expected": "3fa5cd0120a89185"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "9835fa6bf4e20a9b"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "expected": "715770567c13fca3"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "expected": "0b9a914bcf11bf98"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "expected": "24859bed22ffcb43"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "expected": "c5ffd874b2439846"
+    }
+  ],
+  "strip_noise": [
+    {
+      "text": "",
+      "expected": ""
+    },
+    {
+      "text": "hello",
+      "expected": "hello"
+    },
+    {
+      "text": "L0\nL1\n",
+      "expected": "L0\nL1\n"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "expected": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "expected": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "expected": "real line\n"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "expected": "red plain"
+    }
+  ],
+  "summarize_text": [
+    {
+      "text": "",
+      "expected": ""
+    },
+    {
+      "text": "hello",
+      "expected": "hello"
+    },
+    {
+      "text": "L0\nL1\n",
+      "expected": "L0  [3 lines, 6 chars]"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…  [1 lines, 300 chars]"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "expected": "line 0  [30 lines, 229 chars]"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "expected": "ERROR: boom  [4 lines, 41 chars]"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "expected": "diff --git a/x b/x  [6 lines, 75 chars]"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "expected": "\u001b[31mred\u001b[0m plain"
+    }
+  ],
+  "head_tail_truncate": [
+    {
+      "text": "",
+      "max_lines": 4,
+      "expected": ""
+    },
+    {
+      "text": "",
+      "max_lines": 7,
+      "expected": ""
+    },
+    {
+      "text": "",
+      "max_lines": 10,
+      "expected": ""
+    },
+    {
+      "text": "",
+      "max_lines": 40,
+      "expected": ""
+    },
+    {
+      "text": "hello",
+      "max_lines": 4,
+      "expected": "hello"
+    },
+    {
+      "text": "hello",
+      "max_lines": 7,
+      "expected": "hello"
+    },
+    {
+      "text": "hello",
+      "max_lines": 10,
+      "expected": "hello"
+    },
+    {
+      "text": "hello",
+      "max_lines": 40,
+      "expected": "hello"
+    },
+    {
+      "text": "L0\nL1\n",
+      "max_lines": 4,
+      "expected": "L0\nL1\n"
+    },
+    {
+      "text": "L0\nL1\n",
+      "max_lines": 7,
+      "expected": "L0\nL1\n"
+    },
+    {
+      "text": "L0\nL1\n",
+      "max_lines": 10,
+      "expected": "L0\nL1\n"
+    },
+    {
+      "text": "L0\nL1\n",
+      "max_lines": 40,
+      "expected": "L0\nL1\n"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "max_lines": 4,
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "max_lines": 7,
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "max_lines": 10,
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "日本語🎌テスト",
+      "max_lines": 40,
+      "expected": "日本語🎌テスト"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_lines": 4,
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_lines": 7,
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_lines": 10,
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_lines": 40,
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "max_lines": 4,
+      "expected": "line 0\nline 1\n  [... 27 lines omitted ...]\nline 29"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "max_lines": 7,
+      "expected": "line 0\nline 1\nline 2\nline 3\n  [... 25 lines omitted ...]\nline 29"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "max_lines": 10,
+      "expected": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n  [... 22 lines omitted ...]\nline 28\nline 29"
+    },
+    {
+      "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
+      "max_lines": 40,
+      "expected": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "max_lines": 4,
+      "expected": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "max_lines": 7,
+      "expected": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "max_lines": 10,
+      "expected": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n"
+    },
+    {
+      "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
+      "max_lines": 40,
+      "expected": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "max_lines": 4,
+      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n  [... 2 lines omitted ...]\nreal line\n"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "max_lines": 7,
+      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "max_lines": 10,
+      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n"
+    },
+    {
+      "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
+      "max_lines": 40,
+      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "max_lines": 4,
+      "expected": "\u001b[31mred\u001b[0m plain"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "max_lines": 7,
+      "expected": "\u001b[31mred\u001b[0m plain"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "max_lines": 10,
+      "expected": "\u001b[31mred\u001b[0m plain"
+    },
+    {
+      "text": "\u001b[31mred\u001b[0m plain",
+      "max_lines": 40,
+      "expected": "\u001b[31mred\u001b[0m plain"
+    }
+  ]
+}

@@ -14,6 +14,8 @@ import json
 import math
 from typing import Any, Callable
 
+from .serialization import dumps
+
 _CJK_RANGES: tuple[tuple[int, int], ...] = (
     (0x1100, 0x11FF),  # Hangul Jamo
     (0x2E80, 0x2FDF),  # CJK radicals
@@ -63,9 +65,9 @@ def estimate_tokens(obj: Any) -> int:
         for tc in getattr(obj, "tool_calls", None) or []:
             args = getattr(tc, "arguments", {})
             total += 6 + _estimator(getattr(tc, "name", "")) + _estimator(
-                json.dumps(args, ensure_ascii=False, default=str)
+                dumps(args)
             )
         return total
     if isinstance(obj, dict):
-        return _estimator(json.dumps(obj, ensure_ascii=False, default=str))
+        return _estimator(dumps(obj))
     return _estimator(str(obj))

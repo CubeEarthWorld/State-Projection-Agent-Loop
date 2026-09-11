@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from .ids import new_ulid
+from .serialization import dumps
 
 STATUSES = ("pending", "in_progress", "blocked", "completed", "cancelled")
 CONTEXT_MODES = ("name", "summary", "full")
@@ -204,9 +205,9 @@ class ChecklistStore:
         lines: list[str] = []
         visible = [v for v in self._lists.values() if v["include_in_context"]]
         for value in visible:
-            line = json.dumps(_view(value, value["context_mode"]), ensure_ascii=False)
+            line = dumps(_view(value, value["context_mode"]))
             if sum(len(x) + 1 for x in lines) + len(line) > max_chars - 100:
-                line = json.dumps(_view(value, "summary"), ensure_ascii=False)
+                line = dumps(_view(value, "summary"))
             if sum(len(x) + 1 for x in lines) + len(line) > max_chars - 100:
                 break
             lines.append(line)

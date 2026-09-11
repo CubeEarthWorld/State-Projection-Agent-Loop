@@ -23,7 +23,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "jsonschema>=4.17",
 ]
 
 [project.optional-dependencies]

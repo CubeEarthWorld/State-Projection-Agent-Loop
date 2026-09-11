@@ -1,0 +1,155 @@
+[
+  {
+    "name": "meta.tool.find",
+    "category": "meta",
+    "card": {
+      "summary": "ツール台帳を自然文で検索し、該当ツールのカード一覧を返す",
+      "tags": [
+        "meta",
+        "検索"
+      ]
+    },
+    "spec": {
+      "description": "Search the capability registry with a natural-language query and return matching cards.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "やりたいことを自然文で"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "目次のカテゴリで絞り込み"
+          },
+          "k": {
+            "type": "integer",
+            "default": 8,
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "usage_notes": "自動候補に必要なツールが見当たらない時に使う。目次のカテゴリ名で絞れる。"
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "pure"
+    },
+    "effects": [
+      {
+        "kind": "none"
+      }
+    ]
+  },
+  {
+    "name": "meta.artifact.peek",
+    "category": "meta",
+    "card": {
+      "summary": "アーティファクト参照の中身を部分閲覧する",
+      "tags": [
+        "meta",
+        "参照"
+      ]
+    },
+    "spec": {
+      "description": "Partially inspect the value stored behind an artifact reference ({\"$artifact\": \"...\"}).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "object",
+            "description": "構造化参照 {\"$artifact\": \"art_...\"}"
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "中身から探したい内容"
+          },
+          "range": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "行範囲(例 '10-40')やキーパス(例 'items[0].name')"
+          }
+        },
+        "required": [
+          "artifact"
+        ]
+      },
+      "usage_notes": "プレビューで足りない時のみ使う。全量展開は避け、queryかrangeで絞る。"
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "pure",
+      "resolve_handles": false
+    },
+    "effects": [
+      {
+        "kind": "none"
+      }
+    ]
+  },
+  {
+    "name": "meta.history.search",
+    "category": "meta",
+    "card": {
+      "summary": "折り畳まれた過去の会話をイベント台帳から検索する",
+      "tags": [
+        "meta",
+        "検索",
+        "履歴"
+      ]
+    },
+    "spec": {
+      "description": "Search the append-only event ledger for this run, including messages folded out of the live conversation by compaction. Use when working_state doesn't have enough detail.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "k": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "pure"
+    },
+    "effects": [
+      {
+        "kind": "none"
+      }
+    ]
+  }
+]

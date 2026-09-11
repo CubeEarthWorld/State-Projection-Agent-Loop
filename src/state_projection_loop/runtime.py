@@ -21,9 +21,9 @@ by naive "batch of tool calls" runtimes:
   awaiting task gave up on it, and collapsing that distinction is exactly
   what lets non-idempotent operations double-fire.
 
-JSON Schema validation uses ``jsonschema`` when installed and falls back to
-a built-in mini validator otherwise (keeps the core pure-Python for
-embedded environments).
+JSON Schema validation uses one small built-in validator (``_mini_validate``)
+— see :func:`validate_args` for why that is deliberate rather than a
+fallback.
 """
 from __future__ import annotations
 
@@ -41,13 +41,8 @@ from .policy import PolicyEngine
 from .projection import TurnContext
 from .registry import Registry
 from .run import Command, Run
+from .serialization import dumps
 from .tokens import estimate_tokens
-
-try:
-    import jsonschema as _jsonschema
-except ImportError:  # pragma: no cover - exercised via _mini_validate tests
-    _jsonschema = None
-
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -57,6 +52,30 @@ _TYPE_MAP = {
     "string": str, "integer": int, "number": (int, float), "boolean": bool,
     "array": list, "object": dict, "null": type(None),
 }
+
+
+def _json_type_name(value: Any) -> str:
+    """Name a value's type in the JSON Schema vocabulary.
+
+    The message this feeds is a self-repair prompt sent to the model, so it
+    names types the way the schema beside it does — and identically in the
+    Dart port, which has no Python type names to fall back on.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
 
 
 def _type_ok(expected: str, value: Any) -> bool:
@@ -69,15 +88,15 @@ def _type_ok(expected: str, value: Any) -> bool:
 
 
 def _mini_validate(schema: dict[str, Any], value: Any, path: str = "") -> Optional[str]:
-    """Minimal JSON Schema subset validator (fallback when jsonschema is absent)."""
+    """The JSON Schema subset a tool-argument schema actually uses."""
     where = path or "arguments"
     t = schema.get("type")
     if t is not None:
         types = t if isinstance(t, list) else [t]
         if not any(_type_ok(x, value) for x in types):
-            return f"{where}: expected type {t}, got {type(value).__name__}"
+            return f"{where}: expected type {dumps(t)}, got {_json_type_name(value)}"
     if "enum" in schema and value not in schema["enum"]:
-        return f"{where}: {value!r} is not one of {schema['enum']}"
+        return f"{where}: {dumps(value)} is not one of {dumps(schema['enum'])}"
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
             return f"{where}: {value} is less than minimum {schema['minimum']}"
@@ -91,7 +110,7 @@ def _mini_validate(schema: dict[str, Any], value: Any, path: str = "") -> Option
     if isinstance(value, dict):
         for req in schema.get("required", []):
             if req not in value:
-                return f"{where}: missing required property {req!r}"
+                return f"{where}: missing required property {dumps(req)}"
         props = schema.get("properties", {})
         for key, sub in props.items():
             if key in value and isinstance(sub, dict):
@@ -101,7 +120,7 @@ def _mini_validate(schema: dict[str, Any], value: Any, path: str = "") -> Option
         if schema.get("additionalProperties") is False:
             extra = set(value) - set(props)
             if extra:
-                return f"{where}: unexpected properties {sorted(extra)}"
+                return f"{where}: unexpected properties {dumps(sorted(extra))}"
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
         for i, item in enumerate(value):
             err = _mini_validate(schema["items"], item, f"{where}[{i}]")
@@ -129,18 +148,16 @@ def apply_defaults(schema: dict[str, Any], args: dict[str, Any]) -> dict[str, An
 
 
 def validate_args(schema: dict[str, Any], args: Any) -> Optional[str]:
-    """Return an error message, or None when the arguments pass."""
+    """Return an error message, or None when the arguments pass.
+
+    Deliberately one small validator rather than ``jsonschema``: the error
+    text goes to the model as a self-repair prompt, and two different
+    validators meant this package and its Dart port rejected different
+    arguments with different wording for the same schema. The subset covers
+    what a tool-argument schema actually uses.
+    """
     if not isinstance(args, dict):
-        return f"arguments must be a JSON object, got {type(args).__name__}"
-    if _jsonschema is not None:
-        try:
-            _jsonschema.validate(instance=args, schema=schema)
-            return None
-        except _jsonschema.ValidationError as exc:
-            loc = ".".join(str(p) for p in exc.absolute_path) or "arguments"
-            return f"{loc}: {exc.message}"
-        except _jsonschema.SchemaError as exc:
-            return f"tool schema itself is invalid: {exc.message}"
+        return f"arguments must be a JSON object, got {_json_type_name(args)}"
     return _mini_validate(schema, args)
 
 
@@ -216,20 +233,23 @@ class BudgetState:
 # ---------------------------------------------------------------------------
 
 class Runtime:
-    def __init__(self, registry: Registry, store: ArtifactStore, config: Config) -> None:
+    # No artifact store of its own: it uses ctx.store, the session's current
+    # one. A resumed run installs a fresh store for its new run id, and a
+    # second copy captured here would silently keep writing artifacts the
+    # session (and therefore meta.artifact.peek) could no longer read.
+    def __init__(self, registry: Registry, config: Config) -> None:
         self.registry = registry
-        self.store = store
         self.config = config
         # Capabilities whose full spec has already been projected into the
-        # conversation (pinned specs live in the kernel → pre-seeded by the
-        # session). Used by the require_spec gate.
+        # conversation. Used by the require_spec gate; pinned capabilities
+        # are exempt because their spec is always in the kernel section.
         self.seen_specs: set[str] = set()
         self._consecutive_validation_failures: dict[str, int] = {}
 
     # -- public ---------------------------------------------------------------
 
     async def execute(
-        self, calls: list[ToolCall], turn: TurnContext, ctx: ToolContext, run: Run, policy: PolicyEngine,
+        self, calls: list[ToolCall], ctx: ToolContext, run: Run, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
         """Validate, authorize and run a batch of calls, in order (P0-1).
 
@@ -278,7 +298,7 @@ class Runtime:
                     observation=f"Approval required: {decision.reason}", command_id=command.id,
                 ))
                 return ExecuteBatchResult(results=results, halted=True)
-            if self._is_read_only(capability):
+            if self.is_read_only(capability):
                 buffer.append((call, capability, args))
             else:
                 await flush()
@@ -287,7 +307,7 @@ class Runtime:
         return ExecuteBatchResult(results=results, halted=False)
 
     async def resume_pending(
-        self, run: Run, ctx: ToolContext, policy: PolicyEngine, turn: TurnContext,
+        self, run: Run, ctx: ToolContext, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
         """Continue a run's ``pending_calls`` after its approval was resolved.
 
@@ -306,14 +326,22 @@ class Runtime:
         approved = run.commands.get(resolved.command_id) if resolved and resolved.resolution == "approved" else None
         if resolved is not None and resolved.resolution == "denied":
             denied_command = run.commands.get(resolved.command_id)
-            observation = f"Approval denied: {denied_command.capability_name if denied_command else first_call.name} was not executed."
+            denied_name = denied_command.capability_name if denied_command else first_call.name
             run.pending_calls = []
-            return ExecuteBatchResult(
-                results=[ToolResult(call=first_call, ok=False, outcome="denied", error="approval_denied",
-                                     observation=observation,
-                                     command_id=denied_command.id if denied_command else None)],
-                halted=False,
-            )
+            # Every parked call needs its own result: the denial cancels the
+            # rest of the decision too, and a call left without one would
+            # take the whole decision out of the projection.
+            results = [ToolResult(
+                call=first_call, ok=False, outcome="denied", error="approval_denied",
+                observation=f"Approval denied: {denied_name} was not executed.",
+                command_id=denied_command.id if denied_command else None,
+            )]
+            results += [
+                ToolResult(call=call, ok=False, outcome="denied", error="approval_denied",
+                           observation=f"Not executed: the approval for {denied_name} was denied.")
+                for call in pending[1:]
+            ]
+            return ExecuteBatchResult(results=results, halted=False)
         capability = self.registry.get(approved.capability_name) if approved else self.registry.get(first_call.name)
         results: list[ToolResult] = []
         if capability is None:
@@ -323,7 +351,7 @@ class Runtime:
             args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
             results.append(await self._execute_one(capability, args, ctx, run, first_call, command=approved))
         run.pending_calls = []
-        rest = await self.execute(pending[1:], turn, ctx, run, policy)
+        rest = await self.execute(pending[1:], ctx, run, policy)
         results.extend(rest.results)
         if rest.halted:
             return ExecuteBatchResult(results=results, halted=True)
@@ -335,15 +363,24 @@ class Runtime:
         capability = self.registry.get(call.name)
         if capability is None:
             toc = self.registry.toc_text()
+            # Never point at a search tool that is itself absent or disabled:
+            # a capability the model cannot reach must not be advertised.
+            hint = (
+                " Use meta.tool.find(query) to locate the right one."
+                if "meta.tool.find" in self.registry else ""
+            )
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="unknown_capability",
                 observation=(
                     f"Error: capability {call.name!r} is not registered. "
-                    f"Tool index: {toc or '(empty)'}. Use find_tools(query) to locate the right one."
+                    f"Tool index: {toc or '(empty)'}.{hint}"
                 ),
             )
 
-        if capability.discovery.require_spec and capability.name not in self.seen_specs:
+        # A pinned capability's full spec is already in the kernel section,
+        # so the gate is satisfied by construction — no pre-seeding needed.
+        needs_spec = capability.discovery.require_spec and not capability.discovery.pinned
+        if needs_spec and capability.name not in self.seen_specs:
             self.seen_specs.add(capability.name)
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="require_spec",
@@ -384,7 +421,7 @@ class Runtime:
         return capability, args
 
     @staticmethod
-    def _is_read_only(capability: Capability) -> bool:
+    def is_read_only(capability: Capability) -> bool:
         # Mirrors PolicyEngine.evaluate: undeclared effects are treated as
         # the most restrictive kind, so an author who forgot to declare
         # effects doesn't also get free parallel execution.
@@ -408,7 +445,7 @@ class Runtime:
                 call=call, ok=False, outcome="failed", error="no_handler", command_id=command.id,
                 observation=f"Error: capability {capability.name!r} has no executable handler registered.",
             )
-        resolved = self.store.resolve_args(args) if capability.execution.resolve_handles else args
+        resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
         start = time.time()
         last_error = ""
@@ -421,7 +458,7 @@ class Runtime:
                     timeout=capability.execution.timeout_s,
                 )
                 elapsed = time.time() - start
-                observation, artifact_id = self._observation_for(capability, value)
+                observation, artifact_id = self._observation_for(capability, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id)
                 return ToolResult(
                     call=call, ok=True, value=value, outcome="ok", command_id=command.id,
@@ -463,7 +500,9 @@ class Runtime:
 
     # -- output policy --------------------------------------------------------
 
-    def _observation_for(self, capability: Capability, value: Any) -> tuple[str, Optional[str]]:
+    def _observation_for(
+        self, capability: Capability, value: Any, store: ArtifactStore,
+    ) -> tuple[str, Optional[str]]:
         text = serialize_value(value)
         policy = capability.execution.output_policy
         threshold = policy.max_inline_tokens or self.config.artifacts.inline_threshold_tokens
@@ -472,8 +511,13 @@ class Runtime:
             return text if text else "(empty result)", None
         if policy.overflow == "truncate":
             return truncate_to_tokens(text, threshold) + "\n…[truncated by output_policy]", None
-        record = self.store.put(value, source=capability.name)
-        ref_text = self.store.ref_text(
+        record = store.put(value, source=capability.name)
+        ref_text = store.ref_text(
             record, preview=policy.preview, preview_tokens=self.config.artifacts.preview_tokens,
         )
-        return ref_text + f"\nUse peek(artifact={{\"$artifact\": \"{record.id}\"}}, query=..., range=...) to inspect further.", record.id
+        if "meta.artifact.peek" in self.registry:
+            ref_text += (
+                f'\nUse meta.artifact.peek(artifact={{"$artifact": "{record.id}"}}, '
+                "query=..., range=...) to inspect further."
+            )
+        return ref_text, record.id

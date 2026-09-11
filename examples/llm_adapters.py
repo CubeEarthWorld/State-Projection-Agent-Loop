@@ -1,7 +1,7 @@
 """Example LLM adapters — NOT part of the ``state_projection_loop`` package.
 
 The core package is intentionally LLM-agnostic: it only defines the
-``LLMAdapter`` Protocol (``complete(messages, tools) -> Decision``) and a
+``LLMAdapter`` Protocol (``async complete(messages, tools) -> Decision``) and a
 scripted test double (``ScriptedLLM``). Talking to any real provider —
 authentication, request shaping, retries, streaming, billing — is entirely
 the integrator's responsibility and concern, not the library's.
@@ -15,6 +15,7 @@ Requires the corresponding optional client library:
     pip install openai       # OpenAICompatAdapter, OpenAICompatEmbedding
     pip install anthropic    # AnthropicAdapter
 """
+import asyncio
 from __future__ import annotations
 
 import json
@@ -96,7 +97,7 @@ class OpenAICompatAdapter:
             }
         return {"role": message.role, "content": message.content}
 
-    def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
+    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [self._to_api(m) for m in messages],
@@ -110,7 +111,8 @@ class OpenAICompatAdapter:
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
 
-        response = self._client.chat.completions.create(**kwargs)
+        # The SDK call blocks; keep the host's event loop free while it runs.
+        response = await asyncio.to_thread(lambda: self._client.chat.completions.create(**kwargs))
         choice = response.choices[0].message
 
         calls: list[ToolCall] = []
@@ -145,7 +147,7 @@ class AnthropicAdapter:
     a real Protocol, not an OpenAI-shaped abstraction with one
     implementation: message roles, tool-result framing, and native tool
     schemas all differ from the OpenAI wire format and are translated here,
-    entirely behind the same ``complete(messages, tools) -> Decision``
+    entirely behind the same ``async complete(messages, tools) -> Decision``
     boundary every adapter uses.
     """
 
@@ -208,7 +210,7 @@ class AnthropicAdapter:
             })
         return out
 
-    def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
+    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
         system, rest = self._split_system(messages)
         kwargs: dict[str, Any] = {
             "model": self.model, "messages": [self._to_api(m) for m in rest],
@@ -219,7 +221,8 @@ class AnthropicAdapter:
         if tools:
             kwargs["tools"] = self._to_api_tools(tools)
 
-        response = self._client.messages.create(**kwargs)
+        # The SDK call blocks; keep the host's event loop free while it runs.
+        response = await asyncio.to_thread(lambda: self._client.messages.create(**kwargs))
 
         text_parts: list[str] = []
         calls: list[ToolCall] = []

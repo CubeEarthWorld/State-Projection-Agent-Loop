@@ -1,0 +1,375 @@
+{
+  "validate_args": [
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "a"
+        ]
+      },
+      "arguments": {},
+      "expected": "arguments: missing required property \"a\""
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": {
+        "a": 42
+      },
+      "expected": "arguments.a: expected type \"string\", got integer"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": {
+        "a": null
+      },
+      "expected": "arguments.a: expected type \"string\", got null"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": 1.5
+      },
+      "expected": "arguments.a: expected type [\"string\",\"null\"], got number"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              "x",
+              "y"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": "z"
+      },
+      "expected": "arguments.a: \"z\" is not one of [\"x\",\"y\"]"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "arguments": {
+        "a": 0
+      },
+      "expected": "arguments.a: 0 is less than minimum 1"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "integer",
+            "maximum": 9
+          }
+        }
+      },
+      "arguments": {
+        "a": 10
+      },
+      "expected": "arguments.a: 10 is greater than maximum 9"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "maxLength": 2
+          }
+        }
+      },
+      "arguments": {
+        "a": "abc"
+      },
+      "expected": "arguments.a: longer than maxLength 2"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "arguments": {
+        "a": "ok",
+        "b": 1,
+        "c": 2
+      },
+      "expected": "arguments: unexpected properties [\"b\",\"c\"]"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          1,
+          "two"
+        ]
+      },
+      "expected": "arguments.a[1]: expected type \"integer\", got string"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "default": "d"
+          }
+        }
+      },
+      "arguments": {},
+      "expected": null
+    }
+  ],
+  "apply_defaults": [
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "a"
+        ]
+      },
+      "arguments": {},
+      "expected": {}
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": {
+        "a": 42
+      },
+      "expected": {
+        "a": 42
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        }
+      },
+      "arguments": {
+        "a": null
+      },
+      "expected": {
+        "a": null
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": 1.5
+      },
+      "expected": {
+        "a": 1.5
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              "x",
+              "y"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": "z"
+      },
+      "expected": {
+        "a": "z"
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "arguments": {
+        "a": 0
+      },
+      "expected": {
+        "a": 0
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "integer",
+            "maximum": 9
+          }
+        }
+      },
+      "arguments": {
+        "a": 10
+      },
+      "expected": {
+        "a": 10
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "maxLength": 2
+          }
+        }
+      },
+      "arguments": {
+        "a": "abc"
+      },
+      "expected": {
+        "a": "abc"
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "arguments": {
+        "a": "ok",
+        "b": 1,
+        "c": 2
+      },
+      "expected": {
+        "a": "ok",
+        "b": 1,
+        "c": 2
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          1,
+          "two"
+        ]
+      },
+      "expected": {
+        "a": [
+          1,
+          "two"
+        ]
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "string",
+            "default": "d"
+          }
+        }
+      },
+      "arguments": {},
+      "expected": {
+        "a": "d"
+      }
+    }
+  ]
+}

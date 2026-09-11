@@ -60,7 +60,6 @@ class ApprovalRequest:
     effects: list[Effect]
     reason: str
     policy_revision: int
-    capability_version: int
     expires_at: Optional[float] = None
     resolution: Optional[str] = None  # "approved" | "denied" | "expired" | None (pending)
     resolved_at: Optional[float] = None
@@ -106,7 +105,7 @@ class Run:
                             {"from": self.state, "to": new_state, "reason": reason})
         self.state = new_state
 
-    def complete(self, result: Any, *, result_ref: Optional[str] = None) -> None:
+    def complete(self, result: Any) -> None:
         self.result = result
         self.transition("COMPLETED", reason="finish")
 
@@ -147,7 +146,7 @@ class Run:
         expires_at = time.time() + expires_in_s if expires_in_s is not None else None
         request = ApprovalRequest(
             id=new_id("approval"), command_id=command.id, effects=effects, reason=reason,
-            policy_revision=policy_revision, capability_version=1, expires_at=expires_at,
+            policy_revision=policy_revision, expires_at=expires_at,
         )
         self.pending_approval = request
         self.ledger.append(self.id, "approval_requested", {
@@ -208,7 +207,6 @@ class Run:
                 "reason": self.pending_approval.reason,
                 "effects": [{"kind": e.kind, "resource": e.resource} for e in self.pending_approval.effects],
                 "policy_revision": self.pending_approval.policy_revision,
-                "capability_version": self.pending_approval.capability_version,
                 "expires_at": self.pending_approval.expires_at,
             },
             "pending_calls": [
@@ -238,7 +236,7 @@ class Run:
                 id=pa["id"], command_id=pa["command_id"],
                 effects=[Effect(kind=e["kind"], resource=e["resource"]) for e in pa["effects"]],
                 reason=pa["reason"], policy_revision=pa["policy_revision"],
-                capability_version=pa["capability_version"], expires_at=pa.get("expires_at"),
+                expires_at=pa.get("expires_at"),
             )
         run.pending_calls = [
             ToolCall(id=c["id"], name=c["name"], arguments=c["arguments"], raw_arguments=c.get("raw_arguments"))
@@ -248,6 +246,6 @@ class Run:
         if lra:
             run.last_resolved_approval = ApprovalRequest(
                 id=lra["id"], command_id=lra["command_id"], effects=[], reason="", policy_revision=0,
-                capability_version=1, resolution=lra.get("resolution"),
+                resolution=lra.get("resolution"),
             )
         return run

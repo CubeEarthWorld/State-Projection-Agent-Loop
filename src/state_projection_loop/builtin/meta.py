@@ -15,33 +15,7 @@ from typing import Any, Optional
 from ..artifacts import ref as artifact_ref
 from ..capability import ToolContext
 from ..registry import Registry
-
-FIND_TOOLS_DEF: dict[str, Any] = {
-    "name": "meta.tool.find",
-    "category": "meta",
-    "card": {
-        "summary": "ツール台帳を自然文で検索し、該当ツールのカード一覧を返す",
-        "signature": "find_tools(query: str, category: str | None = None, k: int = 8) -> list[ToolCard]",
-        "tags": ["meta", "検索"],
-    },
-    "spec": {
-        "description": "Search the capability registry with a natural-language query and return matching cards.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "やりたいことを自然文で"},
-                "category": {"type": ["string", "null"], "description": "目次のカテゴリで絞り込み"},
-                "k": {"type": "integer", "default": 8, "minimum": 1, "maximum": 50},
-            },
-            "required": ["query"],
-        },
-        "usage_notes": "自動候補に必要なツールが見当たらない時に使う。目次のカテゴリ名で絞れる。",
-    },
-    "discovery": {"pinned": True, "no_embed": True},
-    "execution": {"timeout_s": 10, "retry_safety": "pure"},
-    "effects": [{"kind": "none"}],
-}
-
+from .defs import load
 
 def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k: int = 8) -> Any:
     results = ctx.search.search(query, category=category, k=k, layer=3)
@@ -56,67 +30,12 @@ def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k:
     ]
 
 
-PEEK_DEF: dict[str, Any] = {
-    "name": "meta.artifact.peek",
-    "category": "meta",
-    "card": {
-        "summary": "アーティファクト参照の中身を部分閲覧する",
-        "signature": 'peek(artifact: {"$artifact": str}, query: str | null = None, range: str | null = None) -> str',
-        "tags": ["meta", "参照"],
-    },
-    "spec": {
-        "description": "Partially inspect the value stored behind an artifact reference ({\"$artifact\": \"...\"}).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "artifact": {"type": "object", "description": "構造化参照 {\"$artifact\": \"art_...\"}"},
-                "query": {"type": ["string", "null"], "description": "中身から探したい内容"},
-                "range": {"type": ["string", "null"], "description": "行範囲(例 '10-40')やキーパス(例 'items[0].name')"},
-            },
-            "required": ["artifact"],
-        },
-        "usage_notes": "プレビューで足りない時のみ使う。全量展開は避け、queryかrangeで絞る。",
-    },
-    "discovery": {"pinned": True, "no_embed": True},
-    "execution": {"timeout_s": 10, "retry_safety": "pure", "resolve_handles": False},
-    "effects": [{"kind": "none"}],
-}
-
-
 def _peek(ctx: ToolContext, artifact: dict, query: Optional[str] = None, range: Optional[str] = None) -> str:  # noqa: A002
     from ..artifacts import is_ref
 
     if not is_ref(artifact):
         return f"Error: {artifact!r} is not a valid artifact reference; expected {{'$artifact': '<id>'}}"
     return ctx.store.peek(artifact["$artifact"], query=query, range_=range)
-
-
-SEARCH_HISTORY_DEF: dict[str, Any] = {
-    "name": "meta.history.search",
-    "category": "meta",
-    "card": {
-        "summary": "折り畳まれた過去の会話をイベント台帳から検索する",
-        "signature": "search_history(query: str, k: int = 10) -> list[str]",
-        "tags": ["meta", "検索", "履歴"],
-    },
-    "spec": {
-        "description": (
-            "Search the append-only event ledger for this run, including messages folded out of the "
-            "live conversation by compaction. Use when working_state doesn't have enough detail."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string"},
-                "k": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
-            },
-            "required": ["query"],
-        },
-    },
-    "discovery": {"pinned": True, "no_embed": True},
-    "execution": {"timeout_s": 10, "retry_safety": "pure"},
-    "effects": [{"kind": "none"}],
-}
 
 
 def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
@@ -131,43 +50,6 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
             if len(hits) >= k:
                 break
     return hits or [f"No ledger events matched {query!r}."]
-
-
-SPAWN_DEF: dict[str, Any] = {
-    "name": "meta.agent.spawn",
-    "category": "meta",
-    "card": {
-        "summary": "サブエージェントを起動しタスクを委任、結果アーティファクトを受け取る",
-        "signature": "spawn(task: str, kernel: str | None = None, tool_scope: list | None = None, model: str | None = None, max_steps: int = 15) -> Any",
-        "tags": ["meta", "swarm", "サブエージェント"],
-    },
-    "spec": {
-        "description": (
-            "Run a sub-agent with its own independent context on the given task. Parent and child share "
-            "the task string and result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task": {"type": "string", "description": "委任するタスクの完全な記述(子は親の文脈を一切見られない)"},
-                "kernel": {"type": ["string", "null"], "description": "子のシステムプロンプト(省略時は汎用ジョブカーネル)"},
-                "tool_scope": {
-                    "type": ["array", "null"], "items": {"type": "string"},
-                    "description": "子に許可するツール名/カテゴリ(例 ['web/*','file'])。省略時は親と同じ台帳",
-                },
-                "model": {"type": ["string", "null"], "description": "子で使うモデル名(spawn_llm_factory が必要)"},
-                "max_steps": {"type": "integer", "default": 15, "minimum": 1, "maximum": 100},
-                "checklist_ids": {"type": "array", "items": {"type": "string"},
-                    "description": "Explicitly copy these checklist ULIDs to the child. Returns result plus a checklists export document. Parent plans are never auto-merged."},
-            },
-            "required": ["task"],
-        },
-        "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。",
-    },
-    "discovery": {"pinned": True, "no_embed": True},
-    "execution": {"timeout_s": 600, "retry_safety": "never_retry"},
-    "effects": [{"kind": "external", "resource": "subagent:*"}],
-}
 
 
 async def _spawn(
@@ -212,17 +94,21 @@ async def _spawn(
     return result
 
 
+_HANDLERS = {
+    "meta.tool.find": _find_tools,
+    "meta.artifact.peek": _peek,
+    "meta.history.search": _search_history,
+}
+
+
 def ensure_meta_tools(registry: Registry) -> None:
     """Register the resident meta capabilities if absent."""
-    if "meta.tool.find" not in registry:
-        registry.register(FIND_TOOLS_DEF, handler=_find_tools)
-    if "meta.artifact.peek" not in registry:
-        registry.register(PEEK_DEF, handler=_peek)
-    if "meta.history.search" not in registry:
-        registry.register(SEARCH_HISTORY_DEF, handler=_search_history)
+    for definition in load("meta"):
+        if definition["name"] not in registry:
+            registry.register(definition, handler=_HANDLERS[definition["name"]])
 
 
 def install_spawn(registry: Registry) -> None:
     """Opt-in sub-agent capability for swarm-style setups."""
     if "meta.agent.spawn" not in registry:
-        registry.register(SPAWN_DEF, handler=_spawn)
+        registry.register(load("spawn"), handler=_spawn)

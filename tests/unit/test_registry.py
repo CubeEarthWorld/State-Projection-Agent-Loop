@@ -155,3 +155,65 @@ class TestSubset:
     def test_empty_scope_gives_empty_registry(self):
         reg = self._registry()
         assert len(reg.subset([])) == 0
+
+
+class TestDisabling:
+    """A disabled capability is gone from every surface the model can see."""
+
+    def _registry(self) -> Registry:
+        reg = Registry()
+        reg.register(capability_dict("web.search.query", category="web/search"))
+        reg.register(capability_dict("web.fetch.url", category="web/fetch"))
+        reg.register(capability_dict("file.read", category="file", pinned=True))
+        return reg
+
+    def test_disabled_by_name_is_unreachable(self):
+        reg = self._registry()
+        reg.disable("file.read")
+        assert reg.get("file.read") is None
+        assert "file.read" not in reg
+        assert [c.name for c in reg.pinned()] == []
+        assert "file" not in reg.toc_text()
+        assert len(reg) == 2
+
+    def test_disabled_by_category_prefix(self):
+        reg = self._registry()
+        reg.disable("web/*")
+        assert sorted(c.name for c in reg) == ["file.read"]
+
+    def test_disable_bumps_the_epoch_so_caches_rebuild(self):
+        reg = self._registry()
+        before = reg.epoch
+        reg.disable("file.read")
+        assert reg.epoch > before
+        mid = reg.epoch
+        reg.disable("file.read")  # already disabled: no change, no rebuild
+        assert reg.epoch == mid
+
+    def test_enable_restores(self):
+        reg = self._registry()
+        reg.disable("file.read")
+        reg.enable("file.read")
+        assert reg.get("file.read") is not None
+        assert [c.name for c in reg.pinned()] == ["file.read"]
+
+    def test_disable_survives_later_registration(self):
+        """The deny-list is by name, so a self-installing bundled tool
+        (ensure_meta_tools) cannot re-appear by registering itself again."""
+        reg = Registry(disabled=["late.tool.run"])
+        reg.register(capability_dict("late.tool.run"))
+        assert reg.get("late.tool.run") is None
+        assert [c.name for c in reg] == []
+
+    def test_api_name_of_a_disabled_capability_does_not_resolve(self):
+        reg = self._registry()
+        reg.disable("file.read")
+        assert reg.resolve_api_name("file__read") == "file__read"
+
+    def test_subset_carries_the_deny_list(self):
+        reg = self._registry()
+        reg.disable("web/*")
+        sub = reg.subset(["web/*", "file.read"])
+        assert [c.name for c in sub] == ["file.read"]
+        sub.register(capability_dict("web.search.query", category="web/search"), replace=True)
+        assert sub.get("web.search.query") is None

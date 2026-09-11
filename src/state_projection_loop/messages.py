@@ -54,16 +54,6 @@ class Message:
             )
         return str(self.content)
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "role": self.role, "content": self.content,
-            "tool_calls": [
-                {"name": tc.name, "arguments": tc.arguments, "id": tc.id, "raw_arguments": tc.raw_arguments}
-                for tc in self.tool_calls
-            ],
-            "tool_call_id": self.tool_call_id, "name": self.name,
-        }
-
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Message":
         return cls(

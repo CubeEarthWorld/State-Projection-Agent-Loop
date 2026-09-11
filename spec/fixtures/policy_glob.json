@@ -1,0 +1,64 @@
+{
+  "glob_match": [
+    {
+      "value": "bcd",
+      "pattern": "[^a]*",
+      "expected": false
+    },
+    {
+      "value": "^bc",
+      "pattern": "[^a]*",
+      "expected": true
+    },
+    {
+      "value": "abc",
+      "pattern": "[!a]*",
+      "expected": false
+    },
+    {
+      "value": "bbc",
+      "pattern": "[!a]*",
+      "expected": true
+    },
+    {
+      "value": "a\nb",
+      "pattern": "a*b",
+      "expected": true
+    },
+    {
+      "value": "a.c",
+      "pattern": "a?c",
+      "expected": true
+    },
+    {
+      "value": "x[y",
+      "pattern": "x[[]y",
+      "expected": true
+    },
+    {
+      "value": "a]b",
+      "pattern": "a[]]b",
+      "expected": true
+    },
+    {
+      "value": "web.search.query",
+      "pattern": "web.*",
+      "expected": true
+    },
+    {
+      "value": "web.search.query",
+      "pattern": "web.search.query",
+      "expected": true
+    },
+    {
+      "value": "state.goal.set",
+      "pattern": "state.*",
+      "expected": true
+    },
+    {
+      "value": "planning.checklist.manage",
+      "pattern": "state.*",
+      "expected": false
+    }
+  ]
+}

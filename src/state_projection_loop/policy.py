@@ -120,9 +120,15 @@ class PolicyEngine:
             raise ValueError(f"Unknown preset {preset!r}; expected one of {PRESETS}")
         self.clear_layer(layer)
         if preset in ("auto_safe", "auto_workspace_dev"):
+            # Writes confined to the session's own working state never leave
+            # the process, so they are auto-allowed; they are declared as
+            # writes so the runtime keeps them in the model's stated order.
             self.add_rule(layer, Rule(decision="allow", capability_pattern="planning.checklist.manage",
                                      effect_kind="write", resource_pattern="working_state:checklists",
                                      reason="preset:local_checklists"))
+            self.add_rule(layer, Rule(decision="allow", capability_pattern="state.*",
+                                     effect_kind="write", resource_pattern="working_state:*",
+                                     reason="preset:local_working_state"))
         if preset == "deny_all":
             self.add_rule(layer, Rule(decision="deny", reason="preset:deny_all"))
         elif preset == "approve_all_effects":
@@ -204,11 +210,3 @@ class PolicyEngine:
                                per_effect=per_effect)
 
 
-@dataclass
-class ApprovalExpiry:
-    """Small helper so callers don't hardcode a bare number of seconds."""
-
-    seconds: float = 3600.0
-
-    def at(self, *, now: Optional[float] = None) -> float:
-        return (now if now is not None else time.time()) + self.seconds
