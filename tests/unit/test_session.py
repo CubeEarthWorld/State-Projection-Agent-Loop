@@ -507,3 +507,39 @@ class TestApprovalKeepsTheDecisionIntact:
                    for _, text in observations)
         history = session.projection.get("history").render(session._new_turn())
         assert any(m.role == "assistant" and m.tool_calls for m in history)
+
+
+class TestTheLoopDoesNotBlock:
+    """The provider round-trip is the longest wait in a turn. A synchronous
+    adapter call would hold the event loop for its whole duration, freezing
+    every other task in the host application."""
+
+    def test_other_tasks_run_while_the_model_is_thinking(self):
+        import asyncio
+
+        class SlowLLM:
+            async def complete(self, messages, tools=None):
+                from state_projection_loop.llm import Decision
+
+                await asyncio.sleep(0.05)
+                return Decision(text="done")
+
+        ticks = 0
+
+        async def scenario():
+            nonlocal ticks
+
+            async def ticker():
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.005)
+                    ticks += 1
+
+            task = asyncio.create_task(ticker())
+            try:
+                await Session(SlowLLM()).asend("hello")
+            finally:
+                task.cancel()
+
+        asyncio.run(scenario())
+        assert ticks > 2, f"the loop was blocked while the adapter ran (ticks={ticks})"

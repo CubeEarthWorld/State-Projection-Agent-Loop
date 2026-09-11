@@ -25,6 +25,7 @@ from state_projection_loop.compression import (  # noqa: E402
     strip_noise,
     summarize_text,
 )
+from state_projection_loop.runtime import apply_defaults, validate_args  # noqa: E402
 from state_projection_loop.serialization import dumps  # noqa: E402
 from state_projection_loop.tokens import estimate_tokens  # noqa: E402
 
@@ -61,6 +62,24 @@ SIGNATURES = [
         "required": ["query"],
     }),
     ("meta.tool.find", {"type": "object", "properties": {}}),
+]
+
+# Validation messages are a self-repair prompt sent to the model, so the
+# wording is part of the contract, not an implementation detail.
+VALIDATION = [
+    ({"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}, {}),
+    ({"type": "object", "properties": {"a": {"type": "string"}}}, {"a": 42}),
+    ({"type": "object", "properties": {"a": {"type": "string"}}}, {"a": None}),
+    ({"type": "object", "properties": {"a": {"type": ["string", "null"]}}}, {"a": 1.5}),
+    ({"type": "object", "properties": {"a": {"enum": ["x", "y"]}}}, {"a": "z"}),
+    ({"type": "object", "properties": {"a": {"type": "integer", "minimum": 1}}}, {"a": 0}),
+    ({"type": "object", "properties": {"a": {"type": "integer", "maximum": 9}}}, {"a": 10}),
+    ({"type": "object", "properties": {"a": {"type": "string", "maxLength": 2}}}, {"a": "abc"}),
+    ({"type": "object", "properties": {"a": {"type": "string"}}, "additionalProperties": False},
+     {"a": "ok", "b": 1, "c": 2}),
+    ({"type": "object", "properties": {"a": {"type": "array", "items": {"type": "integer"}}}},
+     {"a": [1, "two"]}),
+    ({"type": "object", "properties": {"a": {"type": "string", "default": "d"}}}, {}),
 ]
 
 JSON_VALUES = [
@@ -100,6 +119,17 @@ def main() -> None:
         "api_name": [
             {"name": n, "expected": to_api_name(n)}
             for n in ("meta.tool.find", "planning.checklist.manage", "a.b.c.d.e")
+        ],
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    (out / "validation.json").write_text(json.dumps({
+        "validate_args": [
+            {"schema": s, "arguments": a, "expected": validate_args(s, a)}
+            for s, a in VALIDATION
+        ],
+        "apply_defaults": [
+            {"schema": s, "arguments": a, "expected": apply_defaults(s, a)}
+            for s, a in VALIDATION
         ],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

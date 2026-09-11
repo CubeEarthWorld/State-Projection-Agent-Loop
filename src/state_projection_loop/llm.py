@@ -48,7 +48,15 @@ FINISH_SCHEMA: dict[str, Any] = {
 
 @runtime_checkable
 class LLMAdapter(Protocol):
-    def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision: ...
+    """One model call.
+
+    Async because the session loop awaits it: a provider round-trip is the
+    longest wait in a turn, and a synchronous adapter would block the host
+    application's event loop for its whole duration. An adapter wrapping a
+    blocking SDK should hand the call to ``asyncio.to_thread``.
+    """
+
+    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision: ...
 
 
 def extract_finish(decision: Decision) -> Decision:
@@ -135,7 +143,7 @@ class ScriptedLLM:
     def finish(result: Any = None, *, text: str = "") -> Decision:
         return Decision(text=text, finish=True, result=result)
 
-    def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
+    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
         self.requests.append({"messages": list(messages), "tools": list(tools or [])})
         if self._i >= len(self._steps):
             if self.strict:

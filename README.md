@@ -31,7 +31,7 @@ exactly where it left off.
 ## The package is LLM-agnostic
 
 `state_projection_loop` depends on **no LLM provider SDK**. It defines only
-a two-method `LLMAdapter` Protocol (`complete(messages, tools) -> Decision`)
+a one-method `LLMAdapter` Protocol (`async complete(messages, tools) -> Decision`)
 and a scripted test double (`ScriptedLLM`) for deterministic tests. Talking
 to a real model — OpenAI, Anthropic, DeepSeek, a local server, anything — is
 entirely your own adapter, implementing that Protocol however you like.

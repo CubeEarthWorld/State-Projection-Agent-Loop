@@ -418,7 +418,7 @@ class Session:
                 "candidates": [s.tool.name for s in turn.candidates],
             })
 
-            decision = extract_finish(self.llm.complete(messages, api_tools or None))
+            decision = extract_finish(await self.llm.complete(messages, api_tools or None))
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
             self.budget.steps += 1

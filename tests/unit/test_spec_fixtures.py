@@ -108,3 +108,20 @@ class TestBundledDefinitions:
             assert capability.execution.handler is not None, (
                 f"{capability.name} would fail at call time with no_handler"
             )
+
+
+class TestValidation:
+    """Validation messages are a self-repair prompt sent to the model, so
+    the wording is part of the contract, not an implementation detail."""
+
+    @pytest.mark.parametrize("case", cases("validation", "validate_args"))
+    def test_validate_args(self, case):
+        from state_projection_loop.runtime import validate_args
+
+        assert validate_args(case["schema"], case["arguments"]) == case["expected"]
+
+    @pytest.mark.parametrize("case", cases("validation", "apply_defaults"))
+    def test_apply_defaults(self, case):
+        from state_projection_loop.runtime import apply_defaults
+
+        assert apply_defaults(case["schema"], case["arguments"]) == case["expected"]
