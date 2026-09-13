@@ -419,12 +419,12 @@ class Session:
             })
 
             decision = extract_finish(await self.llm.complete(messages, api_tools or None))
+            self._note_usage(decision, messages, api_tools)
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
             self.budget.steps += 1
-            self._note_usage(decision, messages)
             self.ledger.append(self.run.id, "model_response", {
-                "text": decision.text[:2000], "finish": decision.finish,
+                "text": decision.text, "finish": decision.finish,
                 "calls": [{"name": c.name, "arguments": c.arguments, "id": c.id} for c in decision.calls],
             })
 
@@ -575,11 +575,20 @@ class Session:
     def _checkpoint(self) -> None:
         self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
 
-    def _note_usage(self, decision, messages: list[Message]) -> None:
+    def _note_usage(self, decision, messages: list[Message], api_tools: list[dict]) -> None:
         if decision.usage is not None:
             self.budget.note_usage(decision.usage.prompt_tokens, decision.usage.completion_tokens, self.config)
         else:
-            self.budget.note_usage(estimate_tokens(messages), estimate_tokens(decision.text), self.config)
+            completion_tokens = estimate_tokens(decision.text)
+            for call in decision.calls:
+                arguments = call.raw_arguments if call.raw_arguments is not None else call.arguments
+                completion_tokens += 6 + estimate_tokens(call.name) + estimate_tokens(arguments)
+            # Adapters normalize finish(result) out of calls before returning.
+            if decision.finish:
+                completion_tokens += 6 + estimate_tokens("finish") + estimate_tokens({"result": decision.result})
+            self.budget.note_usage(
+                estimate_tokens(messages) + estimate_tokens(api_tools), completion_tokens, self.config
+            )
 
     def _tool_context(self) -> ToolContext:
         return ToolContext(
