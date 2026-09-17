@@ -46,8 +46,7 @@ from PySide6.QtWidgets import (
 # -- project imports ---------------------------------------------------------
 import os
 
-from state_projection_loop import Registry, Session
-from state_projection_loop.builtin.state import install_state
+from state_projection_loop import Registry, Session, install_builtins
 from state_projection_loop.policy import Rule
 
 from examples.llm_adapters import OpenAICompatAdapter
@@ -467,7 +466,7 @@ class MainWindow(QMainWindow):
             registry=registry,
             seed=initial_seed(),
         )
-        install_state(self.session.registry)
+        install_builtins(self.session.registry, ["state"])
         self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
         self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
         self._scenario_backend = log
@@ -609,8 +608,8 @@ class MainWindow(QMainWindow):
             f"   (Np = all N are pinned/always-available; N, Mp = M of N pinned)"
         )
 
-        # Group tools by category using categories_with_pinned()
-        cat_info = registry.categories_with_pinned()
+        # Group tools by category using categories()
+        cat_info = registry.categories()
         cat_items: dict[str, QTreeWidgetItem] = {}
         for tool in sorted(registry.all(), key=lambda t: (t.category or "misc", t.name)):
             cat = tool.category or "misc"
@@ -756,7 +755,7 @@ class MainWindow(QMainWindow):
             f"   (Np = all N are pinned/always-available; N, Mp = M of N pinned)"
         )
 
-        cat_info = reg.categories_with_pinned()
+        cat_info = reg.categories()
         cat_items: dict[str, QTreeWidgetItem] = {}
         for tool in sorted(reg.all(), key=lambda t: (t.category or "misc", t.name)):
             cat = tool.category or "misc"

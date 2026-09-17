@@ -18,7 +18,6 @@ same capability can coexist during a rollout.
 """
 from __future__ import annotations
 
-import importlib
 import inspect
 import re
 import types
@@ -61,24 +60,42 @@ class Effect:
 
 @dataclass
 class ToolContext:
-    """Runtime services available to capability handlers.
+    """What a tool handler receives.
 
     A handler opts in by declaring a first parameter named ``ctx`` (or
     annotated with ``ToolContext``); it is excluded from the JSON schema and
-    injected by the runtime. ``command_id`` is stable across retries of the
-    *same* logical attempt and is the correct idempotency key to hand to an
-    external API.
+    injected by the runtime with ``command_id`` set. ``command_id`` is stable
+    across retries of the *same* logical attempt and is the correct
+    idempotency key to hand to an external API. Fields are typed ``Any`` only
+    to avoid circular imports; they hold the session's Config, Registry,
+    EventLedger, Run, WorkingState, ArtifactStore and ToolSearch.
+
+    Sections render from the superset :class:`~state_projection_loop.projection.TurnContext`;
+    the runtime narrows it with :meth:`for_command` before a handler runs, so
+    projection state never reaches a tool.
     """
 
-    session: Any = None
-    registry: Any = None
-    store: Any = None
-    working_state: Any = None  # WorkingState; typed Any to avoid a circular import
     config: Any = None
-    search: Any = None
+    registry: Any = None
     ledger: Any = None
     run: Any = None
+    working_state: Any = None
+    session: Any = None
+    store: Any = None
+    search: Any = None
     command_id: str = ""
+
+    @property
+    def run_id(self) -> str:
+        return self.run.id if self.run is not None else ""
+
+    def for_command(self, command_id: str) -> "ToolContext":
+        """The handler-facing view of this context for one command."""
+        return ToolContext(
+            config=self.config, registry=self.registry, ledger=self.ledger, run=self.run,
+            working_state=self.working_state, session=self.session, store=self.store,
+            search=self.search, command_id=command_id,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +124,10 @@ class CapabilityDiscovery:
     require_spec: bool = False
     embedding_text: str = ""
     no_embed: bool = False
+    # One standing sentence for the kernel's "[Runtime notes]", shown while
+    # the capability is pinned and reachable. Pinned only: the pin set is the
+    # developer's own bound on kernel size.
+    kernel_note: str = ""
 
 
 @dataclass
@@ -119,7 +140,6 @@ class OutputPolicy:
 @dataclass
 class CapabilityExecution:
     handler: Optional[Callable[..., Any]] = None
-    handler_ref: str = ""
     timeout_s: float = 30.0
     retries: int = 0
     retry_safety: str = "never_retry"  # one of RETRY_SAFETY
@@ -262,12 +282,12 @@ class Capability:
             require_spec=bool(disc_d.get("require_spec", False)),
             embedding_text=disc_d.get("embedding_text", ""),
             no_embed=bool(disc_d.get("no_embed", False)),
+            kernel_note=disc_d.get("kernel_note", ""),
         )
         exe_d = dict(data.get("execution") or {})
         op_d = dict(exe_d.get("output_policy") or {})
         execution = CapabilityExecution(
             handler=handler,
-            handler_ref=exe_d.get("handler", "") if isinstance(exe_d.get("handler"), str) else "",
             timeout_s=float(exe_d.get("timeout_s", 30.0)),
             retries=int(exe_d.get("retries", 0)),
             retry_safety=exe_d.get("retry_safety", "never_retry"),
@@ -280,8 +300,6 @@ class Capability:
         )
         if execution.handler is None and callable(exe_d.get("handler")):
             execution.handler = exe_d["handler"]
-        if execution.handler is None and execution.handler_ref:
-            execution.handler = _resolve_handler(execution.handler_ref)
         effects = [
             Effect(kind=e.get("kind", "none"), resource=e.get("resource", "*"))
             for e in (data.get("effects") or [])
@@ -365,14 +383,6 @@ class Capability:
 # ---------------------------------------------------------------------------
 # Handler helpers
 # ---------------------------------------------------------------------------
-
-def _resolve_handler(ref: str) -> Callable[..., Any]:
-    module_name, _, attr = ref.rpartition(".")
-    if not module_name:
-        raise ValueError(f"Handler reference {ref!r} must be 'module.attr'")
-    module = importlib.import_module(module_name)
-    return getattr(module, attr)
-
 
 def _handler_wants_ctx(handler: Optional[Callable[..., Any]]) -> bool:
     if handler is None:
@@ -472,6 +482,7 @@ def build_capability_from_function(
     require_spec: bool = False,
     embedding_text: str = "",
     no_embed: bool = False,
+    kernel_note: str = "",
     timeout_s: float = 30.0,
     retries: int = 0,
     retry_safety: str = "never_retry",
@@ -524,6 +535,7 @@ def build_capability_from_function(
             "require_spec": require_spec,
             "embedding_text": embedding_text,
             "no_embed": no_embed,
+            "kernel_note": kernel_note,
         },
         "execution": {
             "timeout_s": timeout_s,

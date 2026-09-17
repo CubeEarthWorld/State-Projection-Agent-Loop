@@ -1,0 +1,131 @@
+[
+  {
+    "name": "filesystem.file.list",
+    "category": "filesystem",
+    "spec": {
+      "description": "List files under a directory of the workspace, recursively, as workspace-relative paths.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": "",
+            "description": "Workspace-relative directory; empty for the workspace root."
+          }
+        }
+      }
+    },
+    "discovery": {
+      "embedding_text": "list files directory tree ls find ファイル一覧"
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "pure"
+    },
+    "effects": [
+      {
+        "kind": "read",
+        "resource": "workspace:*"
+      }
+    ]
+  },
+  {
+    "name": "filesystem.file.read",
+    "category": "filesystem",
+    "spec": {
+      "description": "Read a UTF-8 text file from the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          }
+        },
+        "required": ["path"]
+      }
+    },
+    "discovery": {
+      "embedding_text": "read file contents cat open ファイルを読む"
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "pure",
+      "output_policy": {
+        "max_inline_tokens": 1200
+      }
+    },
+    "effects": [
+      {
+        "kind": "read",
+        "resource": "workspace:*"
+      }
+    ]
+  },
+  {
+    "name": "filesystem.file.write",
+    "category": "filesystem",
+    "spec": {
+      "description": "Write the full content of a UTF-8 text file in the workspace, creating parent directories and overwriting any existing file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative file path."
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": ["path", "content"]
+      },
+      "usage_notes": "Pass the whole file, not a patch."
+    },
+    "discovery": {
+      "embedding_text": "write save create edit file ファイルを書く 保存"
+    },
+    "execution": {
+      "timeout_s": 10,
+      "retry_safety": "idempotent"
+    },
+    "effects": [
+      {
+        "kind": "write",
+        "resource": "workspace:*"
+      }
+    ]
+  },
+  {
+    "name": "shell.command.run",
+    "category": "shell",
+    "spec": {
+      "description": "Run a shell command with the workspace as working directory and return its exit code, stdout and stderr.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["command"]
+      }
+    },
+    "discovery": {
+      "embedding_text": "run command shell terminal execute test build コマンド実行"
+    },
+    "execution": {
+      "timeout_s": 60,
+      "retry_safety": "never_retry",
+      "output_policy": {
+        "max_inline_tokens": 1200
+      }
+    },
+    "effects": [
+      {
+        "kind": "external",
+        "resource": "sandbox:subprocess"
+      }
+    ]
+  }
+]

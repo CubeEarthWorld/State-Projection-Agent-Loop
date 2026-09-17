@@ -23,29 +23,28 @@ import copy
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from .artifacts import ArtifactStore
-from .builtin.meta import ensure_meta_tools
-from .builtin.checklist import ensure_checklist_tool
+from .builtin import DEFAULT_BUILTINS, install_builtins
 from .checklists import ChecklistStore
-from .capability import Capability, ToolContext
+from .capability import ToolContext
+from .compaction import FOLD_INSTRUCTIONS, apply_fold_delta, parse_fold_reply
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend
-from .events import EventLedger, InMemoryLedger, JsonlLedger, Snapshot, RENDERABLE_TYPES, event_to_message
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, event_to_message
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
-from .messages import ASSISTANT, Message, OBSERVATION, SYSTEM, USER
+from .messages import ASSISTANT, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
 from .projection import Projection, Section, TurnContext, build_default_sections
 from .registry import Registry
-from .run import ApprovalRequest, Run, RunStateError
-from .runtime import BudgetState, Runtime
+from .run import ApprovalRequest, PendingQuestion, Run, RunStateError
+from .runtime import WAITING_OUTCOMES, BudgetState, Runtime, validate_value
 from .tokens import estimate_tokens
 from .working_state import WORKING_STATE_FIELDS, WorkingState
 
-_ACTIVE_TOOL_CAP = 48
 
 
 class ConcurrencyError(RuntimeError):
@@ -83,19 +82,20 @@ class Session:
         policy: Optional[PolicyEngine] = None,
         embedder: Optional[EmbeddingBackend] = None,
         sections: Optional[list[Section]] = None,
-        extra_sections: Optional[dict[str, Section]] = None,
         spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
         ledger: Optional[EventLedger] = None,
+        builtins: Iterable[str] = DEFAULT_BUILTINS,
+        on_event: Optional[Callable[[Event], None]] = None,
     ) -> None:
         self.config = config or Config()
         self.llm = llm
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
-        ensure_meta_tools(self.registry)
-        ensure_checklist_tool(self.registry)
+        install_builtins(self.registry, builtins)
 
         self.session_id = new_id("session")
-        self.ledger = ledger if ledger is not None else _make_ledger(self.config)
+        base = ledger if ledger is not None else _make_ledger(self.config)
+        self.ledger = base if on_event is None else ObservedLedger(base, on_event)
         self.run = Run(new_id("run"), self.session_id, self.ledger)
 
         self.policy = policy if policy is not None else self._default_policy()
@@ -107,7 +107,7 @@ class Session:
         self._kernel_text = kernel
         if sections is None:
             sections = build_default_sections(
-                self.config.projection.sections, kernel_text=kernel, extra=extra_sections,
+                self.config.projection.sections, kernel_text=kernel,
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
         self.runtime = Runtime(self.registry, self.config)
@@ -190,6 +190,18 @@ class Session:
     def resolve_approval(self, decision: str) -> ApprovalRequest:
         return self.run.resolve_approval(decision, current_policy_revision=self.policy.revision)
 
+    def answer(self, text: str) -> PendingQuestion:
+        """Answer the question the model asked through ``meta.user.ask``; the
+        run is ``RUNNING`` again and continues with :meth:`resume`."""
+        question = self.run.answer(text)
+        self._observe(question.call_id, "meta.user.ask", text)
+        self._snapshot()
+        return question
+
+    @property
+    def _pending(self) -> Any:
+        return self.run.pending_approval or self.run.pending_question
+
     def resume(self) -> Any:
         _ensure_no_running_loop()
         return asyncio.run(self.aresume())
@@ -198,12 +210,11 @@ class Session:
         async with self._guarded():
             if self.run.state != "RUNNING":
                 raise RunStateError(f"Run {self.run.id} is not resumable from state {self.run.state}")
-            turn = self._new_turn()
-            batch = await self.runtime.resume_pending(self.run, self._tool_context(), self.policy)
+            batch = await self.runtime.resume_pending(self.run, self._context(), self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:
-                return self.run.pending_approval
+                return self._pending
             return await self._loop()
 
     # -- direct invocation ---------------------------------------------------
@@ -213,16 +224,13 @@ class Session:
         return asyncio.run(self.ainvoke(capability_name, **arguments))
 
     async def ainvoke(self, capability_name: str, **arguments: Any) -> Any:
-        from .messages import ToolCall
-
         async with self._guarded():
-            turn = self._new_turn()
             call = ToolCall(name=capability_name, arguments=arguments)
-            batch = await self.runtime.execute([call], self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute([call], self._context(), self.run, self.policy)
             self._apply_batch(batch, record=False)
             self._snapshot()
             if batch.halted:
-                return self.run.pending_approval
+                return self._pending
             result = batch.results[0]
             if not result.ok:
                 raise RuntimeError(result.observation or result.error or "invoke failed")
@@ -262,30 +270,21 @@ class Session:
         point, and the budget is reset.
         """
         irreversible = self._irreversible_effects(up_to_turn=to_turn)
-        all_events = list(self.ledger.iter_run(self.run.id))
-        renderable = [e for e in all_events if e.type in RENDERABLE_TYPES]
-        checkpoints = [e for e in all_events if e.type == "checkpoint"]
-
-        user_turns_seen = 0
-        cut_index = len(renderable)
-        for i, event in enumerate(renderable):
-            if event.type == "user_input":
-                if user_turns_seen == to_turn:
-                    cut_index = i
-                    break
-                user_turns_seen += 1
-
-        kept_renderable = renderable[:cut_index]
-
+        # One pass: keep renderable events before the to_turn-th user input,
+        # and restore the working state from the checkpoint written right
+        # after it.
+        kept_renderable: list[Event] = []
         restored_ws = WorkingState()
         user_count = 0
-        looking_for_checkpoint = False
-        for event in all_events:
-            if event.type == "user_input":
-                if user_count == to_turn:
-                    looking_for_checkpoint = True
+        cut = False
+        for event in self.ledger.iter_run(self.run.id):
+            if not cut and event.type == "user_input":
+                cut = user_count == to_turn
                 user_count += 1
-            elif event.type == "checkpoint" and looking_for_checkpoint:
+            if not cut:
+                if event.type in RENDERABLE_TYPES:
+                    kept_renderable.append(event)
+            elif event.type == "checkpoint":
                 restored_ws = WorkingState.from_dict(event.data.get("working_state") or {})
                 break
 
@@ -304,8 +303,7 @@ class Session:
         self._idle_turns = 0
         self._budget_grace_used = False
         self._active = OrderedDict()
-        self.runtime.seen_specs = set()
-        self.runtime._consecutive_validation_failures = {}
+        self.runtime.reset()
         self._snapshot()
 
         return irreversible
@@ -340,6 +338,7 @@ class Session:
         registry: Optional[Registry] = None, policy: Optional[PolicyEngine] = None,
         embedder: Optional[EmbeddingBackend] = None,
         spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
+        on_event: Optional[Callable[[Event], None]] = None,
     ) -> "Session":
         config = config or Config()
         if not config.persistence.ledger_directory:
@@ -351,9 +350,9 @@ class Session:
 
         session = cls(
             llm, config=config, registry=registry, policy=policy, embedder=embedder,
-            spawn_llm_factory=spawn_llm_factory, ledger=ledger,
+            spawn_llm_factory=spawn_llm_factory, ledger=ledger, on_event=on_event,
         )
-        session.run = Run.from_snapshot_state(run_id, ledger, snapshot.state)
+        session.run = Run.from_snapshot_state(run_id, session.ledger, snapshot.state)
         session.session_id = snapshot.state.get("session_id", session.session_id)
         session.working_state = WorkingState.from_dict(snapshot.state.get("working_state") or {})
         for event in ledger.iter_run(run_id, after=snapshot.sequence):
@@ -408,18 +407,20 @@ class Session:
                 self._snapshot()
                 return stop
 
-            turn = self._new_turn()
-            api_tools = self._api_tools(turn)
-            turn.dedupe_candidate_cards = self.config.projection.dedupe_candidate_cards_against_schemas
+            ctx = self._context()
+            api_tools = self._api_tools(ctx)
+            ctx.dedupe_candidate_cards = self.config.projection.dedupe_candidate_cards_against_schemas
             reserved = self.config.projection.reserved_output_tokens + self.config.projection.provider_overhead_tokens
-            messages = self.projection.render(turn, api_tools=api_tools, reserved_tokens=reserved)
+            messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
+            if await self._fold(ctx, messages):
+                messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
             self.ledger.append(self.run.id, "projection_compiled", {
                 "tokens": estimate_tokens(messages), "messages": len(messages),
-                "candidates": [s.tool.name for s in turn.candidates],
+                "candidates": [s.tool.name for s in ctx.candidates],
             })
 
-            decision = extract_finish(await self.llm.complete(messages, api_tools or None))
-            self._note_usage(decision, messages, api_tools)
+            decision = extract_finish(await self.llm.complete(messages, ctx.api_tools or None))
+            self.budget.note_decision(decision, messages, ctx.api_tools, self.config)
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
             self.budget.steps += 1
@@ -439,6 +440,12 @@ class Session:
                 continue
 
             if decision.finish:
+                schema = self.config.result_schema
+                error = validate_value(schema, decision.result) if schema else None
+                if error is not None:
+                    self.ledger.append(self.run.id, "decision_validated", {"ok": False, "reason": f"result_schema: {error}"})
+                    self._notice(f"[runtime] finish(result) rejected: {error}. Fix the result and call finish again.")
+                    continue
                 self.ledger.append(self.run.id, "decision_validated", {"ok": True, "finish": True})
                 if self.config.mode == "job":
                     self.run.complete(decision.result)
@@ -455,20 +462,58 @@ class Session:
 
             self._idle_turns = 0
             self.ledger.append(self.run.id, "decision_validated", {"ok": True, "finish": False})
-            batch = await self.runtime.execute(decision.calls, self._tool_context(), self.run, self.policy)
+            batch = await self.runtime.execute(decision.calls, ctx, self.run, self.policy)
             self._apply_batch(batch)
             self._snapshot()
             if batch.halted:
-                return self.run.pending_approval
+                return self._pending
+
+    async def _fold(self, ctx: TurnContext, messages: list[Message]) -> bool:
+        """Compaction: when the prompt exceeds ``compaction.trigger_ratio`` of
+        the window, fold history older than the full-fidelity window into the
+        working state with one model call. Returns True when the projection
+        must be re-rendered."""
+        ratio = self.config.compaction.trigger_ratio
+        if ratio <= 0:
+            return False
+        used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
+        if used <= ratio * self.config.projection.window_tokens:
+            return False
+        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
+        keep = self.config.compression.full_window
+        foldable = [e for e in events[:max(0, len(events) - keep)] if e.sequence > self.working_state.folded_sequence]
+        if not foldable:
+            return False
+        lines = []
+        for e in foldable:
+            m = event_to_message(e)
+            if m is not None:
+                lines.append(f"{m['role']}: {m.get('content', '')}")
+        prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content="\n".join(lines))]
+        decision = await self.llm.complete(prompt)
+        self.budget.steps += 1
+        self.budget.note_decision(decision, prompt, [], self.config)
+        delta = parse_fold_reply(decision.text)
+        before = self.working_state.to_dict()
+        error = "reply was not a JSON object" if delta is None else apply_fold_delta(self.working_state, delta)
+        if error is not None:
+            self._notice(f"[runtime] compaction skipped: {error}")
+            return False
+        self.working_state.folded_sequence = foldable[-1].sequence
+        self.ledger.append(self.run.id, "state_folded", {
+            "through_sequence": self.working_state.folded_sequence, "before": before, "delta": delta,
+        })
+        return True
 
     def _apply_batch(self, batch, *, record: bool = True) -> None:
+
         for result in batch.results:
             # A call parked on an approval has no result yet. Recording a
             # placeholder observation would either be overwritten by the real
             # one on resume (two results for one call) or stand in for a call
             # that never ran; instead the whole decision stays out of the
             # projection until it completes — see pair_tool_calls.
-            if record and result.outcome != "waiting_approval":
+            if record and result.outcome not in WAITING_OUTCOMES:
                 self._observe(result.call.id, result.call.name, result.observation)
             if result.ok:
                 self._activate(result.call.name)
@@ -490,13 +535,12 @@ class Session:
             return self.run.result if self.run.result is not None else self._last_assistant_text()
         return self._last_assistant_text() or "[budget exhausted]"
 
-    def _new_turn(self) -> TurnContext:
-        turn = TurnContext(
-            config=self.config, registry=self.registry, ledger=self.ledger, run_id=self.run.id,
-            working_state=self.working_state, session=self, store=self.store, step=self.budget.steps,
+    def _context(self) -> TurnContext:
+        return TurnContext(
+            config=self.config, registry=self.registry, ledger=self.ledger, run=self.run,
+            working_state=self.working_state, session=self, store=self.store, search=self.search,
+            candidates=self._layer2_candidates(),
         )
-        turn.candidates = self._layer2_candidates()
-        return turn
 
     def _layer2_candidates(self) -> list[ScoredTool]:
         query = "\n".join(q for q in self._candidate_queries() if q)
@@ -529,11 +573,11 @@ class Session:
     def _last_assistant_text(self) -> str:
         return self._last_text(ASSISTANT)
 
-    def _api_tools(self, turn: TurnContext) -> list[dict]:
+    def _api_tools(self, ctx: TurnContext) -> list[dict]:
         names: "OrderedDict[str, None]" = OrderedDict()
         for capability in self.registry.pinned():
             names[capability.name] = None
-        for scored in turn.candidates:
+        for scored in ctx.candidates:
             names[scored.tool.name] = None
         for name in self._active:
             names[name] = None
@@ -545,10 +589,11 @@ class Session:
     def _activate(self, name: str) -> None:
         self._active[name] = None
         self._active.move_to_end(name)
-        while len(self._active) > _ACTIVE_TOOL_CAP:
+        while len(self._active) > self.config.discovery.active_tools:
             self._active.popitem(last=False)
 
-    def _activate_tools(self, names: list[str]) -> None:
+    def activate(self, names: Iterable[str]) -> None:
+        """Mark tools recently used so their schemas are sent natively next turn."""
         for name in names:
             self._activate(name)
 
@@ -574,27 +619,6 @@ class Session:
 
     def _checkpoint(self) -> None:
         self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
-
-    def _note_usage(self, decision, messages: list[Message], api_tools: list[dict]) -> None:
-        if decision.usage is not None:
-            self.budget.note_usage(decision.usage.prompt_tokens, decision.usage.completion_tokens, self.config)
-        else:
-            completion_tokens = estimate_tokens(decision.text)
-            for call in decision.calls:
-                arguments = call.raw_arguments if call.raw_arguments is not None else call.arguments
-                completion_tokens += 6 + estimate_tokens(call.name) + estimate_tokens(arguments)
-            # Adapters normalize finish(result) out of calls before returning.
-            if decision.finish:
-                completion_tokens += 6 + estimate_tokens("finish") + estimate_tokens({"result": decision.result})
-            self.budget.note_usage(
-                estimate_tokens(messages) + estimate_tokens(api_tools), completion_tokens, self.config
-            )
-
-    def _tool_context(self) -> ToolContext:
-        return ToolContext(
-            session=self, registry=self.registry, store=self.store, working_state=self.working_state,
-            config=self.config, search=self.search, ledger=self.ledger, run=self.run,
-        )
 
 
 class _Continue:

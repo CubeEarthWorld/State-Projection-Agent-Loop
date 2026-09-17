@@ -2,10 +2,10 @@
 
 A :class:`Run` is one job/conversation execution. Its state is not implicit
 in "is the Python object still alive" — it is an explicit, ledger-recorded
-value that a new process can read back after a restart. Approval is a
-first-class state (``WAITING_FOR_APPROVAL``) with its own persisted record
-(:class:`ApprovalRequest`), not just a hook that blocks a batch and forgets
-why.
+value that a new process can read back after a restart. Waiting is a
+first-class state (``WAITING_FOR_APPROVAL``, ``WAITING_FOR_USER``) with its
+own persisted record (:class:`ApprovalRequest`, :class:`PendingQuestion`),
+not just a hook that blocks a batch and forgets why.
 
 A :class:`Command` is one planned invocation of a capability. Its
 ``command_id`` is stable across retries of the *same* logical attempt (never
@@ -69,6 +69,37 @@ class ApprovalRequest:
         return self.expires_at is not None and now >= self.expires_at
 
 
+@dataclass
+class Question:
+    """What a handler returns to pause the run until the user answers (see
+    the ``ask`` pack). The runtime turns it into a :class:`PendingQuestion`."""
+
+    text: str
+    choices: Optional[list[str]] = None
+
+
+@dataclass
+class PendingQuestion:
+    """A question the run is waiting on, persisted in the snapshot so the
+    pause survives a restart. ``Session.answer`` fills ``answer`` and resumes."""
+
+    id: str
+    command_id: str
+    call_id: str
+    text: str
+    choices: Optional[list[str]] = None
+    answer: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "command_id": self.command_id, "call_id": self.call_id,
+                "text": self.text, "choices": self.choices, "answer": self.answer}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "PendingQuestion":
+        return cls(id=d["id"], command_id=d["command_id"], call_id=d["call_id"], text=d["text"],
+                   choices=d.get("choices"), answer=d.get("answer"))
+
+
 class Run:
     """The state machine for one execution. Every transition and approval
     event is written to the ledger *before* ``self.state`` is updated, so a
@@ -85,8 +116,9 @@ class Run:
         # Kept around after resolve_approval() clears pending_approval, so
         # resume can find the exact command_id that was approved instead of
         # minting a fresh one (P0-2: an approved command must keep its
-        # idempotency key across the pause).
+        # idempotency key across the pause). The runtime clears it once consumed.
         self.last_resolved_approval: Optional[ApprovalRequest] = None
+        self.pending_question: Optional[PendingQuestion] = None
         self.pending_calls: list[ToolCall] = []
         self.result: Any = None
 
@@ -189,6 +221,33 @@ class Run:
         self.transition("RUNNING", reason=f"approval {decision}")
         return request
 
+    # -- questions ------------------------------------------------------------
+
+    def ask_question(self, command: Command, call_id: str, question: Question) -> PendingQuestion:
+        """Park the run on a question the model asked the user (the ``ask`` pack)."""
+        pending = PendingQuestion(id=new_id("question"), command_id=command.id, call_id=call_id,
+                                  text=question.text, choices=question.choices)
+        self.pending_question = pending
+        self.ledger.append(self.id, "question_asked", {
+            "question_id": pending.id, "command_id": command.id, "call_id": call_id,
+            "text": question.text, "choices": question.choices,
+        })
+        self.transition("WAITING_FOR_USER", reason="question")
+        return pending
+
+    def answer(self, text: str) -> PendingQuestion:
+        """Answer the pending question; the asking command completes with the
+        answer as its result and the run is ``RUNNING`` again."""
+        pending = self.pending_question
+        if pending is None:
+            raise RunStateError(f"Run {self.id} has no pending question to answer")
+        pending.answer = text
+        self.ledger.append(self.id, "question_answered", {"question_id": pending.id, "answer": text})
+        self.record_outcome(self.commands[pending.command_id], "ok")
+        self.pending_question = None
+        self.transition("RUNNING", reason="answered")
+        return pending
+
     # -- persistence snapshot ------------------------------------------------
 
     def to_snapshot_state(self) -> dict[str, Any]:
@@ -209,6 +268,7 @@ class Run:
                 "policy_revision": self.pending_approval.policy_revision,
                 "expires_at": self.pending_approval.expires_at,
             },
+            "pending_question": None if self.pending_question is None else self.pending_question.to_dict(),
             "pending_calls": [
                 {"id": c.id, "name": c.name, "arguments": c.arguments, "raw_arguments": c.raw_arguments}
                 for c in self.pending_calls
@@ -238,6 +298,9 @@ class Run:
                 reason=pa["reason"], policy_revision=pa["policy_revision"],
                 expires_at=pa.get("expires_at"),
             )
+        pq = state.get("pending_question")
+        if pq:
+            run.pending_question = PendingQuestion.from_dict(pq)
         run.pending_calls = [
             ToolCall(id=c["id"], name=c["name"], arguments=c["arguments"], raw_arguments=c.get("raw_arguments"))
             for c in (state.get("pending_calls") or [])

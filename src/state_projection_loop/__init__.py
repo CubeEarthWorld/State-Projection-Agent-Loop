@@ -7,13 +7,17 @@ Authorize → Execute → Record → Continue/Wait/Complete.
 """
 
 from .artifacts import ArtifactStore, ref as artifact_ref
+from .builtin import BUILTIN_PACKS, DEFAULT_BUILTINS, install_builtins
+from .builtin.skills import skill_capability
+from .builtin.toolkits import install_toolkits
+from .compaction import FOLD_INSTRUCTIONS, FOLD_SCHEMA, apply_fold_delta, parse_fold_reply
 from .capability import Capability, ToolContext, capability
 from .compression import compress_text, summarize_text, content_hash
 from .config import Config
 from .checklists import ChecklistStore
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend, HashingEmbedding
-from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, Snapshot, event_to_message
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, event_to_message
 from .llm import LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
 from .messages import Decision, Message, ToolCall, Usage
 from .policy import PolicyEngine, PolicyDecision, Rule
@@ -24,18 +28,17 @@ from .projection import (
     KernelSection,
     Projection,
     Section,
-    TocSection,
     TurnContext,
+    TocSection,
+    runtime_notes,
 )
 from .registry import Registry, ToolProvider
-from .run import ApprovalRequest, Command, Run, RunStateError
-from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult, validate_args
+from .run import ApprovalRequest, Command, PendingQuestion, Question, Run, RunStateError
+from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult, validate_args, validate_value
 from .session import ConcurrencyError, Session
 from .working_state import RecordedDecision, WorkingState, WorkingStateSection
-from .builtin.meta import install_spawn
-from .builtin.state import install_state
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Config",
@@ -55,6 +58,7 @@ __all__ = [
     "TocSection",
     "HistorySection",
     "CandidatesSection",
+    "runtime_notes",
     "WorkingState",
     "WorkingStateSection",
     "RecordedDecision",
@@ -72,6 +76,16 @@ __all__ = [
     "RunStateError",
     "Command",
     "ApprovalRequest",
+    "Question",
+    "PendingQuestion",
+    "ObservedLedger",
+    "validate_value",
+    "skill_capability",
+    "install_toolkits",
+    "FOLD_SCHEMA",
+    "FOLD_INSTRUCTIONS",
+    "parse_fold_reply",
+    "apply_fold_delta",
     "Event",
     "EventLedger",
     "InMemoryLedger",
@@ -93,7 +107,8 @@ __all__ = [
     "compress_text",
     "summarize_text",
     "content_hash",
-    "install_state",
-    "install_spawn",
+    "install_builtins",
+    "DEFAULT_BUILTINS",
+    "BUILTIN_PACKS",
     "__version__",
 ]

@@ -19,6 +19,7 @@ from state_projection_loop import (
     TurnContext,
 )
 from state_projection_loop.projection import build_default_sections
+from state_projection_loop.run import Run
 from state_projection_loop.tokens import estimate_tokens
 from state_projection_loop.working_state import WorkingState
 
@@ -46,11 +47,12 @@ def make_ledger_with_events(n_user=3, n_obs=0):
 def make_turn(registry=None, ledger=None, run_id="run_test", working_state=None, candidates=None, window=30000):
     cfg = Config()
     cfg.projection.window_tokens = window
+    ledger = ledger or InMemoryLedger()
     return TurnContext(
         config=cfg,
         registry=registry or Registry(),
-        ledger=ledger or InMemoryLedger(),
-        run_id=run_id,
+        ledger=ledger,
+        run=Run(run_id, "ses_test", ledger),
         working_state=working_state or WorkingState(),
         candidates=candidates or [],
     )

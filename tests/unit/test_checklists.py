@@ -7,7 +7,7 @@ import pytest
 
 from state_projection_loop import (
     ChecklistStore, ChecklistSection, Config, Decision, PolicyEngine,
-    ScriptedLLM, Session, ToolCall, TurnContext, WorkingState, install_spawn,
+    ScriptedLLM, Session, ToolCall, TurnContext, WorkingState, install_builtins,
 )
 
 
@@ -186,7 +186,7 @@ def test_branch_rewind_and_spawn_do_not_share_plans():
     session.invoke("planning.checklist.manage", action="delete", id=value["id"], expected_revision=1)
     session.rewind(to_turn=1)
     assert session.checklists.execute("get", id=value["id"])["name"] == "original"
-    install_spawn(session.registry)
+    install_builtins(session.registry, ["spawn"])
     session.spawn_llm_factory = lambda model: ScriptedLLM([
         ScriptedLLM.call("planning.checklist.manage", action="update", id=value["id"], expected_revision=1, name="delegated"),
         ScriptedLLM.finish(result="done"),
@@ -257,7 +257,7 @@ def test_ledger_failure_does_not_apply_edit():
 
 def test_native_schema_dedup_keeps_text_fallback():
     session = Session(ScriptedLLM([]))
-    turn = TurnContext(config=session.config, registry=session.registry, ledger=session.ledger, run_id=session.run.id)
+    turn = TurnContext(config=session.config, registry=session.registry, ledger=session.ledger, run=session.run)
     kernel = session.projection.get("kernel")
     assert "Parameters (JSON Schema)" in kernel.render(turn)[0].content
     turn.api_tools = [c.api_schema() for c in session.registry.pinned()]

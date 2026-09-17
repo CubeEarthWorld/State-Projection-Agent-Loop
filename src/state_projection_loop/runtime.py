@@ -29,18 +29,20 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .artifacts import ArtifactStore, serialize_value, truncate_to_tokens
 from .capability import Capability, Effect, ToolContext
+from .compression import content_hash
 from .config import Config
-from .messages import ToolCall
+from .llm import FINISH_NAME
+from .messages import Decision, Message, ToolCall
 from .policy import PolicyEngine
-from .projection import TurnContext
 from .registry import Registry
-from .run import Command, Run
+from .run import Command, Question, Run
 from .serialization import dumps
 from .tokens import estimate_tokens
 
@@ -147,6 +149,11 @@ def apply_defaults(schema: dict[str, Any], args: dict[str, Any]) -> dict[str, An
     return out
 
 
+def validate_value(schema: dict[str, Any], value: Any) -> Optional[str]:
+    """Validate any JSON value against a schema; error message or None."""
+    return _mini_validate(schema, value)
+
+
 def validate_args(schema: dict[str, Any], args: Any) -> Optional[str]:
     """Return an error message, or None when the arguments pass.
 
@@ -165,7 +172,13 @@ def validate_args(schema: dict[str, Any], args: Any) -> Optional[str]:
 # Results
 # ---------------------------------------------------------------------------
 
-OUTCOMES = ("ok", "failed", "unknown", "denied", "waiting_approval")
+OUTCOMES = ("ok", "failed", "unknown", "denied", "waiting_approval", "waiting_user")
+
+# Outcomes whose result arrives later (approval, answer): nothing is recorded
+# for the call until then, so the decision stays out of the projection as a
+# whole — see pair_tool_calls.
+WAITING_OUTCOMES = frozenset({"waiting_approval", "waiting_user"})
+_DIGITS = re.compile(r"\d")
 
 
 @dataclass
@@ -176,7 +189,6 @@ class ToolResult:
     error: Optional[str] = None
     observation: str = ""
     artifact_id: Optional[str] = None
-    elapsed_s: float = 0.0
     outcome: str = "ok"  # one of OUTCOMES
     command_id: Optional[str] = None
 
@@ -214,6 +226,21 @@ class BudgetState:
         b = cfg.budget
         self.cost += prompt / 1000 * b.cost_per_1k_input + completion / 1000 * b.cost_per_1k_output
 
+    def note_decision(self, decision: Decision, messages: list[Message], api_tools: list[dict], cfg: Config) -> None:
+        """Account one model turn: the adapter's reported usage when it has
+        one, otherwise an estimate from what was sent and what came back."""
+        if decision.usage is not None:
+            self.note_usage(decision.usage.prompt_tokens, decision.usage.completion_tokens, cfg)
+            return
+        completion = estimate_tokens(decision.text)
+        for call in decision.calls:
+            arguments = call.raw_arguments if call.raw_arguments is not None else call.arguments
+            completion += 6 + estimate_tokens(call.name) + estimate_tokens(arguments)
+        # Adapters normalize finish(result) out of calls before returning.
+        if decision.finish:
+            completion += 6 + estimate_tokens(FINISH_NAME) + estimate_tokens({"result": decision.result})
+        self.note_usage(estimate_tokens(messages) + estimate_tokens(api_tools), completion, cfg)
+
     def exceeded(self, cfg: Config) -> Optional[str]:
         b = cfg.budget
         if b.max_steps is not None and self.steps >= b.max_steps:
@@ -245,6 +272,68 @@ class Runtime:
         # are exempt because their spec is always in the kernel section.
         self.seen_specs: set[str] = set()
         self._consecutive_validation_failures: dict[str, int] = {}
+        # Loop guard memory: (capability, arguments hash, result tag) of the
+        # last ``limits.repeat_window`` executed calls in this run.
+        self._recent: list[tuple[str, str, str]] = []
+
+    def reset(self) -> None:
+        """Forget what this runtime learned from the conversation so far.
+        Called on rewind: the specs shown and the failures counted are in
+        the discarded history, so a capability must not start the new
+        timeline already one strike from "giving up"."""
+        self.seen_specs.clear()
+        self._consecutive_validation_failures.clear()
+        self._recent.clear()
+
+    # -- loop guard -----------------------------------------------------------
+
+    @staticmethod
+    def _args_hash(args: dict[str, Any]) -> str:
+        return content_hash(dumps(args))
+
+    def _loop_guard(self, call: ToolCall, capability: Capability, args: dict[str, Any]) -> Optional[ToolResult]:
+        """Refuse a call the model keeps repeating with identical arguments
+        when every repeat failed, or (for anything but a pure read) every
+        repeat returned the same result. Polling a pure read for a change is
+        legitimate and stays allowed."""
+        limit = self.config.limits.max_repeats
+        if limit <= 0:
+            return None
+        args_hash = self._args_hash(args)
+        tags = [tag for name, ahash, tag in self._recent if name == capability.name and ahash == args_hash]
+        if len(tags) < limit:
+            return None
+        why: Optional[str] = None
+        if sum(1 for t in tags if t.startswith("err:")) >= limit:
+            why = f"failed identically {len(tags)} times"
+        elif not (self.is_read_only(capability) and capability.execution.retry_safety == "pure"):
+            if max(tags.count(t) for t in set(tags)) >= limit:
+                why = f"returned the same result {len(tags)} times"
+        if why is None:
+            return None
+        return ToolResult(
+            call=call, ok=False, outcome="failed", error="loop_guard",
+            observation=(
+                f"Loop guard: {capability.name!r} with these exact arguments {why}. "
+                "It was not executed again; change the arguments or the approach."
+            ),
+        )
+
+    def _remember(self, capability: Capability, args: dict[str, Any], result: ToolResult) -> None:
+        if result.outcome in WAITING_OUTCOMES:
+            return
+        tag = (content_hash(serialize_value(result.value)) if result.ok
+               else "err:" + content_hash(_DIGITS.sub("", result.error or "")))
+        self._recent.append((capability.name, self._args_hash(args), tag))
+        del self._recent[:-self.config.limits.repeat_window or None]
+
+    async def _run(
+        self, capability: Capability, args: dict[str, Any], ctx: ToolContext, run: Run, call: ToolCall,
+        command: Optional[Command] = None,
+    ) -> ToolResult:
+        result = await self._execute_one(capability, args, ctx, run, call, command=command)
+        self._remember(capability, args, result)
+        return result
 
     # -- public ---------------------------------------------------------------
 
@@ -265,9 +354,9 @@ class Runtime:
                 return
             if len(buffer) == 1:
                 call, cap, args = buffer[0]
-                results.append(await self._execute_one(cap, args, ctx, run, call))
+                results.append(await self._run(cap, args, ctx, run, call))
             else:
-                tasks = [self._execute_one(cap, args, ctx, run, call) for call, cap, args in buffer]
+                tasks = [self._run(cap, args, ctx, run, call) for call, cap, args in buffer]
                 results.extend(await asyncio.gather(*tasks))
             buffer.clear()
 
@@ -278,6 +367,11 @@ class Runtime:
                 results.append(pre)
                 continue
             capability, args = pre
+            tripped = self._loop_guard(call, capability, args)
+            if tripped is not None:
+                await flush()
+                results.append(tripped)
+                continue
             decision = policy.evaluate(capability, args)
             if decision.decision == "deny":
                 await flush()
@@ -302,7 +396,10 @@ class Runtime:
                 buffer.append((call, capability, args))
             else:
                 await flush()
-                results.append(await self._execute_one(capability, args, ctx, run, call))
+                results.append(await self._run(capability, args, ctx, run, call))
+                if results[-1].outcome == "waiting_user":
+                    run.pending_calls = list(calls[idx + 1:])
+                    return ExecuteBatchResult(results=results, halted=True)
         await flush()
         return ExecuteBatchResult(results=results, halted=False)
 
@@ -323,6 +420,7 @@ class Runtime:
             return ExecuteBatchResult(results=[], halted=False)
         first_call = pending[0]
         resolved = run.last_resolved_approval
+        run.last_resolved_approval = None  # consumed here; must not leak into a later pause
         approved = run.commands.get(resolved.command_id) if resolved and resolved.resolution == "approved" else None
         if resolved is not None and resolved.resolution == "denied":
             denied_command = run.commands.get(resolved.command_id)
@@ -349,7 +447,10 @@ class Runtime:
                                        observation=f"Error: capability {first_call.name!r} no longer registered."))
         else:
             args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
-            results.append(await self._execute_one(capability, args, ctx, run, first_call, command=approved))
+            results.append(await self._run(capability, args, ctx, run, first_call, command=approved))
+            if results[-1].outcome == "waiting_user":
+                run.pending_calls = list(pending[1:])
+                return ExecuteBatchResult(results=results, halted=True)
         run.pending_calls = []
         rest = await self.execute(pending[1:], ctx, run, policy)
         results.extend(rest.results)
@@ -436,7 +537,7 @@ class Runtime:
     ) -> ToolResult:
         if command is None:
             command = run.new_command(capability.qualified_name, args, capability.execution.retry_safety)
-        call_ctx = replace(ctx, command_id=command.id)
+        call_ctx = ctx.for_command(command.id)
 
         handler = capability.execution.handler
         if handler is None:
@@ -447,7 +548,6 @@ class Runtime:
             )
         resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
-        start = time.time()
         last_error = ""
         last_outcome = "failed"
         for attempt in range(attempts):
@@ -457,12 +557,18 @@ class Runtime:
                     self._invoke(handler, capability, resolved, call_ctx),
                     timeout=capability.execution.timeout_s,
                 )
-                elapsed = time.time() - start
+                if isinstance(value, Question):
+                    # The command stays pending until Session.answer completes it.
+                    run.ask_question(command, call.id, value)
+                    return ToolResult(
+                        call=call, ok=False, outcome="waiting_user", error="question_pending",
+                        observation=f"Question pending: {value.text}", command_id=command.id,
+                    )
                 observation, artifact_id = self._observation_for(capability, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id)
                 return ToolResult(
                     call=call, ok=True, value=value, outcome="ok", command_id=command.id,
-                    observation=observation, artifact_id=artifact_id, elapsed_s=elapsed,
+                    observation=observation, artifact_id=artifact_id,
                 )
             except asyncio.TimeoutError:
                 # We cannot confirm whether the underlying effect completed
@@ -476,10 +582,9 @@ class Runtime:
                 last_outcome = "failed"
             if attempt < attempts - 1:
                 await asyncio.sleep(min(0.5 * (attempt + 1), 2.0))
-        elapsed = time.time() - start
         run.record_outcome(command, last_outcome, error=last_error)
         return ToolResult(
-            call=call, ok=False, error=last_error, outcome=last_outcome, elapsed_s=elapsed,
+            call=call, ok=False, error=last_error, outcome=last_outcome,
             command_id=command.id,
             observation=(
                 f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing {capability.name!r} "

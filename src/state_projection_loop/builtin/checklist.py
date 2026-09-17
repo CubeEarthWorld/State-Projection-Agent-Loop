@@ -1,8 +1,6 @@
-"""Resident checklist tool; all operations use the session's working state."""
+"""Handler of the ``checklist`` pack; all operations use the session's working state."""
 from ..capability import ToolContext
 from ..checklists import ChecklistStore
-from .defs import load
-
 
 
 async def _checklist(ctx: ToolContext, action: str, **arguments):
@@ -18,6 +16,4 @@ async def _checklist(ctx: ToolContext, action: str, **arguments):
     return result
 
 
-def ensure_checklist_tool(registry):
-    if "planning.checklist.manage" not in registry:
-        registry.register(load("checklist"), handler=_checklist)
+CHECKLIST_HANDLERS = {"planning.checklist.manage": _checklist}

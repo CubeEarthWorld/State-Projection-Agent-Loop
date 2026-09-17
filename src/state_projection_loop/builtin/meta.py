@@ -1,21 +1,20 @@
-"""Resident meta capabilities: ``find_tools``, ``peek``, and
-``search_history`` are always present; ``spawn`` is opt-in via
-``install_spawn``.
+"""Handlers of the ``meta`` pack (``meta.tool.find``, ``meta.artifact.peek``,
+``meta.history.search``) and the opt-in ``spawn`` pack (``meta.agent.spawn``).
 
-There is no ``done`` capability anymore (P0-3): completion is
-``Decision.finish``, a property of the model's response handled directly by
-the session loop, not something routed through the runtime like any other
-call. See :func:`state_projection_loop.llm.extract_finish`.
+There is no ``done`` capability: completion is ``Decision.finish``, a
+property of the model's response handled directly by the session loop, not
+something routed through the runtime like any other call. See
+:func:`state_projection_loop.llm.extract_finish`.
 """
 from __future__ import annotations
 
 import copy
 from typing import Any, Optional
 
-from ..artifacts import ref as artifact_ref
+from ..artifacts import is_ref
 from ..capability import ToolContext
 from ..registry import Registry
-from .defs import load
+
 
 def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k: int = 8) -> Any:
     results = ctx.search.search(query, category=category, k=k, layer=3)
@@ -23,7 +22,7 @@ def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k:
         toc = ctx.registry.toc_text()
         return f"No tools matched {query!r}. Categories: {toc or '(none)'}"
     if ctx.session is not None:
-        ctx.session._activate_tools([s.tool.name for s in results])
+        ctx.session.activate([s.tool.name for s in results])
     return [
         {"name": s.tool.name, "category": s.tool.category, "card": s.tool.card_text(), "score": round(s.score, 3)}
         for s in results
@@ -31,8 +30,6 @@ def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k:
 
 
 def _peek(ctx: ToolContext, artifact: dict, query: Optional[str] = None, range: Optional[str] = None) -> str:  # noqa: A002
-    from ..artifacts import is_ref
-
     if not is_ref(artifact):
         return f"Error: {artifact!r} is not a valid artifact reference; expected {{'$artifact': '<id>'}}"
     return ctx.store.peek(artifact["$artifact"], query=query, range_=range)
@@ -94,21 +91,10 @@ async def _spawn(
     return result
 
 
-_HANDLERS = {
+META_HANDLERS = {
     "meta.tool.find": _find_tools,
     "meta.artifact.peek": _peek,
     "meta.history.search": _search_history,
 }
 
-
-def ensure_meta_tools(registry: Registry) -> None:
-    """Register the resident meta capabilities if absent."""
-    for definition in load("meta"):
-        if definition["name"] not in registry:
-            registry.register(definition, handler=_HANDLERS[definition["name"]])
-
-
-def install_spawn(registry: Registry) -> None:
-    """Opt-in sub-agent capability for swarm-style setups."""
-    if "meta.agent.spawn" not in registry:
-        registry.register(load("spawn"), handler=_spawn)
+SPAWN_HANDLERS = {"meta.agent.spawn": _spawn}

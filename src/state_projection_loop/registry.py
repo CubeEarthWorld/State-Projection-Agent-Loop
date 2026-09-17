@@ -58,8 +58,8 @@ class Registry:
         self._provider_tools: dict[int, set[str]] = {}
         # A deny-list of names/categories, not of registered objects: a
         # disabled name stays disabled however it is registered afterwards,
-        # so bundled tools that self-install (ensure_meta_tools) cannot
-        # sneak back in.
+        # so a bundled pack installed later (install_builtins) cannot sneak
+        # it back in.
         self._disabled: set[str] = set(disabled)
         self._pinned_cache: tuple[int, list[Capability]] = (-1, [])
 
@@ -81,9 +81,6 @@ class Registry:
             self._latest[cap.name] = cap.qualified_name
         self._epoch += 1
         return cap
-
-    def register_many(self, capabilities: Iterable[Any]) -> list[Capability]:
-        return [self.register(c) for c in capabilities]
 
     def unregister(self, name: str) -> None:
         """Remove by bare name (all versions) or exact ``name@version``."""
@@ -175,11 +172,14 @@ class Registry:
             self._disabled -= removed
             self._epoch += 1
 
+    @staticmethod
+    def _category_of(capability: Capability) -> str:
+        return capability.category or "misc"
+
     def _is_disabled(self, capability: Capability) -> bool:
         if not self._disabled:
             return False
-        category = capability.category or "misc"
-        return any(scope_matches(e, capability.name, category) for e in self._disabled)
+        return any(scope_matches(e, capability.name, self._category_of(capability)) for e in self._disabled)
 
     # -- lookup ---------------------------------------------------------------
 
@@ -242,23 +242,16 @@ class Registry:
             self._pinned_cache = (self._epoch, cached)
         return cached
 
-    def categories(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for c in self:
-            cat = c.category or "misc"
-            counts[cat] = counts.get(cat, 0) + 1
-        return dict(sorted(counts.items()))
-
-    def categories_with_pinned(self) -> dict[str, tuple[int, int]]:
+    def categories(self) -> dict[str, tuple[int, int]]:
+        """Sorted ``category -> (total, pinned)`` counts."""
         totals: dict[str, int] = {}
         pinned: dict[str, int] = {}
         for c in self:
-            cat = c.category or "misc"
+            cat = self._category_of(c)
             totals[cat] = totals.get(cat, 0) + 1
             if c.discovery.pinned:
                 pinned[cat] = pinned.get(cat, 0) + 1
         return {cat: (totals[cat], pinned.get(cat, 0)) for cat in sorted(totals)}
-
 
     # -- layer 1: table of contents -------------------------------------------
 
@@ -270,7 +263,7 @@ class Registry:
         Above ``max_categories`` the index collapses to top-level categories
         only (hierarchise when the TOC itself grows too large).
         """
-        cat_info = self.categories_with_pinned()
+        cat_info = self.categories()
         if len(cat_info) > max_categories:
             top_totals: dict[str, int] = {}
             top_pinned: dict[str, int] = {}
@@ -303,8 +296,7 @@ class Registry:
         scope = list(scope)
         sub = Registry(disabled=self._disabled)
         for c in self:
-            cat = c.category or "misc"
-            if any(scope_matches(entry, c.name, cat) for entry in scope):
+            if any(scope_matches(entry, c.name, self._category_of(c)) for entry in scope):
                 sub._capabilities[c.qualified_name] = c
         sub._recompute_latest()
         sub._epoch = 1
