@@ -36,7 +36,7 @@ class ToolCall:
     validation will fail and route through the self-repair path (§6)."""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "arguments": self.arguments, "raw_arguments": self.raw_arguments}
+        return {"name": self.name, "arguments": self.arguments, "id": self.id, "raw_arguments": self.raw_arguments}
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "ToolCall":
