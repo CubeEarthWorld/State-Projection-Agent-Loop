@@ -3,6 +3,13 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from state_projection_loop.policy import PolicyEngine
+
+
+def allow_all() -> PolicyEngine:
+    """A policy that lets every call run, for tests that are not about policy."""
+    return PolicyEngine(default_decision="allow")
+
 
 def echo_handler(text: str = "") -> str:
     return f"echo: {text}"

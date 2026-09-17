@@ -12,11 +12,7 @@ from state_projection_loop import (
 )
 from state_projection_loop.policy import Rule
 
-from _util import capability_dict
-
-
-def allow_all() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
+from _util import allow_all, capability_dict
 
 
 def observations(session: Session) -> list[tuple[str, str]]:

@@ -6,10 +6,12 @@ from __future__ import annotations
 import pytest
 
 from state_projection_loop import Config, Registry, ScriptedLLM, Session
+from state_projection_loop.messages import Decision, ToolCall, Usage
 from state_projection_loop.policy import PolicyEngine, Rule
 from state_projection_loop.session import ConcurrencyError
+from state_projection_loop.tokens import estimate_tokens
 
-from _util import echo_handler, capability_dict
+from _util import allow_all, capability_dict, echo_handler
 
 
 def echo_registry() -> Registry:
@@ -21,10 +23,6 @@ def echo_registry() -> Registry:
         handler=echo_handler,
     )
     return reg
-
-
-def allow_all_policy() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
 
 
 class TestChatMode:
@@ -48,7 +46,7 @@ class TestChatMode:
             ScriptedLLM.call("demo.echo", text="hello"),
             "The tool said: echo: hello",
         ])
-        session = Session(llm, registry=echo_registry(), policy=allow_all_policy())
+        session = Session(llm, registry=echo_registry(), policy=allow_all())
         reply = session.send("please echo hello")
         assert reply == "The tool said: echo: hello"
         obs = [m for m in session.conversation if m.role == "tool"]
@@ -98,7 +96,7 @@ class TestChatMode:
             "done",
         ])
         cfg = Config.from_dict({"discovery": {"query_sources": []}})  # kill layer 2
-        session = Session(llm, registry=reg, config=cfg, policy=allow_all_policy())
+        session = Session(llm, registry=reg, config=cfg, policy=allow_all())
         assert session.send("noise") == "done"
         find_obs = next(m for m in session.conversation if m.role == "tool" and m.name == "meta.tool.find")
         assert "demo.echo" in str(find_obs.content)
@@ -113,7 +111,7 @@ class TestJobMode:
             ScriptedLLM.call("demo.echo", text="working"),
             ScriptedLLM.finish(result={"status": "ok", "count": 3}),
         ])
-        session = Session(llm, registry=echo_registry(), config=self.job_config(), policy=allow_all_policy())
+        session = Session(llm, registry=echo_registry(), config=self.job_config(), policy=allow_all())
         result = session.run_job("do the thing")
         assert result == {"status": "ok", "count": 3}
         assert session.run.state == "COMPLETED"
@@ -124,11 +122,14 @@ class TestJobMode:
         mixed = Decision(text="", calls=[ToolCall(name="demo.echo", arguments={"text": "x"})],
                           finish=True, result="premature")
         llm = ScriptedLLM([mixed, ScriptedLLM.finish(result="actually done")])
-        session = Session(llm, registry=echo_registry(), config=self.job_config(), policy=allow_all_policy())
+        session = Session(llm, registry=echo_registry(), config=self.job_config(), policy=allow_all())
         result = session.run_job("do the thing")
         assert result == "actually done"
         rejected = [m for m in session.conversation if m.role == "tool" and "Rejected" in str(m.content)]
         assert rejected  # the mixed decision produced a rejection observation, not an execution
+        started = [e for e in session.ledger.iter_run(session.run.id) if e.type == "command_started"]
+        assert started == [], "nothing in a decision that also finishes may run"
+        assert session.run.state == "COMPLETED"
 
     def test_text_only_turn_gets_nudged(self):
         llm = ScriptedLLM([
@@ -148,7 +149,7 @@ class TestJobMode:
             "final wrap-up summary",
         ])
         session = Session(llm, registry=echo_registry(), config=self.job_config(max_steps=2),
-                          policy=allow_all_policy())
+                          policy=allow_all())
         result = session.run_job("loop forever")
         assert result == "final wrap-up summary"
         assert any("Budget exceeded" in str(m.content) for m in session.conversation
@@ -220,7 +221,7 @@ class TestConcurrencyGuard:
         reg = Registry()
         reg.register(capability_dict("demo.slow"), handler=slow_tool)
         llm = ScriptedLLM([ScriptedLLM.call("demo.slow"), "finished"])
-        session = Session(llm, registry=reg, policy=allow_all_policy())
+        session = Session(llm, registry=reg, policy=allow_all())
 
         task = asyncio.create_task(session.asend("go"))
         await started.wait()
@@ -228,6 +229,8 @@ class TestConcurrencyGuard:
             await session.asend("again")
         release.set()
         assert await task == "finished"
+        # the rejected input never reached the conversation
+        assert len([m for m in session.conversation if m.role == "user"]) == 1
 
 
 class TestFidelityCompression:
@@ -250,6 +253,45 @@ class TestBudgetTokens:
         assert session.budget.steps == 1
         assert session.budget.prompt_tokens > 0
         assert session.budget.completion_tokens > 0
+
+
+class TestHistoryAndUsage:
+    def test_long_reply_survives_ledger_and_next_projection(self):
+        reply = "x" * 2100 + "IMPORTANT_END"
+        llm = ScriptedLLM([reply, "ok"])
+        session = Session(llm)
+        assert session.send("one") == reply
+        assert session.conversation[-1].content == reply
+        session.send("continue")
+        assert any(m.content == reply for m in llm.requests[1]["messages"])
+
+
+    @pytest.mark.parametrize("kind", ["arguments", "raw", "finish", "usage"])
+    def test_usage_counts_complete_request_and_output(self, kind):
+        payload = "x" * 8000
+        call = ToolCall(name="missing_tool", arguments={"text": payload})
+        if kind == "raw":
+            call.arguments = {}
+            call.raw_arguments = '{"text":"' + payload
+        decision = Decision(calls=[call])
+        if kind == "finish":
+            decision = ScriptedLLM.finish({"text": payload})
+        if kind == "usage":
+            decision.usage = Usage(prompt_tokens=11, completion_tokens=7)
+        llm = ScriptedLLM([decision, Decision(text="ok", usage=Usage())])
+        config = Config.from_dict({"budget": {"cost_per_1k_input": 1, "cost_per_1k_output": 2}})
+        session = Session(llm, config=config)
+        session.send("go")
+        if kind == "usage":
+            assert session.budget.prompt_tokens == 11
+            assert session.budget.completion_tokens == 7
+        else:
+            request = llm.requests[0]
+            assert session.budget.prompt_tokens == estimate_tokens(request["messages"]) + estimate_tokens(request["tools"])
+            assert session.budget.completion_tokens >= estimate_tokens(payload)
+        assert session.budget.cost == pytest.approx(
+            session.budget.prompt_tokens / 1000 + session.budget.completion_tokens / 1000 * 2
+        )
 
 
 class TestAsyncGuard:
@@ -296,7 +338,7 @@ class TestRewind:
             "sent the email",
             "reply 1",
         ])
-        session = Session(llm, registry=reg, policy=allow_all_policy())
+        session = Session(llm, registry=reg, policy=allow_all())
         session.send("send the email")
         session.send("do something else")
 
@@ -313,7 +355,7 @@ class TestRewind:
             "goal changed",
             "after rewind",
         ])
-        session = Session(llm, policy=allow_all_policy())
+        session = Session(llm, policy=allow_all())
         install_builtins(session.registry, ["state"])
         session.send("set goal")
         session.send("change goal")
@@ -349,7 +391,7 @@ class TestDisabledCapabilitiesAreInvisible:
                                           required=["text"],
                                           embedding_text="echo repeat say"), handler=echo_handler)
         return Session(ScriptedLLM(steps if steps is not None else ["hi"]), kernel="K",
-                       registry=registry, policy=allow_all_policy())
+                       registry=registry, policy=allow_all())
 
     @staticmethod
     def _sent(session: Session) -> tuple[str, list[str]]:
@@ -412,12 +454,12 @@ class TestResumedRunArtifacts:
             "artifacts": {"directory": str(tmp_path / "artifacts")},
         })
         first = Session(ScriptedLLM([ScriptedLLM.finish(result="ok")]), registry=registry,
-                        config=config, policy=allow_all_policy())
+                        config=config, policy=allow_all())
         first.run_job("nothing")
 
         resumed = Session.resume_from_ledger(
             ScriptedLLM([ScriptedLLM.call("demo.big"), ScriptedLLM.finish(result="done")]),
-            first.run.id, config=config, registry=registry, policy=allow_all_policy(),
+            first.run.id, config=config, registry=registry, policy=allow_all(),
         )
         assert resumed.store is not None
         resumed.run.state = "RUNNING"
@@ -460,7 +502,7 @@ class TestStateToolsDeclareTheirWrites:
         from state_projection_loop import install_builtins
         from state_projection_loop.runtime import Runtime
 
-        session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all_policy())
+        session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all())
         install_builtins(session.registry, ["state"])
         mutating = [c for c in session.registry if c.name.startswith("state.") and not c.name.endswith(".get")]
         assert mutating, "expected the bundled state tools to be installed"

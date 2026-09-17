@@ -15,14 +15,12 @@ from examples.customer_support.tools import (
     load_manuals,
 )
 
+from _util import allow_all
+
 
 @pytest.fixture()
 def backend():
     return SupportBackend()
-
-
-def allow_all() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
 
 
 def make_session(backend, steps):

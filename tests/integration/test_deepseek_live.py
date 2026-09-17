@@ -20,6 +20,8 @@ from examples.coding_agent.tools import CODING_KERNEL, build_coding_registry, se
 from examples.customer_support.tools import SUPPORT_KERNEL, SupportBackend, build_support_registry
 from examples.llm_adapters import OpenAICompatAdapter
 
+from _util import allow_all
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -37,10 +39,6 @@ def adapter(**kw) -> OpenAICompatAdapter:
         base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
         temperature=kw.pop("temperature", 0.0), **kw,
     )
-
-
-def allow_all() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
 
 
 class TestBasicChat:

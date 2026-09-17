@@ -18,15 +18,13 @@ from examples.coding_agent.tools import (
     seed_workspace,
 )
 
+from _util import allow_all
+
 
 @pytest.fixture()
 def workspace(tmp_path):
     seed_workspace(tmp_path)
     return tmp_path
-
-
-def allow_all() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
 
 
 class TestBugFixWorkflow:
