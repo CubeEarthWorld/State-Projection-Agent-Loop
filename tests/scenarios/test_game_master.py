@@ -2,7 +2,7 @@
 + dice + full working-state management (goal / flags / variables)."""
 from __future__ import annotations
 
-import pytest
+
 
 from state_projection_loop import ScriptedLLM, Session, install_builtins
 from state_projection_loop.policy import PolicyEngine, Rule

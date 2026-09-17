@@ -25,6 +25,7 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from .context import ToolContext
 from .serialization import dumps
 
 # ---------------------------------------------------------------------------
@@ -52,50 +53,6 @@ class Effect:
     def __post_init__(self) -> None:
         if self.kind not in EFFECT_KINDS:
             raise ValueError(f"Effect.kind must be one of {EFFECT_KINDS}, got {self.kind!r}")
-
-
-# ---------------------------------------------------------------------------
-# Tool context (injected into handlers that declare a `ctx` parameter)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ToolContext:
-    """What a tool handler receives.
-
-    A handler opts in by declaring a first parameter named ``ctx`` (or
-    annotated with ``ToolContext``); it is excluded from the JSON schema and
-    injected by the runtime with ``command_id`` set. ``command_id`` is stable
-    across retries of the *same* logical attempt and is the correct
-    idempotency key to hand to an external API. Fields are typed ``Any`` only
-    to avoid circular imports; they hold the session's Config, Registry,
-    EventLedger, Run, WorkingState, ArtifactStore and ToolSearch.
-
-    Sections render from the superset :class:`~state_projection_loop.projection.TurnContext`;
-    the runtime narrows it with :meth:`for_command` before a handler runs, so
-    projection state never reaches a tool.
-    """
-
-    config: Any = None
-    registry: Any = None
-    ledger: Any = None
-    run: Any = None
-    working_state: Any = None
-    session: Any = None
-    store: Any = None
-    search: Any = None
-    command_id: str = ""
-
-    @property
-    def run_id(self) -> str:
-        return self.run.id if self.run is not None else ""
-
-    def for_command(self, command_id: str) -> "ToolContext":
-        """The handler-facing view of this context for one command."""
-        return ToolContext(
-            config=self.config, registry=self.registry, ledger=self.ledger, run=self.run,
-            working_state=self.working_state, session=self.session, store=self.store,
-            search=self.search, command_id=command_id,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +203,14 @@ class Capability:
         validate_capability_name(self.name)
 
     @property
+    def planned_effects(self) -> list[Effect]:
+        """The effects the policy engine and the runtime reason about. A
+        capability that declares none is NOT assumed safe — that would reward
+        an author who forgot to declare effects with maximum trust and free
+        parallel execution — so it counts as the most restrictive kind."""
+        return self.effects or [Effect(kind="external", resource="undeclared:*")]
+
+    @property
     def wants_ctx(self) -> bool:
         """Derived from the handler it describes, so it cannot go stale when
         a handler is attached after construction."""
@@ -303,8 +268,6 @@ class Capability:
                 preview=op_d.get("preview", "head"),
             ),
         )
-        if execution.handler is None and callable(exe_d.get("handler")):
-            execution.handler = exe_d["handler"]
         effects = [
             Effect(kind=e.get("kind", "none"), resource=e.get("resource", "*"))
             for e in (data.get("effects") or [])
@@ -338,8 +301,6 @@ class Capability:
         return f"- {sig} — {self.card.summary}"
 
     def spec_text(self) -> str:
-        import json as _json
-
         lines = [f"### {self.qualified_name}", self.card.signature]
         if self.spec.description:
             lines.append(self.spec.description)

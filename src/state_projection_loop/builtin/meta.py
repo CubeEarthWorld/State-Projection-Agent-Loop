@@ -12,7 +12,7 @@ import copy
 from typing import Any, Optional
 
 from ..artifacts import is_ref
-from ..capability import ToolContext
+from ..context import ToolContext
 from ..serialization import dumps
 
 

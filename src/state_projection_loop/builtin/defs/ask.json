@@ -1,44 +1,46 @@
-{
-  "name": "meta.user.ask",
-  "category": "meta",
-  "card": {
-    "summary": "Ask the user a question and pause the run until they answer.",
-    "tags": ["meta", "user", "question"]
-  },
-  "spec": {
-    "description": "Ask the user for information or a decision that only they can give. The run pauses until the host supplies an answer; the answer arrives as this call's result.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "question": {
-          "type": "string",
-          "description": "One clear question."
-        },
-        "choices": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Optional fixed options the user may pick from."
-        }
-      },
-      "required": ["question"]
+[
+  {
+    "name": "meta.user.ask",
+    "category": "meta",
+    "card": {
+      "summary": "Ask the user a question and pause the run until they answer.",
+      "tags": ["meta", "user", "question"]
     },
-    "usage_notes": "Ask one question at a time. Never ask for something a tool can find out."
-  },
-  "discovery": {
-    "pinned": true,
-    "kernel_note": "When you need information or a decision only the user can give, call meta.user.ask; the run pauses until they answer.",
-    "no_embed": true
-  },
-  "execution": {
-    "timeout_s": 5,
-    "retry_safety": "never_retry"
-  },
-  "effects": [
-    {
-      "kind": "external",
-      "resource": "user:question"
-    }
-  ]
-}
+    "spec": {
+      "description": "Ask the user for information or a decision that only they can give. The run pauses until the host supplies an answer; the answer arrives as this call's result.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "One clear question."
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional fixed options the user may pick from."
+          }
+        },
+        "required": ["question"]
+      },
+      "usage_notes": "Ask one question at a time. Never ask for something a tool can find out."
+    },
+    "discovery": {
+      "pinned": true,
+      "kernel_note": "When you need information or a decision only the user can give, call meta.user.ask; the run pauses until they answer.",
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 5,
+      "retry_safety": "never_retry"
+    },
+    "effects": [
+      {
+        "kind": "external",
+        "resource": "user:question"
+      }
+    ]
+  }
+]

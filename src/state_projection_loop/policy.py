@@ -23,8 +23,7 @@ responsibility (§7.4).
 from __future__ import annotations
 
 import fnmatch
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from .capability import Capability, Effect
@@ -78,7 +77,6 @@ class PolicyDecision:
     decision: str
     reason: str
     layer: str = ""
-    per_effect: list[tuple[Effect, str, str]] = field(default_factory=list)  # (effect, decision, layer)
 
 
 class PolicyEngine:
@@ -200,21 +198,13 @@ class PolicyEngine:
         return best[1], best[2], best[3]
 
     def evaluate(self, capability: Capability, arguments: dict[str, Any]) -> PolicyDecision:
-        # A capability that declares no effects at all is NOT assumed safe —
-        # that would reward an author who simply forgot to declare effects
-        # with maximum trust. Treat undeclared effects as the most
-        # restrictive kind so the default posture stays conservative.
-        effects = capability.effects or [Effect(kind="external", resource="undeclared:*")]
-        per_effect: list[tuple[Effect, str, str]] = []
         worst_decision, worst_layer, worst_reason = "allow", "default", "no effects"
         worst_severity = 0
-        for effect in effects:
+        for effect in capability.planned_effects:
             decision, layer, reason = self._evaluate_effect(capability, effect, arguments)
-            per_effect.append((effect, decision, layer))
             severity = _SEVERITY[decision]
             if severity > worst_severity:
                 worst_decision, worst_layer, worst_reason, worst_severity = decision, layer, reason, severity
-        return PolicyDecision(decision=worst_decision, reason=worst_reason, layer=worst_layer,
-                               per_effect=per_effect)
+        return PolicyDecision(decision=worst_decision, reason=worst_reason, layer=worst_layer)
 
 

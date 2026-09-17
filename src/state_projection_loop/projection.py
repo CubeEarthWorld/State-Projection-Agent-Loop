@@ -16,10 +16,9 @@ nothing can give back more.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .capability import ToolContext
+from .context import TurnContext
 from .compression import compress_text, summarize_text
 from .events import RENDERABLE_TYPES, event_to_message
 from .llm import FINISH_NAME
@@ -27,17 +26,6 @@ from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM
 from .registry import Registry
 from .tokens import estimate_tokens
 from .serialization import dumps
-
-
-@dataclass
-class TurnContext(ToolContext):
-    """What a section renders from: the handler context plus this turn's
-    projection state. ``api_tools`` is the list of native schemas that will
-    be sent; sections may drop entries from it while shrinking, and the
-    session sends whatever is left."""
-
-    candidates: list[Any] = field(default_factory=list)  # list[ScoredTool]
-    api_tools: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _schema_name(schema: dict[str, Any]) -> Any:
@@ -232,6 +220,22 @@ class HistorySection(Section):
         return pair_tool_calls(current[i:])
 
 
+class WorkingStateSection(Section):
+    """Projects the working state each turn (volatile — always near the tail)."""
+
+    name = "working_state"
+
+    def __init__(self, *, max_tokens: int = 800) -> None:
+        self.max_tokens = max_tokens
+
+    def render(self, ctx: TurnContext) -> list[Message]:
+        ws = ctx.working_state
+        if ws.is_empty():
+            return []
+        body = ws.render(max_tokens=self.max_tokens)
+        return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []
+
+
 class ChecklistSection(Section):
     """Current plans survive history compression. Text is state data. Shrinks
     by halving its character budget; the plans themselves are untouched."""
@@ -360,8 +364,6 @@ def build_default_sections(
     *,
     kernel_text: str,
 ) -> list[Section]:
-    from .working_state import WorkingStateSection
-
     factories = {
         "kernel": lambda: KernelSection(kernel_text),
         "toc": TocSection,

@@ -1,79 +1,81 @@
-{
-  "name": "meta.agent.spawn",
-  "category": "meta",
-  "card": {
-    "summary": "サブエージェントを起動しタスクを委任、結果アーティファクトを受け取る",
-    "tags": [
-      "meta",
-      "swarm",
-      "サブエージェント"
-    ]
-  },
-  "spec": {
-    "description": "Run a sub-agent with its own independent context on the given task. Parent and child share the task string and result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "task": {
-          "type": "string",
-          "description": "委任するタスクの完全な記述(子は親の文脈を一切見られない)"
-        },
-        "kernel": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "子のシステムプロンプト(省略時は汎用ジョブカーネル)"
-        },
-        "tool_scope": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "子に許可するツール名/カテゴリ(例 ['web/*','file'])。省略時は親と同じ台帳"
-        },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "子で使うモデル名(spawn_llm_factory が必要)"
-        },
-        "max_steps": {
-          "type": "integer",
-          "default": 15,
-          "minimum": 1,
-          "maximum": 100
-        },
-        "checklist_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Explicitly copy these checklist ULIDs to the child. Returns result plus a checklists export document. Parent plans are never auto-merged."
-        }
-      },
-      "required": [
-        "task"
+[
+  {
+    "name": "meta.agent.spawn",
+    "category": "meta",
+    "card": {
+      "summary": "サブエージェントを起動しタスクを委任、結果アーティファクトを受け取る",
+      "tags": [
+        "meta",
+        "swarm",
+        "サブエージェント"
       ]
     },
-    "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。"
-  },
-  "discovery": {
-    "pinned": true,
-    "no_embed": true
-  },
-  "execution": {
-    "timeout_s": 600,
-    "retry_safety": "never_retry"
-  },
-  "effects": [
-    {
-      "kind": "external",
-      "resource": "subagent:*"
-    }
-  ]
-}
+    "spec": {
+      "description": "Run a sub-agent with its own independent context on the given task. Parent and child share the task string and result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "委任するタスクの完全な記述(子は親の文脈を一切見られない)"
+          },
+          "kernel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "子のシステムプロンプト(省略時は汎用ジョブカーネル)"
+          },
+          "tool_scope": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "子に許可するツール名/カテゴリ(例 ['web/*','file'])。省略時は親と同じ台帳"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "子で使うモデル名(spawn_llm_factory が必要)"
+          },
+          "max_steps": {
+            "type": "integer",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "checklist_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Explicitly copy these checklist ULIDs to the child. Returns result plus a checklists export document. Parent plans are never auto-merged."
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。"
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 600,
+      "retry_safety": "never_retry"
+    },
+    "effects": [
+      {
+        "kind": "external",
+        "resource": "subagent:*"
+      }
+    ]
+  }
+]

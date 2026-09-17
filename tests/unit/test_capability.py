@@ -89,7 +89,7 @@ class TestDecorator:
         assert cap.execution.timeout_s == 5.0
 
     def test_optional_param_gets_default_and_ctx_excluded(self):
-        from state_projection_loop.capability import ToolContext
+        from state_projection_loop.context import ToolContext
 
         def handler(ctx: ToolContext, path: str, verbose: bool = False) -> str:
             return path
@@ -103,7 +103,8 @@ class TestDecorator:
         import asyncio
 
         from state_projection_loop import Config, Registry, Run, Runtime
-        from state_projection_loop.capability import Capability, ToolContext
+        from state_projection_loop.capability import Capability
+        from state_projection_loop.context import ToolContext
         from state_projection_loop.events import InMemoryLedger
         from state_projection_loop.artifacts import ArtifactStore
         from state_projection_loop.messages import ToolCall

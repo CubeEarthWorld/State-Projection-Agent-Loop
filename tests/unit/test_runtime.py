@@ -10,18 +10,12 @@ import pytest
 
 from state_projection_loop import Config, Registry, ToolCall
 from state_projection_loop.artifacts import ArtifactStore, ref
-from state_projection_loop.capability import ToolContext
+from state_projection_loop.context import ToolContext
 from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.run import Run
 from state_projection_loop.builtin import install_builtins
-from state_projection_loop.runtime import (
-    BudgetState,
-    Runtime,
-    _mini_validate,
-    apply_defaults,
-    validate_args,
-)
+from state_projection_loop.runtime import BudgetState, Runtime
 
 from _util import capability_dict, echo_handler
 
@@ -333,51 +327,6 @@ class TestOutputPolicy:
             runtime, [ToolCall(name="demo.echo2", arguments={"data": record.id})], turn, ctx, run, policy,
         )
         assert batch.results[0].value == record.id  # literal string passed through
-
-
-class TestMiniValidator:
-    """The dependency-free fallback (used when jsonschema is absent)."""
-
-    SCHEMA = {
-        "type": "object",
-        "properties": {
-            "q": {"type": "string", "minLength": 2},
-            "n": {"type": "integer", "minimum": 1, "maximum": 10},
-            "mode": {"enum": ["a", "b"]},
-            "items": {"type": "array", "items": {"type": "string"}},
-            "opt": {"type": ["string", "null"]},
-        },
-        "required": ["q"],
-        "additionalProperties": False,
-    }
-
-    def test_accepts_valid(self):
-        assert _mini_validate(self.SCHEMA, {"q": "ok", "n": 5, "mode": "a",
-                                            "items": ["x"], "opt": None}) is None
-
-    @pytest.mark.parametrize("args,fragment", [
-        ({}, "required"),
-        ({"q": "ok", "n": "5"}, "expected type"),
-        ({"q": "ok", "n": 0}, "minimum"),
-        ({"q": "ok", "n": 11}, "maximum"),
-        ({"q": "x"}, "minLength"),
-        ({"q": "ok", "mode": "c"}, "not one of"),
-        ({"q": "ok", "items": ["x", 1]}, "expected type"),
-        ({"q": "ok", "zzz": 1}, "unexpected properties"),
-        ({"q": "ok", "n": True}, "expected type"),
-    ])
-    def test_rejects_invalid(self, args, fragment):
-        assert fragment in _mini_validate(self.SCHEMA, args)
-
-    def test_validate_args_agrees(self):
-        assert validate_args(self.SCHEMA, {"q": "ok"}) is None
-        assert validate_args(self.SCHEMA, {"q": 1}) is not None
-        assert validate_args(self.SCHEMA, "not a dict") is not None
-
-    def test_apply_defaults(self):
-        schema = {"type": "object", "properties": {"k": {"type": "integer", "default": 7}}}
-        assert apply_defaults(schema, {}) == {"k": 7}
-        assert apply_defaults(schema, {"k": 1}) == {"k": 1}
 
 
 class TestBudgetState:

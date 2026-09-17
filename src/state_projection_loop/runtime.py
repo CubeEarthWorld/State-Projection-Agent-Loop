@@ -21,9 +21,6 @@ by naive "batch of tool calls" runtimes:
   awaiting task gave up on it, and collapsing that distinction is exactly
   what lets non-idempotent operations double-fire.
 
-JSON Schema validation uses one small built-in validator (``_mini_validate``)
-— see :func:`validate_args` for why that is deliberate rather than a
-fallback.
 """
 from __future__ import annotations
 
@@ -35,9 +32,11 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .artifacts import ArtifactStore, serialize_value
-from .capability import Capability, Effect, ToolContext
+from .capability import Capability
+from .context import ToolContext
 from .compression import content_hash
 from .config import Config
+from .json_schema import apply_defaults, validate_args
 from .llm import FINISH_NAME
 from .messages import Decision, Message, ToolCall
 from .policy import PolicyEngine
@@ -47,132 +46,8 @@ from .serialization import dumps
 from .tokens import estimate_tokens, truncate_to_tokens
 
 # ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-_TYPE_MAP = {
-    "string": str, "integer": int, "number": (int, float), "boolean": bool,
-    "array": list, "object": dict, "null": type(None),
-}
-
-
-def _json_type_name(value: Any) -> str:
-    """Name a value's type in the JSON Schema vocabulary.
-
-    The message this feeds is a self-repair prompt sent to the model, so it
-    names types the way the schema beside it does — and identically in the
-    Dart port, which has no Python type names to fall back on.
-    """
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int):
-        return "integer"
-    if isinstance(value, float):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return type(value).__name__
-
-
-def _type_ok(expected: str, value: Any) -> bool:
-    py = _TYPE_MAP.get(expected)
-    if py is None:
-        return True
-    if expected in ("integer", "number") and isinstance(value, bool):
-        return False
-    return isinstance(value, py)
-
-
-def _mini_validate(schema: dict[str, Any], value: Any, path: str = "") -> Optional[str]:
-    """The JSON Schema subset a tool-argument schema actually uses."""
-    where = path or "arguments"
-    t = schema.get("type")
-    if t is not None:
-        types = t if isinstance(t, list) else [t]
-        if not any(_type_ok(x, value) for x in types):
-            return f"{where}: expected type {dumps(t)}, got {_json_type_name(value)}"
-    if "enum" in schema and value not in schema["enum"]:
-        return f"{where}: {dumps(value)} is not one of {dumps(schema['enum'])}"
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if "minimum" in schema and value < schema["minimum"]:
-            return f"{where}: {value} is less than minimum {schema['minimum']}"
-        if "maximum" in schema and value > schema["maximum"]:
-            return f"{where}: {value} is greater than maximum {schema['maximum']}"
-    if isinstance(value, str):
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            return f"{where}: shorter than minLength {schema['minLength']}"
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            return f"{where}: longer than maxLength {schema['maxLength']}"
-    if isinstance(value, dict):
-        for req in schema.get("required", []):
-            if req not in value:
-                return f"{where}: missing required property {dumps(req)}"
-        props = schema.get("properties", {})
-        for key, sub in props.items():
-            if key in value and isinstance(sub, dict):
-                err = _mini_validate(sub, value[key], f"{where}.{key}")
-                if err:
-                    return err
-        if schema.get("additionalProperties") is False:
-            extra = set(value) - set(props)
-            if extra:
-                return f"{where}: unexpected properties {dumps(sorted(extra))}"
-    if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        for i, item in enumerate(value):
-            err = _mini_validate(schema["items"], item, f"{where}[{i}]")
-            if err:
-                return err
-    if "anyOf" in schema:
-        errs = []
-        for sub in schema["anyOf"]:
-            err = _mini_validate(sub, value, where)
-            if err is None:
-                break
-            errs.append(err)
-        else:
-            return f"{where}: no anyOf branch matched ({'; '.join(errs)})"
-    return None
-
-
-def apply_defaults(schema: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
-    """Fill missing top-level arguments that declare a schema default."""
-    out = dict(args)
-    for key, sub in (schema.get("properties") or {}).items():
-        if key not in out and isinstance(sub, dict) and "default" in sub:
-            out[key] = sub["default"]
-    return out
-
-
-def validate_value(schema: dict[str, Any], value: Any) -> Optional[str]:
-    """Validate any JSON value against a schema; error message or None."""
-    return _mini_validate(schema, value)
-
-
-def validate_args(schema: dict[str, Any], args: Any) -> Optional[str]:
-    """Return an error message, or None when the arguments pass.
-
-    Deliberately one small validator rather than ``jsonschema``: the error
-    text goes to the model as a self-repair prompt, and two different
-    validators meant this package and its Dart port rejected different
-    arguments with different wording for the same schema. The subset covers
-    what a tool-argument schema actually uses.
-    """
-    if not isinstance(args, dict):
-        return f"arguments must be a JSON object, got {_json_type_name(args)}"
-    return _mini_validate(schema, args)
-
-
-# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
-
-OUTCOMES = ("ok", "failed", "unknown", "denied", "waiting_approval", "waiting_user")
 
 # Outcomes whose result arrives later (approval, answer): nothing is recorded
 # for the call until then, so the decision stays out of the projection as a
@@ -189,7 +64,7 @@ class ToolResult:
     error: Optional[str] = None
     observation: str = ""
     artifact_id: Optional[str] = None
-    outcome: str = "ok"  # one of OUTCOMES
+    outcome: str = "ok"  # ok | failed | unknown | denied | waiting_approval | waiting_user
     command_id: Optional[str] = None
 
 
@@ -534,11 +409,7 @@ class Runtime:
 
     @staticmethod
     def is_read_only(capability: Capability) -> bool:
-        # Mirrors PolicyEngine.evaluate: undeclared effects are treated as
-        # the most restrictive kind, so an author who forgot to declare
-        # effects doesn't also get free parallel execution.
-        effects = capability.effects or [Effect(kind="external", resource="undeclared:*")]
-        return all(e.kind in ("none", "read") for e in effects)
+        return all(e.kind in ("none", "read") for e in capability.planned_effects)
 
     # -- execution ------------------------------------------------------------
 

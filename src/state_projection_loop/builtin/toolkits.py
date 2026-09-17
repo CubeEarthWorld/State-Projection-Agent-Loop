@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from ..registry import Registry
+from . import _install
 from .defs import load
 
 
@@ -51,7 +52,4 @@ def install_toolkits(registry: Registry, root: str | Path, *, shell: bool = True
         "filesystem.file.write": write,
         **({"shell.command.run": run} if shell else {}),
     }
-    for definition in load("toolkits"):
-        handler = handlers.get(definition["name"])
-        if handler is not None and definition["name"] not in registry:
-            registry.register(definition, handler=handler, replace=True)
+    _install(registry, [d for d in load("toolkits") if d["name"] in handlers], handlers)

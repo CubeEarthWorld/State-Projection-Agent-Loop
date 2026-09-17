@@ -18,7 +18,7 @@ the timeout fired mid-flight (``unknown`` — never safe to blindly retry).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from .capability import Effect
@@ -62,7 +62,6 @@ class ApprovalRequest:
     policy_revision: int
     expires_at: Optional[float] = None
     resolution: Optional[str] = None  # "approved" | "denied" | "expired" | None (pending)
-    resolved_at: Optional[float] = None
 
     def is_expired(self, *, now: Optional[float] = None) -> bool:
         now = now if now is not None else time.time()
@@ -211,7 +210,6 @@ class Run:
         if decision not in ("approved", "denied"):
             raise ValueError("decision must be 'approved' or 'denied'")
         request.resolution = decision
-        request.resolved_at = time.time()
         self.ledger.append(self.id, "approval_resolved", {"approval_id": request.id, "resolution": decision})
         self.pending_approval = None
         self.last_resolved_approval = request

@@ -42,8 +42,13 @@ def install_builtins(registry: Registry, packs: Iterable[str]) -> None:
         handlers = _PACKS.get(pack)
         if handlers is None:
             raise ValueError(f"Unknown builtin pack {pack!r}; expected one of {sorted(_PACKS)}")
-        defs = load(pack)
-        for definition in (defs if isinstance(defs, list) else [defs]):
-            name = definition["name"]
-            if name not in registry:
-                registry.register(definition, handler=handlers[name], replace=True)
+        _install(registry, load(pack), handlers)
+
+
+def _install(registry: Registry, definitions: list[dict], handlers: dict[str, Callable]) -> None:
+    """Register each definition with its handler, unless the registry already
+    resolves that name."""
+    for definition in definitions:
+        name = definition["name"]
+        if name not in registry:
+            registry.register(definition, handler=handlers[name], replace=True)

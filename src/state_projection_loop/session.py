@@ -28,7 +28,6 @@ from typing import Any, Callable, Iterable, Optional
 from .artifacts import ArtifactStore
 from .builtin import DEFAULT_BUILTINS, install_builtins
 from .checklists import ChecklistStore
-from .capability import ToolContext
 from .compaction import FOLD_INSTRUCTIONS, apply_fold_delta, parse_fold_reply
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
@@ -38,10 +37,12 @@ from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
 from .messages import ASSISTANT, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
-from .projection import Projection, Section, TurnContext, build_default_sections
+from .context import TurnContext
+from .projection import Projection, Section, build_default_sections
 from .registry import Registry
 from .run import ApprovalRequest, PendingQuestion, Run, RunStateError
-from .runtime import WAITING_OUTCOMES, BudgetState, Runtime, validate_value
+from .json_schema import validate_value
+from .runtime import WAITING_OUTCOMES, BudgetState, Runtime
 from .tokens import estimate_tokens
 from .working_state import WORKING_STATE_FIELDS, WorkingState
 

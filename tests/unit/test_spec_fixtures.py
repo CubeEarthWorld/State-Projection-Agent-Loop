@@ -124,12 +124,12 @@ class TestValidation:
 
     @pytest.mark.parametrize("case", cases("validation", "validate_args"))
     def test_validate_args(self, case):
-        from state_projection_loop.runtime import validate_args
+        from state_projection_loop.json_schema import validate_args
 
         assert validate_args(case["schema"], case["arguments"]) == case["expected"]
 
     @pytest.mark.parametrize("case", cases("validation", "apply_defaults"))
     def test_apply_defaults(self, case):
-        from state_projection_loop.runtime import apply_defaults
+        from state_projection_loop.json_schema import apply_defaults
 
         assert apply_defaults(case["schema"], case["arguments"]) == case["expected"]

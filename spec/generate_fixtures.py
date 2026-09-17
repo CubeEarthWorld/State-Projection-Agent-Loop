@@ -25,7 +25,7 @@ from state_projection_loop.compression import (  # noqa: E402
     summarize_text,
 )
 from state_projection_loop.policy import glob_match  # noqa: E402
-from state_projection_loop.runtime import apply_defaults, validate_args  # noqa: E402
+from state_projection_loop.json_schema import apply_defaults, validate_args  # noqa: E402
 from state_projection_loop.serialization import dumps  # noqa: E402
 from state_projection_loop.tokens import estimate_tokens  # noqa: E402
 
