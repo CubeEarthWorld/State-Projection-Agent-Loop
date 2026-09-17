@@ -13,7 +13,6 @@ from typing import Any, Optional
 
 from ..artifacts import is_ref
 from ..capability import ToolContext
-from ..registry import Registry
 from ..serialization import dumps
 
 
@@ -66,11 +65,10 @@ async def _spawn(
         raise ValueError("Duplicate checklist_ids")
     llm = parent.spawn_llm_factory(model) if parent.spawn_llm_factory else parent.llm
 
-    child_registry = parent.registry.subset(tool_scope) if tool_scope else Registry()
-    if not tool_scope:
-        for cap in parent.registry:
-            if cap.name != "meta.agent.spawn":  # no recursive swarm by default
-                child_registry.register(cap, replace=True)
+    # No scope means everything but spawn itself (no recursive swarm by
+    # default). Always a subset(), so the parent's deny-list carries over.
+    child_registry = parent.registry.subset(
+        tool_scope or [c.name for c in parent.registry if c.name != "meta.agent.spawn"])
 
     child_config = copy.deepcopy(parent.config)
     child_config.mode = "job"

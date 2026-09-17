@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from state_projection_loop import (
-    ChecklistStore, ChecklistSection, Config, Decision, PolicyEngine,
+    ChecklistStore, ChecklistSection, Config, Decision, PolicyEngine, Registry,
     ScriptedLLM, Session, ToolCall, TurnContext, WorkingState, install_builtins,
 )
 
@@ -195,6 +195,20 @@ def test_branch_rewind_and_spawn_do_not_share_plans():
     assert result["result"] == "done"
     assert result["checklists"]["checklists"][0]["name"] == "delegated"
     assert session.checklists.execute("get", id=value["id"])["name"] == "original"
+
+
+def test_a_spawned_child_keeps_the_parents_deny_list():
+    seen: list[list[str]] = []
+
+    def child_step(messages, tools):
+        seen.append([t["function"]["name"] for t in tools])
+        return ScriptedLLM.finish(result="done")
+
+    session = Session(ScriptedLLM([]), registry=Registry(disabled=["planning.checklist.manage"]),
+                      builtins=["meta", "checklist", "spawn"], policy=PolicyEngine(default_decision="allow"),
+                      spawn_llm_factory=lambda model: ScriptedLLM([child_step]))
+    assert session.invoke("meta.agent.spawn", task="work") == "done"
+    assert "meta__tool__find" in seen[0] and "planning__checklist__manage" not in seen[0]
 
 
 def test_shared_wire_fixture():

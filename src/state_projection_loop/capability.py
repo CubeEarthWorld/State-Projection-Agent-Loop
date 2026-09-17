@@ -241,10 +241,15 @@ class Capability:
     discovery: CapabilityDiscovery = field(default_factory=CapabilityDiscovery)
     execution: CapabilityExecution = field(default_factory=CapabilityExecution)
     effects: list[Effect] = field(default_factory=list)
-    wants_ctx: bool = False
 
     def __post_init__(self) -> None:
         validate_capability_name(self.name)
+
+    @property
+    def wants_ctx(self) -> bool:
+        """Derived from the handler it describes, so it cannot go stale when
+        a handler is attached after construction."""
+        return _handler_wants_ctx(self.execution.handler)
 
     @property
     def qualified_name(self) -> str:
@@ -315,7 +320,6 @@ class Capability:
             effects=effects,
         )
         cap.derive_card()
-        cap.wants_ctx = _handler_wants_ctx(cap.execution.handler)
         return cap
 
     def derive_card(self) -> None:
@@ -499,15 +503,15 @@ def build_capability_from_function(
     except Exception:
         hints = {}
     sig = inspect.signature(fn)
+    wants_ctx = _handler_wants_ctx(fn)
     properties: dict[str, Any] = {}
     required: list[str] = []
     for i, (pname, param) in enumerate(sig.parameters.items()):
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        ann = hints.get(pname, param.annotation)
-        if i == 0 and (pname == "ctx" or ann is ToolContext):
+        if i == 0 and wants_ctx:
             continue
-        schema = _hint_to_schema(ann)
+        schema = _hint_to_schema(hints.get(pname, param.annotation))
         if pname in param_docs:
             schema = {**schema, "description": param_docs[pname]}
         if param.default is inspect.Parameter.empty:

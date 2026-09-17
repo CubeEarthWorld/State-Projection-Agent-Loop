@@ -126,7 +126,9 @@ class Config:
             if not hasattr(cfg, key):
                 raise ValueError(f"Unknown config key: {key!r}")
             current = getattr(cfg, key)
-            if dataclasses.is_dataclass(current) and isinstance(value, dict):
+            if dataclasses.is_dataclass(current):
+                if not isinstance(value, dict):
+                    raise ValueError(f'Config key "{key}" expects a map')
                 for sub_key, sub_value in value.items():
                     if not hasattr(current, sub_key):
                         raise ValueError(f"Unknown config key: {key}.{sub_key}")
@@ -134,6 +136,3 @@ class Config:
             else:
                 setattr(cfg, key, value)
         return cfg
-
-    def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)

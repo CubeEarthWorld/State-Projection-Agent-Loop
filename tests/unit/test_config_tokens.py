@@ -49,6 +49,10 @@ class TestConfigDefaults:
         with pytest.raises(ValueError, match="Unknown config key"):
             Config.from_dict({"discovery": {"vektor": "on"}})
 
+    def test_from_dict_rejects_a_scalar_where_a_section_belongs(self):
+        with pytest.raises(ValueError, match="expects a map"):
+            Config.from_dict({"budget": 5})
+
 
 class TestTokenEstimation:
     def test_empty(self):

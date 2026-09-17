@@ -596,12 +596,12 @@ class Runtime:
 
     @staticmethod
     async def _invoke(handler: Any, capability: Capability, args: dict[str, Any], ctx: ToolContext) -> Any:
-        kwargs = dict(args)
-        if capability.wants_ctx:
-            kwargs = {"ctx": ctx, **kwargs}
+        # The context is the first parameter whatever it is called, so it
+        # goes in positionally.
+        positional = (ctx,) if capability.wants_ctx else ()
         if inspect.iscoroutinefunction(handler):
-            return await handler(**kwargs)
-        return await asyncio.to_thread(handler, **kwargs)
+            return await handler(*positional, **args)
+        return await asyncio.to_thread(handler, *positional, **args)
 
     # -- output policy --------------------------------------------------------
 
