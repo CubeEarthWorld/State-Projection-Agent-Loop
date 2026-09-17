@@ -33,12 +33,7 @@ pytestmark = [
 
 
 def adapter(**kw) -> OpenAICompatAdapter:
-    return OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-        temperature=kw.pop("temperature", 0.0), **kw,
-    )
+    return OpenAICompatAdapter.from_env(temperature=kw.pop("temperature", 0.0), **kw)
 
 
 class TestBasicChat:

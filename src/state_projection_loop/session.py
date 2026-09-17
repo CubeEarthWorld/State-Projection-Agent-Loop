@@ -9,10 +9,10 @@ truth; the projection is a disposable window over it.
 
 Two correctness properties enforced here that a naive loop gets wrong:
 
-* **P0-3** — completion (``Decision.finish``) is validated *before* any
+* completion (``Decision.finish``) is validated *before* any
   side-effecting call in the same decision executes; a decision that mixes
   the two is rejected outright, never partially honored.
-* **P0-4** — at most one in-flight turn per session. A second concurrent
+* at most one in-flight turn per session. A second concurrent
   ``asend``/``arun_job`` raises :class:`ConcurrencyError` immediately
   instead of interleaving state.
 """
@@ -50,7 +50,7 @@ from .working_state import WORKING_STATE_FIELDS, WorkingState
 
 class ConcurrencyError(RuntimeError):
     """Raised when a second turn is attempted on a session with one already
-    in flight (P0-4). Sessions are single-writer by design; run concurrent
+    in flight. Sessions are single-writer by design; run concurrent
     conversations as separate Sessions."""
 
 
@@ -365,7 +365,7 @@ class Session:
             run_id=self.run.id, sequence=self.ledger.last_sequence(self.run.id), ts=time.time(), state=state,
         ))
 
-    # -- concurrency guard (P0-4) ---------------------------------------------
+    # -- concurrency guard ---------------------------------------------
 
     def _guarded(self):
         if self._lock.locked():

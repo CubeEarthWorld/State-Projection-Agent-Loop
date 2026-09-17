@@ -1,4 +1,4 @@
-"""Run state machine: the unit of resumable execution (P1-2).
+"""Run state machine: the unit of resumable execution.
 
 A :class:`Run` is one job/conversation execution. Its state is not implicit
 in "is the Python object still alive" — it is an explicit, ledger-recorded
@@ -121,7 +121,7 @@ class Run:
         self.pending_approval: Optional[ApprovalRequest] = None
         # Kept around after resolve_approval() clears pending_approval, so
         # resume can find the exact command_id that was approved instead of
-        # minting a fresh one (P0-2: an approved command must keep its
+        # minting a fresh one (an approved command must keep its
         # idempotency key across the pause). The runtime clears it once consumed.
         self.last_resolved_approval: Optional[ApprovalRequest] = None
         self.pending_question: Optional[PendingQuestion] = None
@@ -201,7 +201,7 @@ class Run:
         'denied'. If the policy revision has moved since the request was
         made, the approval is stale and must be re-requested — approving
         blind to a changed policy would defeat the whole point of layered
-        deny (P1-2 "premise changed" rule)."""
+        deny ("premise changed" rule)."""
         request = self.pending_approval
         if request is None:
             raise RunStateError(f"Run {self.id} has no pending approval to resolve")

@@ -1,5 +1,5 @@
-"""Internal message and decision representation (spec §17 — implementation
-discretion; §8.2 — observations carry a structurally distinct role).
+"""Internal message and decision representation; observations carry a
+structurally distinct role.
 
 ``content`` may be a plain string or a list of part dicts
 (e.g. ``[{"type": "text", "text": ...}, {"type": "image_url", ...}]``) so
@@ -13,8 +13,7 @@ from typing import Any, Optional
 from .ids import new_id
 
 # Role constants. Tool results MUST use OBSERVATION so untrusted data stays
-# structurally distinct from instructions (invariant I6; mitigation, not a
-# full defense — see spec §16).
+# structurally distinct from instructions (a mitigation, not a full defense).
 SYSTEM = "system"
 USER = "user"
 ASSISTANT = "assistant"
@@ -33,7 +32,7 @@ class ToolCall:
     id: str = field(default_factory=new_call_id)
     raw_arguments: Optional[str] = None
     """Original argument string when the provider returned unparseable JSON;
-    validation will fail and route through the self-repair path (§6)."""
+    validation will fail and route through the self-repair path."""
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "arguments": self.arguments, "id": self.id, "raw_arguments": self.raw_arguments}
@@ -84,7 +83,7 @@ class Usage:
 class Decision:
     """One model output: plain text and/or a batch of tool calls.
 
-    ``finish`` is the formal completion signal (P0-3): it is a property of
+    ``finish`` is the formal completion signal: it is a property of
     the *decision itself*, not a tool call routed through the runtime like
     any other. A decision that sets ``finish`` together with a non-empty
     ``calls`` is invalid and MUST be rejected by validation before anything

@@ -1,17 +1,16 @@
-"""Structured working state (P1-1): a finite, typed record of what the agent
-knows and has decided, replacing an unbounded stack of free-text summaries.
+"""Structured working state: a finite, typed record of what the agent
+knows and has decided, rather than an unbounded stack of free-text summaries.
 
-The old summary contract asked an LLM to write prose that "preserves
-reasons" and hoped later re-folds wouldn't lose them. Prose has no schema,
-so nothing enforced that promise — a decision's reason was exactly as likely
-to survive a second fold as any other sentence, which is to say: not
-reliably. ``WorkingState`` makes the shape the promise: decisions are
-``(text, reason)`` pairs in a list, not sentences buried in a paragraph, so
-folding *appends* to a field instead of re-summarizing a summary.
+Prose has no schema: a summary asked to "preserve reasons" keeps a
+decision's reason exactly as reliably as any other sentence survives a
+second fold, which is to say not reliably. ``WorkingState`` makes the shape
+the promise: decisions are ``(text, reason)`` pairs in a list, not sentences
+buried in a paragraph, so folding *appends* to a field instead of
+re-summarizing a summary.
 
 The original conversation text is never lost either way — it stays in the
 Event Ledger (``user_input``/``model_response``/``command_*`` events) and is
-reachable via the ``search_history`` capability even after being folded out
+reachable via ``meta.history.search`` even after being folded out
 of the live projection.
 """
 from __future__ import annotations
@@ -54,8 +53,8 @@ class WorkingState:
     artifact_refs: list[str] = field(default_factory=list)
     # Free-form escape hatch for application-specific state (game flags,
     # domain variables) that doesn't fit the fixed fields above. Editors of
-    # `extra` are the same three as before: user code, the LLM (via the
-    # state.extra.* capabilities), and the session seed.
+    # `extra` are user code, the LLM (via the state.extra.* capabilities) and
+    # the session seed.
     extra: dict[str, Any] = field(default_factory=dict)
     checklists: ChecklistStore = field(default_factory=ChecklistStore)
     # Ledger sequence up to which history has been folded into this state by

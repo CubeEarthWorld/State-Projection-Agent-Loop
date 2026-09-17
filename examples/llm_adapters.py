@@ -6,23 +6,24 @@ scripted test double (``ScriptedLLM``). Talking to any real provider —
 authentication, request shaping, retries, streaming, billing — is entirely
 the integrator's responsibility and concern, not the library's.
 
-These two adapters are provided here purely as *reference implementations*
-so the examples and integration tests have something to run against. Copy
+They are provided here purely as *reference implementations* so the
+examples and integration tests have something to run against. Copy
 them into your own project and adapt freely; there is no supported
 "upgrade path" contract for this file the way there is for the package.
 
 Requires the corresponding optional client library:
-    pip install openai       # OpenAICompatAdapter, OpenAICompatEmbedding
-    pip install anthropic    # AnthropicAdapter
+    pip install openai                             # OpenAICompatAdapter
+    pip install llama-cpp-python huggingface-hub   # LlamaCppEmbedding
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any, Optional, Sequence
 
 from state_projection_loop.llm import extract_finish, parse_text_tool_calls
-from state_projection_loop.messages import ASSISTANT, Decision, Message, OBSERVATION, SYSTEM, ToolCall, Usage
+from state_projection_loop.messages import Decision, Message, ToolCall, Usage
 
 Vector = list[float]
 
@@ -45,6 +46,24 @@ class OpenAICompatAdapter:
     text protocol parser (``parse_text_tool_calls``) picks it up as a
     fallback.
     """
+
+    @classmethod
+    def from_env(cls, **kwargs: Any) -> "OpenAICompatAdapter":
+        """The adapter every example script uses: ``LLM_MODEL`` / ``LLM_API_KEY``
+        / ``LLM_BASE_URL`` from the environment (a ``.env`` file is loaded when
+        python-dotenv is installed), defaulting to DeepSeek."""
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv()
+        except ImportError:
+            pass
+        return cls(
+            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
+            base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+            **kwargs,
+        )
 
     def __init__(
         self,
@@ -140,152 +159,6 @@ class OpenAICompatAdapter:
             text=text, calls=calls, thought=getattr(choice, "reasoning_content", None) or "",
             usage=usage, raw=response,
         ))
-
-
-class AnthropicAdapter:
-    """Adapter for the Anthropic Messages API — shows that ``LLMAdapter`` is
-    a real Protocol, not an OpenAI-shaped abstraction with one
-    implementation: message roles, tool-result framing, and native tool
-    schemas all differ from the OpenAI wire format and are translated here,
-    entirely behind the same ``async complete(messages, tools) -> Decision``
-    boundary every adapter uses.
-    """
-
-    def __init__(
-        self,
-        model: str,
-        *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        temperature: float = 0.3,
-        max_tokens: int = 4096,
-        timeout: float = 120.0,
-        client: Any = None,
-    ) -> None:
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        if client is not None:
-            self._client = client
-        else:
-            try:
-                from anthropic import Anthropic
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError("pip install anthropic") from exc
-            self._client = Anthropic(api_key=api_key, base_url=base_url, timeout=timeout)
-
-    @staticmethod
-    def _split_system(messages: list[Message]) -> tuple[str, list[Message]]:
-        system_parts = [m.text() for m in messages if m.role == SYSTEM]
-        rest = [m for m in messages if m.role != SYSTEM]
-        return "\n\n".join(p for p in system_parts if p), rest
-
-    @staticmethod
-    def _to_api(message: Message) -> dict[str, Any]:
-        if message.role == ASSISTANT and message.tool_calls:
-            content: list[dict[str, Any]] = []
-            if message.text():
-                content.append({"type": "text", "text": message.text()})
-            for tc in message.tool_calls:
-                content.append({"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.arguments})
-            return {"role": "assistant", "content": content}
-        if message.role == OBSERVATION:
-            return {
-                "role": "user",
-                "content": [{
-                    "type": "tool_result", "tool_use_id": message.tool_call_id or "", "content": message.text(),
-                }],
-            }
-        role = "assistant" if message.role == ASSISTANT else "user"
-        return {"role": role, "content": message.text()}
-
-    @staticmethod
-    def _to_api_tools(tools: list[dict]) -> list[dict[str, Any]]:
-        out = []
-        for t in tools:
-            fn = t.get("function", t)
-            out.append({
-                "name": fn["name"], "description": fn.get("description", ""),
-                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
-            })
-        return out
-
-    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
-        system, rest = self._split_system(messages)
-        kwargs: dict[str, Any] = {
-            "model": self.model, "messages": [self._to_api(m) for m in rest],
-            "temperature": self.temperature, "max_tokens": self.max_tokens,
-        }
-        if system:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = self._to_api_tools(tools)
-
-        # The SDK call blocks; keep the host's event loop free while it runs.
-        response = await asyncio.to_thread(lambda: self._client.messages.create(**kwargs))
-
-        text_parts: list[str] = []
-        calls: list[ToolCall] = []
-        for block in response.content:
-            btype = getattr(block, "type", None)
-            if btype == "text":
-                text_parts.append(block.text)
-            elif btype == "tool_use":
-                calls.append(ToolCall(name=block.name, arguments=dict(block.input or {}), id=block.id))
-
-        text = "\n".join(text_parts)
-        if not calls and "```tool_call" in text:
-            text, calls = parse_text_tool_calls(text)
-
-        usage = None
-        if getattr(response, "usage", None) is not None:
-            usage = Usage(
-                prompt_tokens=response.usage.input_tokens or 0,
-                completion_tokens=response.usage.output_tokens or 0,
-            )
-        return extract_finish(Decision(text=text, calls=calls, usage=usage, raw=response))
-
-
-# ---------------------------------------------------------------------------
-# Embedding backend
-# ---------------------------------------------------------------------------
-
-class OpenAICompatEmbedding:
-    """Any OpenAI-compatible ``/embeddings`` endpoint (OpenAI, DeepSeek, a
-    local server). Implements the package's ``EmbeddingBackend`` Protocol
-    (``embed_documents``/``embed_query``); pass an instance to
-    ``Session(embedder=...)``."""
-
-    def __init__(
-        self,
-        model: str = "text-embedding-3-small",
-        *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        timeout: float = 60.0,
-        client: Any = None,
-    ) -> None:
-        self.model = model
-        if client is not None:
-            self._client = client
-        else:
-            try:
-                from openai import OpenAI
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError("pip install openai") from exc
-            self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-
-    def _embed(self, texts: Sequence[str]) -> list[Vector]:
-        if not texts:
-            return []
-        response = self._client.embeddings.create(model=self.model, input=list(texts))
-        return [list(item.embedding) for item in response.data]
-
-    def embed_documents(self, texts: Sequence[str]) -> list[Vector]:
-        return self._embed(texts)
-
-    def embed_query(self, text: str) -> Vector:
-        return self._embed([text])[0]
 
 
 # ---------------------------------------------------------------------------

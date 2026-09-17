@@ -8,36 +8,16 @@ Escalations and chart cards are printed at the end (in-memory backend).
 from __future__ import annotations
 
 import json
-import os
-
-from state_projection_loop import Session
-from state_projection_loop.policy import Rule
 
 from ..llm_adapters import OpenAICompatAdapter
-from .tools import SUPPORT_KERNEL, SupportBackend, build_support_registry
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
+from .tools import SupportBackend, make_session
 
 
 def main() -> None:
-    llm = OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-    )
     backend = SupportBackend()
     # Interactive multi-turn chat: the run stays RUNNING across many send()
     # calls (job mode's finish() would otherwise terminate it on turn one).
-    session = Session(llm, kernel=SUPPORT_KERNEL, registry=build_support_registry(backend))
-    # Escalation and chart rendering are the two effectful actions this
-    # demo exposes; grant the whole support.* namespace so the console
-    # demo doesn't stop to ask for approval on every reply.
-    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="support.*"))
+    session = make_session(OpenAICompatAdapter.from_env(), backend)
 
     print("カスタマーサポートAIです。ご質問をどうぞ(quit で終了)")
     while True:

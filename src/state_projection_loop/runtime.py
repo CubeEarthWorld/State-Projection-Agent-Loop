@@ -6,13 +6,13 @@ policy authorization and output shaping are enforced here in code.
 Two correctness properties this module exists to guarantee, both violated
 by naive "batch of tool calls" runtimes:
 
-* **Order** (P0-1): calls execute in the model's stated order by default.
+* **Order**: calls execute in the model's stated order by default.
   The only concurrency allowed is a run of *adjacent* calls whose
   capabilities declare no write/external effects — reads never race a
   write, and a write never jumps ahead of an earlier read or write. There
   is no cross-batch dependency solver; that complexity is deliberately out
   of scope (see the design spec's "later" list).
-* **Idempotency** (P0-2): a capability may only be auto-retried by this
+* **Idempotency**: a capability may only be auto-retried by this
   runtime if its ``retry_safety`` is ``pure`` or ``idempotent`` —
   :class:`~state_projection_loop.capability.CapabilityExecution` refuses to
   even construct with ``retries > 0`` otherwise. A timeout is recorded as
@@ -231,7 +231,7 @@ class Runtime:
     async def execute(
         self, calls: list[ToolCall], ctx: ToolContext, run: Run, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
-        """Validate, authorize and run a batch of calls, in order (P0-1).
+        """Validate, authorize and run a batch of calls, in order.
 
         A contiguous run of calls whose capabilities declare no write/
         external effects may execute concurrently; anything else runs one
@@ -455,7 +455,7 @@ class Runtime:
             except asyncio.TimeoutError:
                 # We cannot confirm whether the underlying effect completed
                 # after the awaiting task gave up — never collapse this into
-                # "failed" (P0-2). A retry only proceeds below if the
+                # "failed". A retry only proceeds below if the
                 # capability's retry_safety already permits blind retries.
                 last_error = f"timed out after {capability.execution.timeout_s}s"
                 last_outcome = "unknown"

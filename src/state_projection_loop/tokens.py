@@ -1,4 +1,4 @@
-"""Token estimation utilities (spec §3.3, §13).
+"""Token estimation utilities.
 
 Budgets are enforced against a conservative estimate, never an exact
 tokenizer count. The estimator is pluggable via :func:`set_estimator` so a

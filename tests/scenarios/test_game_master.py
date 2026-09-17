@@ -4,24 +4,16 @@ from __future__ import annotations
 
 
 
-from state_projection_loop import ScriptedLLM, Session, install_builtins
-from state_projection_loop.policy import PolicyEngine, Rule
+from state_projection_loop import ScriptedLLM
 
-from examples.game_master.tools import GM_KERNEL, MediaLog, build_game_registry, initial_seed
+from examples.game_master import tools
+from examples.game_master.tools import MediaLog
 
-
-def allow_game_and_state() -> PolicyEngine:
-    policy = PolicyEngine(default_decision="allow")
-    return policy
+from _util import allow_all
 
 
 def make_session(log, steps, seed=None):
-    session = Session(
-        ScriptedLLM(steps), kernel=GM_KERNEL, registry=build_game_registry(log, dice_seed=42),
-        seed=seed or initial_seed(), policy=allow_game_and_state(),
-    )
-    install_builtins(session.registry, ["state"])
-    return session
+    return tools.make_session(ScriptedLLM(steps), log, seed=seed, dice_seed=42, policy=allow_all())
 
 
 class TestPresentation:

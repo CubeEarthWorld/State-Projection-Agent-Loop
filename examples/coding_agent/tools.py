@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from state_projection_loop import Registry, install_toolkits
+from state_projection_loop import Registry, Session, install_toolkits
 
 
 def build_coding_registry(root: Path) -> Registry:
@@ -97,3 +97,13 @@ def seed_workspace(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "calculator.py").write_text(BUGGY_CALCULATOR, encoding="utf-8")
     (root / "test_calculator.py").write_text(CALCULATOR_TESTS, encoding="utf-8")
+
+
+def make_session(llm, root: Path, **session_args) -> Session:
+    """The coding agent over the workspace at ``root``. Its file tools live
+    entirely inside that workspace, so they are granted up front instead of
+    pausing on every write for approval."""
+    session = Session(llm, kernel=CODING_KERNEL, registry=build_coding_registry(root), **session_args)
+    session.policy.set_scope("workspace_write", "allow")
+    session.policy.set_scope("sandbox_command", "allow")
+    return session

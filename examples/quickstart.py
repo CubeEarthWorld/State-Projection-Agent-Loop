@@ -9,19 +9,11 @@ not in the ``state_projection_loop`` package — the package only defines the
 """
 from __future__ import annotations
 
-import os
 import sys
 
 from state_projection_loop import Session, capability
 
 from examples.llm_adapters import OpenAICompatAdapter
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
 
 
 @capability(name="inventory.stock.get", category="inventory", embedding_text="在庫 いくつ 残り stock",
@@ -36,13 +28,8 @@ def get_stock(warehouse: str) -> dict:
 
 
 def main() -> None:
-    llm = OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-    )
     session = Session(
-        llm,
+        OpenAICompatAdapter.from_env(),
         kernel="あなたは在庫管理アシスタント。在庫の質問には必ず inventory.stock.get を使う。答え終えたら finish(result) を呼ぶ。",
     )
     session.registry.register(get_stock)

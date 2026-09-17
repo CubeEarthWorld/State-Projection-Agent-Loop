@@ -22,14 +22,14 @@ class ProjectionConfig:
     )
     window_tokens: int = 30000
     # Reserved so the model always has room to answer; counted against the
-    # window budget alongside messages and native tool schemas (P0-5).
+    # window budget alongside messages and native tool schemas.
     reserved_output_tokens: int = 1024
     # Provider-side fixed overhead not visible in the message list itself
     # (e.g. a vendor's per-request wrapping tokens); 0 is a safe default.
     provider_overhead_tokens: int = 0
     # When native tool schemas are sent to the provider, the candidates
     # section only needs the one-line signature, not the full card
-    # description a second time (P0-5 dedup).
+    # description a second time (dedup).
     dedupe_candidate_cards_against_schemas: bool = True
 
 

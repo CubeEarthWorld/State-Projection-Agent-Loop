@@ -1,14 +1,13 @@
-"""Artifact store (replaces the old string-handle ``ValueStore``).
+"""Artifact store.
 
 Large tool results, stored projections, and model responses never pass
 through the model's context a second time: they are stored here and
 projected as a preview card. A reference is a *structured* JSON object,
-never a bare string — ``"$h1"`` used to be silently rewritten into a lookup
-whenever it appeared as an argument, which meant a user could never pass
-that literal string through a tool, and a mis-detected reference could leak
-one tool's output into another tool's arguments. The fix is representational:
-only ``{"$artifact": "<id>"}`` is ever resolved; every other string,
-including one that happens to look like an id, passes through untouched.
+never a bare string: if a string could be a reference, a user could never
+pass that literal string through a tool, and a mis-detected reference could
+leak one tool's output into another tool's arguments. Only
+``{"$artifact": "<id>"}`` is ever resolved; every other string, including
+one that happens to look like an id, passes through untouched.
 
 Artifacts are namespaced by run so a sub-agent (or a resumed run) can never
 address another run's data by guessing an id.
@@ -148,7 +147,7 @@ class ArtifactStore:
         return self._find(aid) is not None
 
     def ref_text(self, record: ArtifactRecord, *, preview: str = "head", preview_tokens: int = 120) -> str:
-        """Projection form of an artifact: id + type + size + preview (I7)."""
+        """Projection form of an artifact: id + type + size + preview."""
         if preview == "tail":
             body = record.text[-preview_tokens * 6:]
             body = truncate_to_tokens(body[::-1], preview_tokens)[::-1]

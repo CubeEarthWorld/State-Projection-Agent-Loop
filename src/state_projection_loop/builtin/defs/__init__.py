@@ -1,8 +1,8 @@
 """Bundled capability definitions, as data.
 
 The definitions live in JSON, not in Python or Dart literals, because this
-package is developed alongside a Dart port and every definition used to be
-written out by hand twice. The same files are copied into the Dart
+package is developed alongside a Dart port and a definition written out by
+hand twice drifts. The same files are copied into the Dart
 repository under ``spec/tools/`` and compiled into a string constant there,
 so a definition can only be changed in one place.
 

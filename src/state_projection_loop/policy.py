@@ -1,4 +1,4 @@
-"""Policy engine: the sole owner of execution permission (P1-2, §7).
+"""Policy engine: the sole owner of execution permission.
 
 The LLM proposes; it never decides. Every planned effect of a capability
 call is evaluated here, in a fixed layer order, before the runtime is
@@ -18,7 +18,7 @@ Declared effects (:class:`~state_projection_loop.capability.Effect`) are
 self-reported by the capability author. This engine is the *policy*
 boundary, not the *sandbox* boundary — pairing it with OS/process-level
 restrictions on network, filesystem and credentials is the caller's
-responsibility (§7.4).
+responsibility.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ LAYER_ORDER = ("absolute", "admin", "developer", "workspace", "session", "llm")
 DECISIONS = ("allow", "deny", "require_approval")
 _SEVERITY = {"allow": 1, "require_approval": 2, "deny": 3}
 
-# Convenience scopes mapped onto effect-kind + resource patterns (§7.2).
+# Convenience scopes mapped onto effect-kind + resource patterns.
 SCOPES: dict[str, tuple[Optional[str], str]] = {
     "workspace_read": ("read", "workspace:*"),
     "workspace_write": ("write", "workspace:*"),
@@ -140,7 +140,7 @@ class PolicyEngine:
         self._changed(f"clear_layer layer={layer}")
 
     def set_scope(self, scope: str, decision: str, *, layer: str = "workspace") -> None:
-        """Grant/deny/gate one of the named scopes (§7.2), e.g.
+        """Grant/deny/gate one of the named scopes, e.g.
         ``set_scope("network_access", "deny")``."""
         if scope not in SCOPES:
             raise ValueError(f"Unknown scope {scope!r}; expected one of {sorted(SCOPES)}")

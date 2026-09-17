@@ -8,12 +8,8 @@ from state_projection_loop import ScriptedLLM, Session
 from state_projection_loop.artifacts import ref
 from state_projection_loop.policy import PolicyEngine
 
-from examples.customer_support.tools import (
-    SUPPORT_KERNEL,
-    SupportBackend,
-    build_support_registry,
-    load_manuals,
-)
+from examples.customer_support import tools
+from examples.customer_support.tools import SupportBackend, load_manuals
 
 from _util import allow_all
 
@@ -24,8 +20,7 @@ def backend():
 
 
 def make_session(backend, steps):
-    return Session(ScriptedLLM(steps), kernel=SUPPORT_KERNEL,
-                   registry=build_support_registry(backend), policy=allow_all())
+    return tools.make_session(ScriptedLLM(steps), backend, policy=allow_all())
 
 
 class TestManualData:

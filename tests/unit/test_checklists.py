@@ -212,7 +212,7 @@ def test_a_spawned_child_keeps_the_parents_deny_list():
 
 
 def test_shared_wire_fixture():
-    document = json.loads((Path(__file__).parents[1] / "fixtures/checklists_v1.json").read_text(encoding="utf-8"))
+    document = json.loads((Path(__file__).parents[2] / "spec/fixtures/checklists_v1.json").read_text(encoding="utf-8"))
     store = ChecklistStore.from_dict(document)
     assert store.to_dict() == document
     value = store.execute("get", id=document["checklists"][0]["id"])

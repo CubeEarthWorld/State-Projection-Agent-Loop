@@ -1,5 +1,5 @@
-"""Runtime: validation & self-repair, require_spec gate, ordering (P0-1),
-retry-safety-gated retries and OUTCOME_UNKNOWN (P0-2), output policy,
+"""Runtime: validation & self-repair, require_spec gate, ordering,
+retry-safety-gated retries and OUTCOME_UNKNOWN, output policy,
 budget arithmetic."""
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ class TestRequireSpec:
 
 
 class TestOrdering:
-    """P0-1: calls execute in the model's stated order; only a contiguous
+    """Calls execute in the model's stated order; only a contiguous
     run of read-only capabilities may run concurrently."""
 
     def test_write_then_read_preserves_order(self):
@@ -165,7 +165,7 @@ class TestOrdering:
 
 
 class TestRetrySafety:
-    """P0-2: retries are only permitted for pure/idempotent capabilities;
+    """Retries are only permitted for pure/idempotent capabilities;
     a timeout is OUTCOME_UNKNOWN, never silently 'failed'."""
 
     def test_timeout_is_outcome_unknown_not_failed(self):

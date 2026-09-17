@@ -32,12 +32,7 @@ def test_vector_candidates_feed_the_live_model():
 
     backend = SupportBackend()
     session = Session(
-        OpenAICompatAdapter(
-            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-            api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-            base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-            temperature=0.0,
-        ),
+        OpenAICompatAdapter.from_env(temperature=0.0),
         kernel=SUPPORT_KERNEL,
         registry=build_support_registry(backend),
         embedder=LlamaCppEmbedding(),

@@ -6,7 +6,7 @@ approved — is appended here as an :class:`Event`. Nothing else is
 authoritative: conversation views, working state, and run status are all
 *derived* by replaying (or partially replaying, via a :class:`Snapshot`)
 this log. That is what makes a run resumable after a process restart and
-makes "what actually happened" answerable after the fact (P1-3).
+makes "what actually happened" answerable after the fact.
 
 Sensitive payloads are never embedded directly in an event: callers pass an
 artifact reference (see :mod:`state_projection_loop.artifacts`) and only

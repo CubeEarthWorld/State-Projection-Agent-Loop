@@ -13,7 +13,7 @@ implements a fenced-JSON text protocol::
 
 Completion is a formal property of a :class:`~state_projection_loop.messages.Decision`
 (``finish``/``result``), not a capability the runtime executes like any
-other (P0-3). A model signals completion by calling the reserved
+other. A model signals completion by calling the reserved
 ``finish(result)`` function — every adapter routes that call through
 :func:`extract_finish` at the end of ``complete()`` so the rest of the
 system only ever has to check ``decision.finish``.
@@ -66,7 +66,7 @@ def extract_finish(decision: Decision) -> Decision:
     Any *other* calls made in the same decision are deliberately left in
     ``decision.calls`` rather than dropped, so the session's validator can
     reject the mixed decision explicitly and tell the model why, instead of
-    silently discarding side effects it asked for (P0-3).
+    silently discarding side effects it asked for.
     """
     remaining: list[ToolCall] = []
     finished = False

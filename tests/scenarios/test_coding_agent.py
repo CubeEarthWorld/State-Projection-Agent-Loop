@@ -11,12 +11,7 @@ from state_projection_loop import Config, ScriptedLLM, Session
 from state_projection_loop.artifacts import ref
 from state_projection_loop.policy import PolicyEngine
 
-from examples.coding_agent.tools import (
-    CODING_KERNEL,
-    FIXED_CALCULATOR,
-    build_coding_registry,
-    seed_workspace,
-)
+from examples.coding_agent.tools import FIXED_CALCULATOR, make_session, seed_workspace
 
 from _util import allow_all
 
@@ -36,8 +31,7 @@ class TestBugFixWorkflow:
             ScriptedLLM.call("dev.tests.run"),
             ScriptedLLM.finish(result="divide() にゼロ除算ガードを追加し、全テストが通ることを確認しました。"),
         ])
-        session = Session(llm, kernel=CODING_KERNEL, registry=build_coding_registry(workspace),
-                          config=Config.from_dict({"mode": "job"}), policy=allow_all())
+        session = make_session(llm, workspace, config=Config.from_dict({"mode": "job"}), policy=allow_all())
         reply = session.run_job("テストが落ちているので calculator.py を直してください")
 
         assert "全テスト" in reply
@@ -55,7 +49,7 @@ class TestBugFixWorkflow:
             ScriptedLLM.call("filesystem.file.read", path="../secret.txt"),
             "読めませんでした。",
         ])
-        session = Session(llm, registry=build_coding_registry(workspace), policy=allow_all())
+        session = make_session(llm, workspace, policy=allow_all())
         session.send("親ディレクトリのファイルを読んで")
         obs = next(m.content for m in session.conversation if m.role == "tool")
         assert "escapes the workspace" in obs
@@ -75,7 +69,7 @@ class TestBugFixWorkflow:
             peek_step,
             "確認しました。",
         ])
-        session = Session(llm, registry=build_coding_registry(workspace), policy=allow_all())
+        session = make_session(llm, workspace, policy=allow_all())
         session.send("big.txt の最後の方を見せて")
         obs = [m.content for m in session.conversation if m.role == "tool"]
         assert "art_" in obs[0] and "peek" in obs[0]   # became an artifact, not inlined

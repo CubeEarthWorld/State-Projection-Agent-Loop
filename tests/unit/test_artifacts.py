@@ -1,5 +1,5 @@
 """Artifact store: structured references never confuse literal strings
-(P0-6), previews, peek, run namespacing, move()."""
+, previews, peek, run namespacing, move()."""
 from __future__ import annotations
 
 from state_projection_loop.artifacts import ArtifactStore, is_ref, ref

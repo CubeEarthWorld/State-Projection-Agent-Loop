@@ -15,11 +15,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import QRect, Qt, QThread, Signal, Slot, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontDatabase,
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
@@ -44,32 +43,15 @@ from PySide6.QtWidgets import (
 )
 
 # -- project imports ---------------------------------------------------------
-import os
+from state_projection_loop import Registry, Session, TurnContext
 
-from state_projection_loop import Registry, Session, install_builtins
-from state_projection_loop.policy import Rule
-
+from examples.coding_agent import tools as coding_agent
+from examples.coding_agent.tools import build_coding_registry, seed_workspace
+from examples.customer_support import tools as customer_support
+from examples.customer_support.tools import SupportBackend, build_support_registry
+from examples.game_master import tools as game_master
+from examples.game_master.tools import MediaLog, build_game_registry
 from examples.llm_adapters import OpenAICompatAdapter
-
-
-def _make_llm(**kwargs):
-    return OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-        **kwargs,
-    )
-
-from examples.coding_agent.tools import CODING_KERNEL, build_coding_registry, seed_workspace
-from examples.customer_support.tools import SUPPORT_KERNEL, SupportBackend, build_support_registry
-from examples.game_master.tools import GM_KERNEL, MediaLog, build_game_registry, initial_seed
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
 
 
 # ============================================================================
@@ -91,7 +73,6 @@ class SessionWorker(QThread):
         super().__init__(parent)
         self.session = session
         self.user_text = user_text
-        self._interrupted = False
 
     def run(self) -> None:
         try:
@@ -132,7 +113,6 @@ class SessionWorker(QThread):
             self.finished.emit()
 
     def interrupt(self) -> None:
-        self._interrupted = True
         self.session.interrupt()
 
 
@@ -459,46 +439,24 @@ class MainWindow(QMainWindow):
 
     def _init_game_master(self) -> None:
         log = MediaLog()
-        registry = build_game_registry(log)
-        self.session = Session(
-            _make_llm(temperature=0.8),
-            kernel=GM_KERNEL,
-            registry=registry,
-            seed=initial_seed(),
-        )
-        install_builtins(self.session.registry, ["state"])
-        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
-        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
+        self.session = game_master.make_session(OpenAICompatAdapter.from_env(temperature=0.8), log)
         self._scenario_backend = log
-        self._log(f"Game Master session created. {len(list(registry))} tools registered.")
+        self._log(f"Game Master session created. {len(list(self.session.registry))} tools registered.")
 
     def _init_customer_support(self) -> None:
         backend = SupportBackend()
-        registry = build_support_registry(backend)
-        self.session = Session(
-            _make_llm(),
-            kernel=SUPPORT_KERNEL,
-            registry=registry,
-        )
-        self.session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="support.*"))
+        self.session = customer_support.make_session(OpenAICompatAdapter.from_env(), backend)
         self._scenario_backend = backend
-        self._log(f"Customer Support session created. {len(list(registry))} tools registered.")
+        self._log(f"Customer Support session created. {len(list(self.session.registry))} tools registered.")
 
     def _init_coding_agent(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
         root = Path(self._temp_dir.name)
         seed_workspace(root)
-        registry = build_coding_registry(root)
-        self.session = Session(
-            _make_llm(),
-            kernel=CODING_KERNEL,
-            registry=registry,
-        )
-        self.session.policy.set_scope("workspace_write", "allow")
-        self.session.policy.set_scope("sandbox_command", "allow")
+        self.session = coding_agent.make_session(OpenAICompatAdapter.from_env(), root)
         self._scenario_backend = root
         self._log(f"Coding Agent session created. Workspace: {root}")
-        self._log(f"Seeded: calculator.py, test_calculator.py")
+        self._log("Seeded: calculator.py, test_calculator.py")
 
     # -- Message sending -----------------------------------------------------
 
@@ -633,7 +591,7 @@ class MainWindow(QMainWindow):
                 cat_item = cat_items[cat]
 
             pinned_mark = "📍 pinned" if tool.discovery.pinned else ""
-            sig = tool.card.signature if tool.card.signature else tool.name
+            sig = tool.card.signature
             tool_item = QTreeWidgetItem([f"  {tool.name}", sig, pinned_mark])
             tool_item.setToolTip(0, tool.spec.description or tool.card.summary)
             if tool.discovery.pinned:
@@ -660,10 +618,10 @@ class MainWindow(QMainWindow):
         # Update system prompt tab
         if self.session is not None:
             kernel_sec = self.session.projection.get("kernel")
-            if kernel_sec is not None and hasattr(kernel_sec, "_messages"):
-                msgs = getattr(kernel_sec, "_messages", [])
+            if kernel_sec is not None:
+                msgs = kernel_sec.render(TurnContext(config=self.session.config, registry=self.session.registry))
                 if msgs:
-                    self.kernel_view.setPlainText(msgs[0].text() if hasattr(msgs[0], "text") else str(msgs[0]))
+                    self.kernel_view.setPlainText(msgs[0].text())
 
         # Update log with backend info
         backend = self._scenario_backend
@@ -717,9 +675,9 @@ class MainWindow(QMainWindow):
     def _on_scenario_changed(self) -> None:
         scenario = self.scenario_combo.currentData()
         kernels = {
-            "game_master": GM_KERNEL,
-            "customer_support": SUPPORT_KERNEL,
-            "coding_agent": CODING_KERNEL,
+            "game_master": game_master.GM_KERNEL,
+            "customer_support": customer_support.SUPPORT_KERNEL,
+            "coding_agent": coding_agent.CODING_KERNEL,
         }
         kernel_text = kernels.get(scenario, "")
         self.kernel_view.setPlainText(kernel_text)
@@ -779,7 +737,7 @@ class MainWindow(QMainWindow):
                 cat_item = cat_items[cat]
 
             pinned_mark = "📍 pinned" if tool.discovery.pinned else ""
-            sig = tool.card.signature if tool.card.signature else tool.name
+            sig = tool.card.signature
             tool_item = QTreeWidgetItem([f"  {tool.name}", sig, pinned_mark])
             tool_item.setToolTip(0, tool.spec.description or tool.card.summary)
             if tool.discovery.pinned:

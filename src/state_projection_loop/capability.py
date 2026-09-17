@@ -1,4 +1,4 @@
-"""Capabilities: versioned execution contracts (replaces the old ``ToolDef``).
+"""Capabilities: versioned execution contracts.
 
 A Capability is not just a function signature — it is a full contract the
 runtime and policy engine can reason about *without* running the handler:

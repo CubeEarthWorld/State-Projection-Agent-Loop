@@ -1,4 +1,4 @@
-"""Config defaults (§13) and token estimation."""
+"""Config defaults and token estimation."""
 from __future__ import annotations
 
 import pytest

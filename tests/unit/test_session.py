@@ -1,5 +1,5 @@
 """Session loop: chat & job modes, candidates injection, meta capabilities,
-finish validation (P0-3), concurrency guard (P0-4), policy gating, budget
+finish validation, concurrency guard, policy gating, budget
 grace, interruption, compaction wiring."""
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ class TestChatMode:
         def check(messages, tools):
             joined = "\n".join(str(m.content) for m in messages)
             # Native schemas are sent, so the candidate card dedupes down to
-            # just the signature (P0-5) instead of repeating the full card.
+            # just the signature instead of repeating the full card.
             assert "[Tool candidates" in joined and "demo.echo(" in joined
             tool_names = [t["function"]["name"] for t in tools]
             # native schema names are provider-safe encoded (dots -> "__")

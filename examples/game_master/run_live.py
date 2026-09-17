@@ -6,39 +6,16 @@ working-state management.
 from __future__ import annotations
 
 import json
-import os
-
-from state_projection_loop import Session, install_builtins
-from state_projection_loop.policy import Rule
 
 from ..llm_adapters import OpenAICompatAdapter
-from .tools import GM_KERNEL, MediaLog, build_game_registry, initial_seed
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
+from .tools import MediaLog, make_session
 
 
 def main() -> None:
-    llm = OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-        temperature=0.8,
-    )
     log = MediaLog()
     # Interactive multi-turn narration: chat mode, so the run stays RUNNING
     # across many send() calls instead of terminating on the first finish().
-    session = Session(llm, kernel=GM_KERNEL, registry=build_game_registry(log), seed=initial_seed())
-    install_builtins(session.registry, ["state"])
-    # A single-player narrative game: media cues and dice rolls are the
-    # only effects, and they're the whole point of the game master — grant
-    # them instead of pausing the story to ask for approval.
-    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
-    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
+    session = make_session(OpenAICompatAdapter.from_env(temperature=0.8), log)
 
     print("=== 地下迷宮からの脱出 ===")
     print("GM>", session.send("ゲームを開始してください。オープニングの場面を描写して。"))
