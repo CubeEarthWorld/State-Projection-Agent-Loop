@@ -9,7 +9,6 @@ editing a JSON file to match new behaviour.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from state_projection_loop.compression import (
     strip_noise,
     summarize_text,
 )
+from state_projection_loop.policy import glob_match
 from state_projection_loop.serialization import dumps
 from state_projection_loop.tokens import estimate_tokens
 
@@ -57,7 +57,7 @@ class TestCompression:
 class TestPolicyGlob:
     @pytest.mark.parametrize("case", cases("policy_glob", "glob_match"))
     def test_glob_match(self, case):
-        assert fnmatch.fnmatchcase(case["value"], case["pattern"]) is case["expected"]
+        assert glob_match(case["value"], case["pattern"]) is case["expected"]
 
 
 class TestCapability:

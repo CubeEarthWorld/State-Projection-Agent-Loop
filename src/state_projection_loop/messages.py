@@ -7,9 +7,10 @@ multimodal input can pass through without core changes.
 """
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from .ids import new_id
 
 # Role constants. Tool results MUST use OBSERVATION so untrusted data stays
 # structurally distinct from instructions (invariant I6; mitigation, not a
@@ -19,11 +20,10 @@ USER = "user"
 ASSISTANT = "assistant"
 OBSERVATION = "tool"
 
-_call_counter = itertools.count(1)
-
-
 def new_call_id() -> str:
-    return f"call_{next(_call_counter)}"
+    # A ULID, not a counter: a counter restarts with the process and would
+    # reuse ids already in a resumed ledger, where calls pair with results by id.
+    return new_id("call")
 
 
 @dataclass

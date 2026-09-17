@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .artifacts import ArtifactStore, serialize_value, truncate_to_tokens
+from .artifacts import ArtifactStore, serialize_value
 from .capability import Capability, Effect, ToolContext
 from .compression import content_hash
 from .config import Config
@@ -44,7 +44,7 @@ from .policy import PolicyEngine
 from .registry import Registry
 from .run import Command, Question, Run
 from .serialization import dumps
-from .tokens import estimate_tokens
+from .tokens import estimate_tokens, truncate_to_tokens
 
 # ---------------------------------------------------------------------------
 # Validation

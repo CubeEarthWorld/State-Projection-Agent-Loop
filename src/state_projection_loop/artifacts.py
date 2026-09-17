@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .ids import new_id
-from .tokens import estimate_tokens
+from .tokens import estimate_tokens, truncate_to_tokens
 from .serialization import dumps
 
 REF_KEY = "$artifact"
@@ -45,19 +45,6 @@ def is_ref(value: Any) -> bool:
 
 def ref(artifact_id: str) -> dict[str, str]:
     return {REF_KEY: artifact_id}
-
-
-def truncate_to_tokens(text: str, max_tokens: int) -> str:
-    if estimate_tokens(text) <= max_tokens:
-        return text
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if estimate_tokens(text[:mid]) <= max_tokens:
-            lo = mid
-        else:
-            hi = mid - 1
-    return text[:lo]
 
 
 @dataclass

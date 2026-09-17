@@ -10,7 +10,6 @@ paper over an unexplained diff.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 import sys
 from pathlib import Path
@@ -25,6 +24,7 @@ from state_projection_loop.compression import (  # noqa: E402
     strip_noise,
     summarize_text,
 )
+from state_projection_loop.policy import glob_match  # noqa: E402
 from state_projection_loop.runtime import apply_defaults, validate_args  # noqa: E402
 from state_projection_loop.serialization import dumps  # noqa: E402
 from state_projection_loop.tokens import estimate_tokens  # noqa: E402
@@ -153,7 +153,7 @@ def main() -> None:
 
     (out / "policy_glob.json").write_text(json.dumps({
         "glob_match": [
-            {"value": v, "pattern": p, "expected": fnmatch.fnmatchcase(v, p)}
+            {"value": v, "pattern": p, "expected": glob_match(v, p)}
             for v, p in GLOBS
         ],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

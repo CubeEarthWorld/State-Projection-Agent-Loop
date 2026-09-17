@@ -16,13 +16,12 @@ of the live projection.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
 from .messages import Message, SYSTEM
 from .projection import Section
-from .tokens import estimate_tokens
+from .tokens import truncate_to_tokens
 from .checklists import ChecklistStore
 from .serialization import dumps
 
@@ -119,13 +118,7 @@ class WorkingState:
             parts.append("artifact_refs: " + ", ".join(self.artifact_refs))
         if self.extra:
             parts.append("extra: " + dumps(self.extra))
-        body = "\n".join(parts)
-        if estimate_tokens(body) > max_tokens:
-            # Truncate the least time-critical sections first: facts, then
-            # decisions, keeping goal/constraints/open_questions/next_actions
-            # (the parts most load-bearing for not losing the thread).
-            body = body[: max_tokens * 4]
-        return body
+        return truncate_to_tokens("\n".join(parts), max_tokens)
 
 
 class WorkingStateSection(Section):

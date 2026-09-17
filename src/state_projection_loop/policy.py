@@ -47,6 +47,11 @@ SCOPES: dict[str, tuple[Optional[str], str]] = {
 PRESETS = ("deny_all", "approve_all_effects", "auto_safe", "auto_workspace_dev")
 
 
+# Case-sensitive on every platform (fnmatch.fnmatch folds case on Windows),
+# and the function the shared spec fixtures pin against the Dart port.
+glob_match = fnmatch.fnmatchcase
+
+
 @dataclass
 class Rule:
     decision: str  # one of DECISIONS
@@ -57,11 +62,11 @@ class Rule:
     reason: str = ""
 
     def matches(self, capability: Capability, effect: Effect, arguments: dict[str, Any]) -> bool:
-        if not fnmatch.fnmatch(capability.name, self.capability_pattern):
+        if not glob_match(capability.name, self.capability_pattern):
             return False
         if self.effect_kind is not None and effect.kind != self.effect_kind:
             return False
-        if not fnmatch.fnmatch(effect.resource, self.resource_pattern):
+        if not glob_match(effect.resource, self.resource_pattern):
             return False
         if self.arg_predicate is not None and not self.arg_predicate(arguments):
             return False
