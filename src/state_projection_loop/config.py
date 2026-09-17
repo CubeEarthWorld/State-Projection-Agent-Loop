@@ -38,6 +38,8 @@ class DiscoveryConfig:
     vector: str = "auto"  # "auto" | "on" | "off"
     k: int = 8
     toc: bool = True
+    # Recently used non-pinned tools whose native schemas are re-sent each turn.
+    active_tools: int = 48
     query_sources: list[str] = field(
         default_factory=lambda: ["last_user_message", "last_model_thought", "goal_if_exists"]
     )
@@ -80,6 +82,11 @@ class LimitsConfig:
     max_idle_turns: int = 3
     # Default approval TTL; None means requests never expire on their own.
     approval_expires_s: Optional[float] = 3600.0
+    # Loop guard: an identical call repeated this many times inside the last
+    # repeat_window calls (all failing, or all returning the same result) is
+    # not executed again; 0 disables the guard.
+    max_repeats: int = 3
+    repeat_window: int = 8
 
 
 @dataclass
@@ -90,8 +97,19 @@ class PersistenceConfig:
 
 
 @dataclass
+class CompactionConfig:
+    # When the rendered prompt exceeds this fraction of the window, one extra
+    # model call folds old history into the working state (see compaction.py).
+    # 0 disables compaction; deterministic compression always stays on.
+    trigger_ratio: float = 0.0
+
+
+@dataclass
 class Config:
     mode: str = "chat"  # "chat" | "job"
+    # Job mode: JSON Schema finish(result) must satisfy; a failing result is
+    # bounced back to the model like an argument error.
+    result_schema: Optional[dict[str, Any]] = None
     projection: ProjectionConfig = field(default_factory=ProjectionConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     compression: CompressionConfig = field(default_factory=CompressionConfig)
@@ -99,6 +117,7 @@ class Config:
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     persistence: PersistenceConfig = field(default_factory=PersistenceConfig)
+    compaction: CompactionConfig = field(default_factory=CompactionConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":

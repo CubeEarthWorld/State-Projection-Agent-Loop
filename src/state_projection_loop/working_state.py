@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
 from .messages import Message, SYSTEM
+from .projection import Section
 from .tokens import estimate_tokens
 from .checklists import ChecklistStore
 from .serialization import dumps
@@ -55,6 +56,9 @@ class WorkingState:
     # state.extra.* capabilities), and the session seed.
     extra: dict[str, Any] = field(default_factory=dict)
     checklists: ChecklistStore = field(default_factory=ChecklistStore)
+    # Ledger sequence up to which history has been folded into this state by
+    # compaction; those events render at summary fidelity afterwards.
+    folded_sequence: int = 0
 
     def is_empty(self) -> bool:
         return not any([
@@ -74,6 +78,7 @@ class WorkingState:
             "artifact_refs": list(self.artifact_refs),
             "extra": dict(self.extra),
             "checklists": self.checklists.to_dict(),
+            "folded_sequence": self.folded_sequence,
         }
 
     @classmethod
@@ -89,6 +94,7 @@ class WorkingState:
             artifact_refs=list(d.get("artifact_refs") or []),
             extra=dict(d.get("extra") or {}),
             checklists=ChecklistStore.from_dict(d["checklists"]) if "checklists" in d else ChecklistStore(),
+            folded_sequence=int(d.get("folded_sequence") or 0),
         )
 
     def render(self, *, max_tokens: int = 800) -> str:
@@ -122,7 +128,7 @@ class WorkingState:
         return body
 
 
-class WorkingStateSection:
+class WorkingStateSection(Section):
     """Projects the working state each turn (volatile — always near the tail)."""
 
     name = "working_state"

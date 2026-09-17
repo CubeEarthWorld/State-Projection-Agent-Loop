@@ -207,24 +207,44 @@ stays sent/pushed regardless of which branch you're on now.
 ## Working state (structured, not prose)
 
 ```python
-from state_projection_loop import Session, install_state
-
-session = Session(llm, kernel=GM_KERNEL, seed={"goal": "escape the dungeon", "extra": {"flags": {}}})
-install_state(session.registry)   # state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
+session = Session(llm, kernel=GM_KERNEL, builtins=["meta", "checklist", "state"],
+                  seed={"goal": "escape the dungeon", "extra": {"flags": {}}})
+# the "state" pack: state.goal.set / state.fact.add / state.decision.record / state.extra.* + [Working state] view
 ```
 
 `WorkingState` is a finite record — goal, acceptance criteria, constraints,
 confirmed facts, `(decision, reason)` pairs, open questions, next actions,
-artifact refs, plus a free-form `extra` dict for app-specific state. When
-the conversation overflows the window, compaction *merges* a JSON delta into
-it instead of re-summarizing prose, so a decision's reason recorded three
-folds ago is still there verbatim. The original messages are never lost —
-they stay in the Event Ledger, searchable via `meta.history.search` even
-after being folded out of the live projection.
+artifact refs, plus a free-form `extra` dict for app-specific state. It is
+projected every turn and checkpointed per user turn, so a decision's reason
+recorded twenty turns ago is still there verbatim after the conversation
+itself has been compressed out of the window. The original messages are
+never lost — they stay in the Event Ledger, searchable via
+`meta.history.search` even after being folded out of the live projection.
 
-## Disabling tools
+## Bundled tools: packs on, names off
 
-Any capability can be hidden from the model — bundled ones included:
+Bundled tools come in **packs** and there is one switch for them:
+
+| Pack | Tools | Default |
+|---|---|---|
+| `meta` | `meta.tool.find`, `meta.artifact.peek`, `meta.history.search` | on |
+| `checklist` | `planning.checklist.manage` | on |
+| `state` | `state.goal.set`, `state.fact.add`, … (9 tools) | off |
+| `spawn` | `meta.agent.spawn` | off |
+
+```python
+Session(llm)                                     # meta + checklist
+Session(llm, builtins=["meta", "state"])        # no checklist, with state tools
+Session(llm, builtins=())                        # nothing bundled at all
+install_builtins(registry, ["spawn"])            # same operation on a registry you built yourself
+```
+
+`install_builtins` is idempotent and a name the registry already resolves is
+left alone, so your own definition of `meta.tool.find` wins over the bundled
+one. An unknown pack name raises at construction.
+
+Per-tool control is the registry's deny-list, which works for bundled and
+developer capabilities alike:
 
 ```python
 registry = Registry(disabled=["planning.checklist.manage", "debug/*"])
@@ -236,7 +256,8 @@ session.registry.enable("my.dangerous.tool")
 
 Entries match a capability name, a category, or a category prefix
 (`"cat/*"`) — the same rule `subset()` uses, so `subset()` is the allow-list
-and `disable()` the deny-list.
+and `disable()` the deny-list. A capability is reachable iff it is registered
+and not denied; there is no third state.
 
 A disabled capability is gone from **every** surface the model can see: the
 native tool schemas, the pinned specs and runtime notes in the kernel, the
@@ -244,14 +265,45 @@ tool index, layer-2 candidates, `meta.tool.find`, and execution (it fails as
 `unknown_capability`). Both `Registry.__iter__` and `Registry.get()` skip
 disabled entries and everything else derives from those two, so there is no
 surface left to leak through. The deny-list is by *name*, not by registered
-object, so a bundled tool that installs itself (`ensure_meta_tools`) cannot
-re-appear by registering again.
+object, so installing a pack again cannot bring a denied tool back.
+
+### Kernel notes belong to the tool, not the kernel
+
+Any **pinned** capability may carry `discovery.kernel_note`, one sentence of
+standing guidance that appears under "[Runtime notes]" while the capability
+is reachable. The bundled tools use it (that is where "use
+`planning.checklist.manage` to plan multi-step work" comes from), and so can
+yours. Only pinned capabilities contribute, so the kernel stays bounded by
+the pin set you chose, never by registry size.
+
+## Standard agent features (each one is a switch)
+
+| Feature | Switch | What it does |
+|---|---|---|
+| Clarifying questions | pack `ask` | `meta.user.ask(question, choices?)` pauses the run in `WAITING_FOR_USER`; `send()`/`run_job()` return a `PendingQuestion`, the host calls `session.answer(text)` then `session.resume()`. The answer is the tool's result; the pause survives a restart like an approval does. |
+| Loop guard | `limits.max_repeats` (3; `0` off) | An identical call (same name and arguments) that failed identically, or returned the same result, `max_repeats` times within the last `limits.repeat_window` (8) calls is not executed again; the model gets a "loop guard" observation. Pure reads may still be polled. |
+| Structured job output | `result_schema` | In job mode `finish(result)` is validated against the JSON Schema; a failing result is bounced back like an argument error. |
+| Observers | `Session(on_event=fn)` | `fn(event)` fires after every ledger append. Read-only by contract (the veto point stays the policy engine); an observer that raises is ignored. |
+| Compaction | `compaction.trigger_ratio` (`0` off) | When the prompt exceeds the ratio of the window, one extra model call folds history older than the full-fidelity window into `WorkingState` as a schema-validated JSON delta (`state_folded` keeps the pre-fold state); folded events then render as one-line summaries. Deterministic compression stays on regardless. |
+| Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `meta.tool.find` with no second index. |
+| Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `filesystem.file.list/read/write` and `shell.command.run` with declared effects; never installed unless you ask. |
+
+```python
+session = Session(llm, builtins=["meta", "checklist", "ask"], on_event=print,
+                  config=Config.from_dict({"compaction": {"trigger_ratio": 0.8}}))
+session.registry.register(skill_capability("deploy", DEPLOY_STEPS, summary="How to deploy the service"))
+install_toolkits(session.registry, "./workspace")
+
+reply = session.send("Release the service")
+if session.run.state == "WAITING_FOR_USER":     # the model asked something
+    session.answer(input(reply.text))
+    reply = session.resume()
+```
 
 ## Sub-agents (opt-in)
 
 ```python
-from state_projection_loop import install_spawn
-install_spawn(session.registry)
+session = Session(llm, builtins=["meta", "checklist", "spawn"])
 # the model can now: spawn(task=..., tool_scope=["web.*"], max_steps=15)
 ```
 
@@ -268,8 +320,12 @@ artifacts must be explicitly moved into the parent's namespace.
   backends (`OpenAICompatEmbedding`, `LlamaCppEmbedding`) are examples too.
 - **Capability sources**: `ToolProvider` Protocol — sync external
   capability servers into the registry mid-session.
-- **Sections**: implement the `Section` Protocol and insert it anywhere the
-  cache-class ordering allows.
+- **Sections**: subclass `Section` (`render`, optional `shrink`) and pass the
+  full list via `Session(sections=...)` or splice one in with
+  `session.add_section(...)`. When the window overflows, sections are asked
+  to `shrink` from last to first, so order is also priority: put what you
+  can most afford to lose last. Built-ins shrink candidates, then the
+  checklist view, then the oldest history.
 - **Persistence**: `EventLedger` Protocol — `InMemoryLedger` for tests,
   `JsonlLedger` for disk; implement your own for a real database.
 
@@ -278,19 +334,48 @@ artifacts must be explicitly moved into the parent's namespace.
 ```python
 Config.from_dict({
   "mode": "chat",                          # or "job" (finish(result) ends the run)
+  "result_schema": None,                   # job mode: JSON Schema finish(result) must satisfy
+  "compaction": {"trigger_ratio": 0.0},    # 0 = off; e.g. 0.8 folds history into WorkingState
   "projection": {
-      "sections": ["kernel", "toc", "conversation", "working_state", "candidates"],
-      "window_tokens": 30000, "reserved_output_tokens": 1024,
+      "sections": ["kernel", "toc", "history", "working_state", "checklists", "candidates"],
+      "window_tokens": 30000, "reserved_output_tokens": 1024, "provider_overhead_tokens": 0,
+      "dedupe_candidate_cards_against_schemas": True,
   },
-  "discovery": {"vector": "auto", "k": 8, "toc": True,
+  "discovery": {"vector": "auto", "k": 8, "toc": True, "active_tools": 48,
                 "query_sources": ["last_user_message", "last_model_thought", "goal_if_exists"]},
-  "compaction": {"trigger_ratio": 0.8, "model": "same", "contract": "v2"},
-  "budget": {"max_steps": 50, "max_tokens": None, "max_cost": None, "max_seconds": None},
-  "artifacts": {"inline_threshold_tokens": 800, "directory": None},
-  "limits": {"max_validation_retries": 2, "approval_expires_s": 3600.0},
-  "persistence": {"ledger_directory": None, "snapshot_every_n_events": 20},
+  "compression": {"full_window": 6, "compressed_window": 24, "summary_window": 60,
+                  "compressed_max_lines": 80, "observation_max_lines": 40},
+  "budget": {"max_steps": 50, "max_tokens": None, "max_cost": None, "max_seconds": None,
+             "cost_per_1k_input": 0.0, "cost_per_1k_output": 0.0},
+  "artifacts": {"inline_threshold_tokens": 800, "preview_tokens": 120, "directory": None},
+  "limits": {"max_validation_retries": 2, "max_idle_turns": 3, "approval_expires_s": 3600.0,
+             "max_repeats": 3, "repeat_window": 8},
+  "persistence": {"ledger_directory": None},
 })
 ```
+
+Cross-session memory is specified but not built; see [docs/roadmap.md](docs/roadmap.md).
+
+## Changes in 0.5 (pre-1.0: breaking, no aliases)
+
+- `Session(builtins=...)` / `install_builtins()` replace `ensure_meta_tools`,
+  `ensure_checklist_tool`, `install_state`, `install_spawn`.
+- One `ToolContext` for sections and handlers replaces `TurnContext`.
+- `Section.shrink` replaces the hard-coded overflow ladder; `extra_sections`
+  is gone (pass `sections=`).
+- `discovery.kernel_note` replaces the hard-coded runtime-note table.
+- `Registry.categories()` returns `(total, pinned)`; `categories_with_pinned`,
+  `register_many`, `Message.meta`, `ToolResult.elapsed_s`, four never-emitted
+  event types and the unused `WAITING_FOR_USER` state are removed.
+- `Session.activate()` and `Runtime.reset()` are public; `discovery.active_tools`
+  replaces a hard-coded LRU size.
+- Handlers receive `ToolContext`; sections receive its superset `TurnContext`
+  (candidates, native schemas, dedupe flag), so projection state never reaches a tool.
+- Shrinking now counts native schemas: a dropped candidate takes its schema with it,
+  and the least recently used non-pinned schema is dropped as a last resort.
+- New standard features, each optional: `ask` pack, loop guard, `result_schema`,
+  `on_event` observers, compaction, `skill_capability`, `install_toolkits`.
+  `WAITING_FOR_USER` is back, now in use.
 
 ## Examples & scenarios
 

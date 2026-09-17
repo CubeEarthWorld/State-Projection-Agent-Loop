@@ -126,6 +126,9 @@ class PolicyEngine:
             self.add_rule(layer, Rule(decision="allow", capability_pattern="planning.checklist.manage",
                                      effect_kind="write", resource_pattern="working_state:checklists",
                                      reason="preset:local_checklists"))
+            self.add_rule(layer, Rule(decision="allow", capability_pattern="meta.user.ask",
+                                     effect_kind="external", resource_pattern="user:*",
+                                     reason="preset:ask_user"))
             self.add_rule(layer, Rule(decision="allow", capability_pattern="state.*",
                                      effect_kind="write", resource_pattern="working_state:*",
                                      reason="preset:local_working_state"))

@@ -40,6 +40,7 @@
     },
     "discovery": {
       "pinned": true,
+      "kernel_note": "If a needed tool is not listed, search the registry with meta.tool.find(query, category).",
       "no_embed": true
     },
     "execution": {
@@ -94,6 +95,7 @@
     },
     "discovery": {
       "pinned": true,
+      "kernel_note": "Inspect what an artifact holds with meta.artifact.peek(artifact=..., query=..., range=...) rather than asking for the whole value.",
       "no_embed": true
     },
     "execution": {

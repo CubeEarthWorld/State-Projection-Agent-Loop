@@ -93,15 +93,10 @@ class TestBundledDefinitions:
 
     def test_every_bundled_capability_has_a_handler(self):
         from state_projection_loop import Registry
-        from state_projection_loop.builtin.checklist import ensure_checklist_tool
-        from state_projection_loop.builtin.meta import ensure_meta_tools, install_spawn
-        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop import install_builtins
 
         registry = Registry()
-        ensure_meta_tools(registry)
-        ensure_checklist_tool(registry)
-        install_spawn(registry)
-        install_state(registry)
+        install_builtins(registry, ["meta", "checklist", "spawn", "state"])
 
         assert list(registry)
         for capability in registry:

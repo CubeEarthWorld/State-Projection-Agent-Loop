@@ -14,9 +14,8 @@ from state_projection_loop.artifacts import ArtifactStore, ref
 from state_projection_loop.capability import ToolContext
 from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
-from state_projection_loop.projection import TurnContext
 from state_projection_loop.run import Run
-from state_projection_loop.builtin.meta import ensure_meta_tools
+from state_projection_loop.builtin import install_builtins
 from state_projection_loop.runtime import (
     BudgetState,
     Runtime,
@@ -35,7 +34,7 @@ def make_runtime(registry: Registry, config: Config | None = None, *, allow_all:
     ledger = InMemoryLedger()
     run = Run("run_test", "ses_test", ledger)
     policy = PolicyEngine(default_decision="allow" if allow_all else "require_approval")
-    turn = TurnContext(config=config, registry=registry, ledger=ledger, run_id="run_test", store=store)
+    turn = ToolContext(config=config, registry=registry, ledger=ledger, run=run, store=store)
     ctx = ToolContext(registry=registry, store=store, config=config, ledger=ledger, run=run)
     return runtime, turn, ctx, run, policy
 
@@ -84,7 +83,7 @@ class TestValidation:
 
     def test_unknown_capability_mentions_the_search_tool_when_present(self):
         registry = echo_registry()
-        ensure_meta_tools(registry)
+        install_builtins(registry, ["meta"])
         runtime, turn, ctx, run, policy = make_runtime(registry)
         batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
         assert not batch.results[0].ok

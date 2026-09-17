@@ -10,33 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from state_projection_loop import Registry
+from state_projection_loop import Registry, install_toolkits
 
 
 def build_coding_registry(root: Path) -> Registry:
     root = Path(root).resolve()
     registry = Registry()
-
-    def _resolve(path: str) -> Path:
-        candidate = (root / path).resolve()
-        if not candidate.is_relative_to(root):
-            raise PermissionError(f"path escapes the workspace: {path}")
-        return candidate
-
-    def list_files(pattern: str = "**/*") -> list[str]:
-        return sorted(
-            str(p.relative_to(root)).replace("\\", "/")
-            for p in root.glob(pattern) if p.is_file()
-        )
-
-    def read_file(path: str) -> str:
-        return _resolve(path).read_text(encoding="utf-8")
-
-    def write_file(path: str, content: str) -> str:
-        target = _resolve(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return f"wrote {len(content)} chars to {path}"
 
     def run_tests() -> str:
         outputs = []
@@ -50,47 +29,7 @@ def build_coding_registry(root: Path) -> Registry:
             outputs.append(f"{test.name}: {status}\n{detail}")
         return "\n\n".join(outputs) or "no test files found"
 
-    registry.register({
-        "name": "filesystem.file.list",
-        "category": "file",
-        "spec": {
-            "description": "ワークスペース内のファイル一覧を返す。",
-            "parameters": {"type": "object", "properties": {
-                "pattern": {"type": "string", "default": "**/*"}}},
-        },
-        "discovery": {"embedding_text": "ファイル一覧 構成 どんなファイル ls list"},
-        "execution": {"timeout_s": 10, "retry_safety": "pure"},
-        "effects": [{"kind": "read", "resource": "workspace:*"}],
-    }, handler=list_files)
-
-    registry.register({
-        "name": "filesystem.file.read",
-        "category": "file",
-        "spec": {
-            "description": "ワークスペース内のファイルを読む。",
-            "parameters": {"type": "object", "properties": {
-                "path": {"type": "string"}}, "required": ["path"]},
-        },
-        "discovery": {"embedding_text": "ファイルを読む 中身 コード 確認 read cat"},
-        "execution": {"timeout_s": 10, "retry_safety": "pure",
-                      "output_policy": {"max_inline_tokens": 1200}},
-        "effects": [{"kind": "read", "resource": "workspace:*"}],
-    }, handler=read_file)
-
-    registry.register({
-        "name": "filesystem.file.write",
-        "category": "file.edit",
-        "spec": {
-            "description": "ワークスペース内のファイルへ全文を書き込む(上書き)。",
-            "parameters": {"type": "object", "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"}}, "required": ["path", "content"]},
-            "usage_notes": "部分編集ではなくファイル全文を渡すこと。",
-        },
-        "discovery": {"embedding_text": "ファイルを書く 保存 修正 編集 write save fix"},
-        "execution": {"timeout_s": 10, "retry_safety": "idempotent"},
-        "effects": [{"kind": "write", "resource": "workspace:*"}],
-    }, handler=write_file)
+    install_toolkits(registry, root, shell=False)  # filesystem.file.* confined to the workspace
 
     registry.register({
         "name": "dev.tests.run",

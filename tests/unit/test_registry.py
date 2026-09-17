@@ -89,7 +89,7 @@ class TestToc:
         reg.register(capability_dict("web.search.s2", category="web/search"))
         reg.register(capability_dict("file.f1", category="file"))
         reg.register(capability_dict("misc.m1", category=""))  # -> misc
-        assert reg.categories() == {"file": 1, "misc": 1, "web/search": 2}
+        assert reg.categories() == {"file": (1, 0), "misc": (1, 0), "web/search": (2, 0)}
         assert reg.toc_text() == "file(1) misc(1) web/search(2)"
 
     def test_toc_collapses_when_categories_explode(self):
@@ -199,7 +199,7 @@ class TestDisabling:
 
     def test_disable_survives_later_registration(self):
         """The deny-list is by name, so a self-installing bundled tool
-        (ensure_meta_tools) cannot re-appear by registering itself again."""
+        (install_builtins) cannot re-appear by installing its pack again."""
         reg = Registry(disabled=["late.tool.run"])
         reg.register(capability_dict("late.tool.run"))
         assert reg.get("late.tool.run") is None

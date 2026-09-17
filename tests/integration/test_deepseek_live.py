@@ -163,11 +163,14 @@ class TestLiveCodingAgent:
 
 class TestLiveCompaction:
     def test_summarizer_contract_over_live_model(self):
-        """Small window forces folding; the live model produces the delta."""
-        cfg = Config.from_dict({"projection": {"window_tokens": 2500}})
+        """Small window plus compaction forces a fold; the live model produces the delta."""
+        cfg = Config.from_dict({"projection": {"window_tokens": 2500}, "compression": {"full_window": 2},
+                                "compaction": {"trigger_ratio": 0.5}})
         session = Session(adapter(), kernel="日本語で長めに丁寧に答えるアシスタント。", config=cfg)
         for q in ("日本の四季それぞれの魅力を語って", "その中で旅行に最適な季節は?",
                   "北海道でおすすめの街は?", "そこで食べるべきものは?"):
             session.send(q)
-        assert not session.working_state.is_empty(), "the conversation should have been folded at least once"
+        folds = [e for e in session.ledger.iter_run(session.run.id) if e.type == "state_folded"]
+        assert folds, "the conversation should have been folded at least once"
+        assert session.working_state.folded_sequence > 0
         assert session.send("最初に私が聞いた話題は何だった?")  # continuity survives folding

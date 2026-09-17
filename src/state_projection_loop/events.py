@@ -19,7 +19,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 from .ids import new_id
 from .serialization import dumps
@@ -29,23 +29,22 @@ EVENT_TYPES = (
     "projection_compiled",
     "model_response",
     "decision_validated",
-    "policy_decision",
     "command_started",
     "command_completed",
     "command_failed",
     "command_outcome_unknown",
-    "artifact_stored",
     "approval_requested",
     "approval_resolved",
     "run_state_changed",
-    "state_folded",
-    "policy_changed",
     "branch_created",
     "notice",
     "observation",
     "checkpoint",
     "rewound",
     "checklists_changed",
+    "question_asked",
+    "question_answered",
+    "state_folded",
 )
 
 RENDERABLE_TYPES = ("user_input", "model_response", "observation", "notice")
@@ -205,6 +204,39 @@ class JsonlLedger:
             return None
         d = json.loads(path.read_text(encoding="utf-8"))
         return Snapshot(run_id=d["run_id"], sequence=d["sequence"], ts=d["ts"], state=d["state"])
+
+
+class ObservedLedger:
+    """A ledger that also hands every appended :class:`Event` to an observer.
+
+    Observers are read-only by contract: they see what happened, they cannot
+    veto or rewrite it (that is the policy engine's job). An observer that
+    raises is ignored so it can never take the loop down with it.
+    """
+
+    def __init__(self, inner: EventLedger, on_event: Callable[[Event], None]) -> None:
+        self.inner = inner
+        self.on_event = on_event
+
+    def append(self, run_id: str, type: str, data: dict[str, Any]) -> Event:
+        event = self.inner.append(run_id, type, data)
+        try:
+            self.on_event(event)
+        except Exception:  # noqa: BLE001 — observers never break the loop
+            pass
+        return event
+
+    def iter_run(self, run_id: str, *, after: int = 0) -> Iterator[Event]:
+        return self.inner.iter_run(run_id, after=after)
+
+    def last_sequence(self, run_id: str) -> int:
+        return self.inner.last_sequence(run_id)
+
+    def save_snapshot(self, snapshot: Snapshot) -> None:
+        self.inner.save_snapshot(snapshot)
+
+    def load_snapshot(self, run_id: str) -> Optional[Snapshot]:
+        return self.inner.load_snapshot(run_id)
 
 
 def event_to_message(event: "Event") -> Optional[dict]:

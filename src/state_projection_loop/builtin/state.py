@@ -3,8 +3,8 @@ through a small set of typed capabilities instead of an arbitrary dict.
 
 Editors of the working state are exactly two: user code
 (``session.working_state`` / seed) and the LLM via these capabilities.
-A game master registers all of this; a simple support bot registers none
-— the core projection is identical either way.
+A game master installs this pack; a simple support bot does not — the
+core projection is identical either way.
 """
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import json
 from typing import Any, Optional
 
 from ..capability import ToolContext
-from .defs import load
 
 
 def _walk_extra(extra: dict, path: str, *, create: bool = False) -> tuple[Any, str]:
@@ -96,16 +95,3 @@ STATE_HANDLERS = {
     "state.extra.get": _extra_get,
 }
 
-
-def install_state(registry) -> None:
-    """Register the bundled working-state capabilities.
-
-    Takes a Registry, not a Session: nothing here needs the session, and the
-    Dart port takes a Registry for the same reason.
-
-    The working state is projected automatically by ``WorkingStateSection``
-    whenever it is part of ``config.projection.sections`` (the default).
-    """
-    for definition in load("state"):
-        if definition["name"] not in registry:
-            registry.register(definition, handler=STATE_HANDLERS[definition["name"]])

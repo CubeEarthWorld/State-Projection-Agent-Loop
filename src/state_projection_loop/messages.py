@@ -43,7 +43,6 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
-    meta: dict[str, Any] = field(default_factory=dict)
 
     def text(self) -> str:
         if isinstance(self.content, str):
@@ -97,6 +96,3 @@ class Decision:
     finish: bool = False
     result: Any = None
 
-    @property
-    def is_text_only(self) -> bool:
-        return not self.calls and not self.finish

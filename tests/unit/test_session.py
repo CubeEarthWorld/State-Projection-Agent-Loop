@@ -304,7 +304,7 @@ class TestRewind:
         assert any("mail.send" in note for note in irreversible)
 
     def test_rewind_restores_working_state(self):
-        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop import install_builtins
 
         llm = ScriptedLLM([
             ScriptedLLM.call("state.goal.set", text="find the key"),
@@ -314,7 +314,7 @@ class TestRewind:
             "after rewind",
         ])
         session = Session(llm, policy=allow_all_policy())
-        install_state(session.registry)
+        install_builtins(session.registry, ["state"])
         session.send("set goal")
         session.send("change goal")
         assert session.working_state.goal == "escape the room"
@@ -439,21 +439,21 @@ class TestStateToolsDeclareTheirWrites:
     concurrently, and a mislabelled write loses the model's stated order."""
 
     def test_mutating_state_tools_are_not_read_only(self):
-        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop import install_builtins
         from state_projection_loop.runtime import Runtime
 
         session = Session(ScriptedLLM([]), registry=Registry(), policy=allow_all_policy())
-        install_state(session.registry)
+        install_builtins(session.registry, ["state"])
         mutating = [c for c in session.registry if c.name.startswith("state.") and not c.name.endswith(".get")]
         assert mutating, "expected the bundled state tools to be installed"
         for capability in mutating:
             assert not Runtime.is_read_only(capability), f"{capability.name} claims to be read-only"
 
     def test_state_writes_are_auto_allowed_by_the_default_policy(self):
-        from state_projection_loop.builtin.state import install_state
+        from state_projection_loop import install_builtins
 
         session = Session(ScriptedLLM([]), registry=Registry())  # default (auto_safe) policy
-        install_state(session.registry)
+        install_builtins(session.registry, ["state"])
         capability = session.registry.get("state.goal.set")
         assert session.policy.evaluate(capability, {"text": "x"}).decision == "allow"
 
@@ -483,7 +483,7 @@ class TestApprovalKeepsTheDecisionIntact:
         assert session.run.state == "WAITING_FOR_APPROVAL"
         assert self._observations(session) == []
         assert not any(m.role == "assistant" and m.tool_calls
-                       for m in session.projection.get("history").render(session._new_turn()))
+                       for m in session.projection.get("history").render(session._context()))
 
     def test_approval_produces_exactly_one_result_per_call(self):
         session = self._session([ScriptedLLM.call("demo.write"), "done"])
@@ -505,7 +505,7 @@ class TestApprovalKeepsTheDecisionIntact:
         assert len(observations) == 2, f"both parked calls need a result, got {observations}"
         assert all("denied" in text.lower() or "not executed" in text.lower()
                    for _, text in observations)
-        history = session.projection.get("history").render(session._new_turn())
+        history = session.projection.get("history").render(session._context())
         assert any(m.role == "assistant" and m.tool_calls for m in history)
 
 

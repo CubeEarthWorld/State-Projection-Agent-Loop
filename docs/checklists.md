@@ -138,7 +138,7 @@ Future<void> main() async {
 
 ## 子エージェントへの受け渡し
 
-既存の `install_spawn` / `installSpawn` で有効化する `meta.agent.spawn` に
+`builtins` に `"spawn"` パックを加えて（または `install_builtins` / `installBuiltins`）有効化する `meta.agent.spawn` に
 `checklist_ids: [ULID, ...]` を指定すると、その計画だけを独立コピーします。
 指定した場合の戻り値は `{"result": 子の結果, "checklists": version 1の文書}`。
 省略時の従来の戻り値は変更しません。空配列を明示すると、子が新たに作った計画も

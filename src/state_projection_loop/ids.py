@@ -56,6 +56,7 @@ _PREFIXES = {
     "command": "cmd",
     "approval": "apr",
     "artifact": "art",
+    "question": "qst",
 }
 
 

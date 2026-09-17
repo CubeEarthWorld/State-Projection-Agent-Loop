@@ -15,9 +15,9 @@ Requires the corresponding optional client library:
     pip install openai       # OpenAICompatAdapter, OpenAICompatEmbedding
     pip install anthropic    # AnthropicAdapter
 """
-import asyncio
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Optional, Sequence
 
