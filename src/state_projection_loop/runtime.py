@@ -220,6 +220,17 @@ class BudgetState:
     cost: float = 0.0
     started: float = field(default_factory=time.time)
 
+    def to_dict(self) -> dict[str, Any]:
+        """What a snapshot keeps. Not ``started``: the wall clock restarts
+        with the process that resumes the run."""
+        return {"steps": self.steps, "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens, "cost": self.cost}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BudgetState":
+        return cls(steps=d.get("steps", 0), prompt_tokens=d.get("prompt_tokens", 0),
+                   completion_tokens=d.get("completion_tokens", 0), cost=d.get("cost", 0.0))
+
     def note_usage(self, prompt: int, completion: int, cfg: Config) -> None:
         self.prompt_tokens += prompt
         self.completion_tokens += completion

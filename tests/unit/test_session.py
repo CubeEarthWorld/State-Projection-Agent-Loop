@@ -433,6 +433,24 @@ class TestResumedRunArtifacts:
         assert "xxx" in resumed.store.peek(ids[0])
 
 
+class TestResumeFromLedger:
+    def test_resuming_writes_no_second_run_and_keeps_the_kernel(self, tmp_path):
+        from state_projection_loop import Config
+
+        config = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
+        first = Session(ScriptedLLM(["hello"]), kernel="You are the deploy bot.", config=config)
+        first.send("hi")
+        before = sorted(p.name for p in tmp_path.iterdir())
+
+        llm = ScriptedLLM(["again"])
+        resumed = Session.resume_from_ledger(llm, first.run.id, config=config, kernel="You are the deploy bot.")
+        assert sorted(p.name for p in tmp_path.iterdir()) == before, "resuming must not create a second run"
+        assert (resumed.run.id, resumed.session_id) == (first.run.id, first.session_id)
+
+        resumed.send("and again")
+        assert llm.requests[0]["messages"][0].content.startswith("You are the deploy bot.")
+
+
 class TestStateToolsDeclareTheirWrites:
     """state.* mutates the working state, so it must not be declared as
     effect-free: the runtime uses that declaration to decide what may run

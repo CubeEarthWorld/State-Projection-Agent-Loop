@@ -86,17 +86,24 @@ class Session:
         ledger: Optional[EventLedger] = None,
         builtins: Iterable[str] = DEFAULT_BUILTINS,
         on_event: Optional[Callable[[Event], None]] = None,
+        _restored: Optional[Snapshot] = None,
     ) -> None:
+        """``_restored`` is :meth:`resume_from_ledger`'s way in: the session
+        continues that snapshot's run instead of starting one."""
         self.config = config or Config()
         self.llm = llm
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
         install_builtins(self.registry, builtins)
 
-        self.session_id = new_id("session")
         base = ledger if ledger is not None else _make_ledger(self.config)
         self.ledger = base if on_event is None else ObservedLedger(base, on_event)
-        self.run = Run(new_id("run"), self.session_id, self.ledger)
+        if _restored is None:
+            self.session_id = new_id("session")
+            self.run = Run(new_id("run"), self.session_id, self.ledger)
+        else:
+            self.run = Run.from_snapshot_state(_restored.run_id, self.ledger, _restored.state)
+            self.session_id = self.run.session_id
 
         self.policy = policy if policy is not None else self._default_policy()
 
@@ -112,18 +119,25 @@ class Session:
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
         self.runtime = Runtime(self.registry, self.config)
 
-        # Typed fields go through the same parser snapshots use, so a seeded
-        # `decisions` becomes RecordedDecision objects rather than raw dicts
-        # that blow up on the next to_dict(). Anything else is app-specific
-        # state and lands in `extra`, the documented escape hatch.
-        seed = dict(seed or {})
-        known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
-        self.working_state = WorkingState.from_dict(known)
-        self.working_state.extra.update(
-            {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
-        )
-
-        self.budget = BudgetState()
+        if _restored is None:
+            # Typed fields go through the same parser snapshots use, so a
+            # seeded `decisions` becomes RecordedDecision objects rather than
+            # raw dicts that blow up on the next to_dict(). Anything else is
+            # app-specific state and lands in `extra`, the documented escape hatch.
+            seed = dict(seed or {})
+            known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
+            self.working_state = WorkingState.from_dict(known)
+            self.working_state.extra.update(
+                {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
+            )
+            self.budget = BudgetState()
+        else:
+            self.working_state = WorkingState.from_dict(_restored.state.get("working_state") or {})
+            # Plans changed after the snapshot are in the ledger.
+            for event in self.ledger.iter_run(self.run.id, after=_restored.sequence):
+                if event.type == "checklists_changed":
+                    self.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
+            self.budget = BudgetState.from_dict(_restored.state.get("budget") or {})
 
         # Recently used non-pinned tools (an LRU). Pinned capabilities are
         # added by _api_tools straight from the registry, so they are never
@@ -133,8 +147,9 @@ class Session:
         self._idle_turns = 0
         self._budget_grace_used = False
         self._lock = asyncio.Lock()
-        self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
-        self._snapshot()
+        if _restored is None:
+            self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
+            self._snapshot()
 
     @staticmethod
     def _default_policy() -> PolicyEngine:
@@ -334,12 +349,12 @@ class Session:
 
     @classmethod
     def resume_from_ledger(
-        cls, llm: LLMAdapter, run_id: str, *, config: Optional[Config] = None,
-        registry: Optional[Registry] = None, policy: Optional[PolicyEngine] = None,
-        embedder: Optional[EmbeddingBackend] = None,
-        spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
-        on_event: Optional[Callable[[Event], None]] = None,
+        cls, llm: LLMAdapter, run_id: str, *, config: Optional[Config] = None, **session_args: Any,
     ) -> "Session":
+        """Continue a persisted run in a new process. ``session_args`` are
+        :class:`Session`'s own (``kernel``, ``registry``, ``policy``,
+        ``sections``, ``builtins``, ...): they are code, not state, so the
+        caller passes what the first process passed."""
         config = config or Config()
         if not config.persistence.ledger_directory:
             raise RunStateError("resume_from_ledger requires config.persistence.ledger_directory")
@@ -347,35 +362,12 @@ class Session:
         snapshot = ledger.load_snapshot(run_id)
         if snapshot is None:
             raise RunStateError(f"No snapshot found for run {run_id!r}; nothing to resume")
-
-        session = cls(
-            llm, config=config, registry=registry, policy=policy, embedder=embedder,
-            spawn_llm_factory=spawn_llm_factory, ledger=ledger, on_event=on_event,
-        )
-        session.run = Run.from_snapshot_state(run_id, session.ledger, snapshot.state)
-        session.session_id = snapshot.state.get("session_id", session.session_id)
-        session.working_state = WorkingState.from_dict(snapshot.state.get("working_state") or {})
-        for event in ledger.iter_run(run_id, after=snapshot.sequence):
-            if event.type == "checklists_changed":
-                session.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
-        budget_data = snapshot.state.get("budget") or {}
-        session.budget = BudgetState(
-            steps=budget_data.get("steps", 0), prompt_tokens=budget_data.get("prompt_tokens", 0),
-            completion_tokens=budget_data.get("completion_tokens", 0), cost=budget_data.get("cost", 0.0),
-        )
-        session.store = ArtifactStore(
-            session.run.id, directory=Path(config.artifacts.directory) if config.artifacts.directory else None,
-        )
-        return session
+        return cls(llm, config=config, ledger=ledger, _restored=snapshot, **session_args)
 
     def _snapshot(self) -> None:
         state = {
-            "session_id": self.session_id,
             "working_state": self.working_state.to_dict(),
-            "budget": {
-                "steps": self.budget.steps, "prompt_tokens": self.budget.prompt_tokens,
-                "completion_tokens": self.budget.completion_tokens, "cost": self.budget.cost,
-            },
+            "budget": self.budget.to_dict(),
             **self.run.to_snapshot_state(),
         }
         self.ledger.save_snapshot(Snapshot(
