@@ -407,13 +407,11 @@ class Session:
                 self._snapshot()
                 return stop
 
-            ctx = self._context()
-            api_tools = self._api_tools(ctx)
-            ctx.dedupe_candidate_cards = self.config.projection.dedupe_candidate_cards_against_schemas
-            reserved = self.config.projection.reserved_output_tokens + self.config.projection.provider_overhead_tokens
-            messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
+            ctx, messages = self._project()
             if await self._fold(ctx, messages):
-                messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
+                # From scratch: shrinking the first rendering consumed its
+                # candidates and schemas, and the fold may have moved the goal.
+                ctx, messages = self._project()
             self.ledger.append(self.run.id, "projection_compiled", {
                 "tokens": estimate_tokens(messages), "messages": len(messages),
                 "candidates": [s.tool.name for s in ctx.candidates],
@@ -467,6 +465,15 @@ class Session:
             self._snapshot()
             if batch.halted:
                 return self._pending
+
+    def _project(self) -> tuple[TurnContext, list[Message]]:
+        ctx = self._context()
+        cfg = self.config.projection
+        messages = self.projection.render(
+            ctx, api_tools=self._api_tools(ctx),
+            reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens,
+        )
+        return ctx, messages
 
     async def _fold(self, ctx: TurnContext, messages: list[Message]) -> bool:
         """Compaction: when the prompt exceeds ``compaction.trigger_ratio`` of

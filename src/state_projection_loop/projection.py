@@ -38,7 +38,6 @@ class TurnContext(ToolContext):
 
     candidates: list[Any] = field(default_factory=list)  # list[ScoredTool]
     api_tools: list[dict[str, Any]] = field(default_factory=list)
-    dedupe_candidate_cards: bool = False
 
 
 def _schema_name(schema: dict[str, Any]) -> Any:
@@ -126,7 +125,7 @@ class KernelSection(Section):
         if key != self._cached_key:
             self._rebuild(ctx.registry, ctx.config.mode)
             self._cached_key = key
-        native_names = {t.get("function", {}).get("name") for t in ctx.api_tools}
+        native_names = {_schema_name(t) for t in ctx.api_tools}
         if ctx.api_tools and self._pinned_api_names <= native_names:
             return list(self._native_messages)
         return list(self._messages)
@@ -264,7 +263,7 @@ class CandidatesSection(Section):
     def render(self, ctx: TurnContext) -> list[Message]:
         if not ctx.candidates:
             return []
-        if ctx.dedupe_candidate_cards and ctx.api_tools:
+        if ctx.config.projection.dedupe_candidate_cards_against_schemas and ctx.api_tools:
             lines = [s.tool.card.signature or s.tool.name for s in ctx.candidates]
             header = "[Tool candidates — auto-selected for this turn; schemas sent natively]"
         else:

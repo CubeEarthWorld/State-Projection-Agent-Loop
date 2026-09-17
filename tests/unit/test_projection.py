@@ -114,7 +114,6 @@ class TestRenderComposition:
 
         projection = default_projection(reg)
         turn = make_turn(registry=reg, candidates=[ScoredTool(tool=cap, score=1.0)])
-        turn.dedupe_candidate_cards = True
         msgs = projection.render(turn, api_tools=[cap.api_schema()])
         last = str(msgs[-1].content)
         assert "schemas sent natively" in last
