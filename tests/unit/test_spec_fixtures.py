@@ -80,6 +80,19 @@ class TestSerialization:
         assert estimate_tokens(case["value"]) == case["expected"]
 
 
+class TestProjection:
+    """One whole turn as the model receives it, shared with the Dart port:
+    no refactor of either package may change a byte of it."""
+
+    def test_projection_matches_the_golden_turn(self):
+        import sys
+
+        sys.path.insert(0, str(FIXTURES.parent))
+        from generate_fixtures import projection_scenario
+
+        assert projection_scenario() == load("projection")
+
+
 class TestBundledDefinitions:
     """The bundled definitions are data, shipped as package data and shared
     with the Dart port. A missing or malformed file is a packaging bug that

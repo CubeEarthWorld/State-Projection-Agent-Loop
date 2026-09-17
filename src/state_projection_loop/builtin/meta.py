@@ -14,13 +14,14 @@ from typing import Any, Optional
 from ..artifacts import is_ref
 from ..capability import ToolContext
 from ..registry import Registry
+from ..serialization import dumps
 
 
 def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k: int = 8) -> Any:
     results = ctx.search.search(query, category=category, k=k, layer=3)
     if not results:
         toc = ctx.registry.toc_text()
-        return f"No tools matched {query!r}. Categories: {toc or '(none)'}"
+        return f"No tools matched \"{query}\". Categories: {toc or '(none)'}"
     if ctx.session is not None:
         ctx.session.activate([s.tool.name for s in results])
     return [
@@ -31,7 +32,7 @@ def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k:
 
 def _peek(ctx: ToolContext, artifact: dict, query: Optional[str] = None, range: Optional[str] = None) -> str:  # noqa: A002
     if not is_ref(artifact):
-        return f"Error: {artifact!r} is not a valid artifact reference; expected {{'$artifact': '<id>'}}"
+        return f'Error: {dumps(artifact)} is not a valid artifact reference; expected {{"$artifact": "<id>"}}'
     return ctx.store.peek(artifact["$artifact"], query=query, range_=range)
 
 
@@ -46,7 +47,7 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
             hits.append(f"[{event.sequence}] {event.type}: {blob[:300]}")
             if len(hits) >= k:
                 break
-    return hits or [f"No ledger events matched {query!r}."]
+    return hits or [f"No ledger events matched \"{query}\"."]
 
 
 async def _spawn(

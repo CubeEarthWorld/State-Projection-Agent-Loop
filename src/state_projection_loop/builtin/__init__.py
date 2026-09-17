@@ -16,7 +16,7 @@ from .meta import META_HANDLERS, SPAWN_HANDLERS
 from .state import STATE_HANDLERS
 
 # Packs a bare ``Session(llm)`` installs.
-DEFAULT_BUILTINS: frozenset[str] = frozenset({"meta", "checklist"})
+DEFAULT_BUILTINS: tuple[str, ...] = ("meta", "checklist")
 
 _PACKS: dict[str, dict[str, Callable]] = {
     "meta": META_HANDLERS,

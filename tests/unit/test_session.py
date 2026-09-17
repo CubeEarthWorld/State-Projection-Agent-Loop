@@ -517,29 +517,23 @@ class TestTheLoopDoesNotBlock:
     def test_other_tasks_run_while_the_model_is_thinking(self):
         import asyncio
 
-        class SlowLLM:
-            async def complete(self, messages, tools=None):
-                from state_projection_loop.llm import Decision
-
-                await asyncio.sleep(0.05)
-                return Decision(text="done")
-
-        ticks = 0
-
         async def scenario():
-            nonlocal ticks
+            other_ran = asyncio.Event()
 
-            async def ticker():
-                nonlocal ticks
-                while True:
-                    await asyncio.sleep(0.005)
-                    ticks += 1
+            class WaitingLLM:
+                # Returns only once another task has run: a handshake, not a
+                # wall-clock tick count, so a coarse timer cannot fail it.
+                async def complete(self, messages, tools=None):
+                    from state_projection_loop.llm import Decision
 
-            task = asyncio.create_task(ticker())
-            try:
-                await Session(SlowLLM()).asend("hello")
-            finally:
-                task.cancel()
+                    await other_ran.wait()
+                    return Decision(text="done")
+
+            async def other():
+                other_ran.set()
+
+            task = asyncio.create_task(other())
+            assert await asyncio.wait_for(Session(WaitingLLM()).asend("hello"), timeout=5) == "done"
+            await task
 
         asyncio.run(scenario())
-        assert ticks > 2, f"the loop was blocked while the adapter ran (ticks={ticks})"

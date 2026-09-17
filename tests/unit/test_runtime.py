@@ -4,7 +4,6 @@ budget arithmetic."""
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 import pytest
@@ -141,19 +140,23 @@ class TestOrdering:
     def test_adjacent_read_only_calls_run_concurrently(self):
         reg = Registry()
 
-        async def slow(**kwargs: Any) -> str:
-            await asyncio.sleep(0.15)
+        started = 0
+
+        async def barrier(**kwargs: Any) -> str:
+            # Returns only once all three have started: run serially, the
+            # first would wait forever and hit its timeout instead.
+            nonlocal started
+            started += 1
+            while started < 3:
+                await asyncio.sleep(0)
             return "done"
 
         for name in ("demo.p1", "demo.p2", "demo.p3"):
-            reg.register(capability_dict(name, effects=[("read", "workspace:*")]), handler=slow)
+            reg.register(capability_dict(name, effects=[("read", "workspace:*")], timeout_s=5), handler=barrier)
         runtime, turn, ctx, run, policy = make_runtime(reg)
         calls = [ToolCall(name=n, arguments={}) for n in ("demo.p1", "demo.p2", "demo.p3")]
-        start = time.perf_counter()
         batch = run_batch(runtime, calls, turn, ctx, run, policy)
-        elapsed = time.perf_counter() - start
         assert all(r.ok for r in batch.results)
-        assert elapsed < 0.4  # 3 x 0.15s would be ~0.45s serially
 
     def test_write_breaks_the_parallel_streak(self):
         reg = Registry()

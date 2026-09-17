@@ -314,7 +314,7 @@ class Runtime:
         return ToolResult(
             call=call, ok=False, outcome="failed", error="loop_guard",
             observation=(
-                f"Loop guard: {capability.name!r} with these exact arguments {why}. "
+                f"Loop guard: \"{capability.name}\" with these exact arguments {why}. "
                 "It was not executed again; change the arguments or the approach."
             ),
         )
@@ -444,7 +444,7 @@ class Runtime:
         results: list[ToolResult] = []
         if capability is None:
             results.append(ToolResult(call=first_call, ok=False, outcome="failed", error="unknown_capability",
-                                       observation=f"Error: capability {first_call.name!r} no longer registered."))
+                                       observation=f"Error: capability \"{first_call.name}\" no longer registered."))
         else:
             args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
             results.append(await self._run(capability, args, ctx, run, first_call, command=approved))
@@ -473,7 +473,7 @@ class Runtime:
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="unknown_capability",
                 observation=(
-                    f"Error: capability {call.name!r} is not registered. "
+                    f"Error: capability \"{call.name}\" is not registered. "
                     f"Tool index: {toc or '(empty)'}.{hint}"
                 ),
             )
@@ -486,7 +486,7 @@ class Runtime:
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="require_spec",
                 observation=(
-                    f"Capability {call.name!r} requires its full spec to be reviewed before first use. "
+                    f"Capability \"{call.name}\" requires its full spec to be reviewed before first use. "
                     f"The spec follows — verify your arguments against it and call again.\n"
                     + capability.spec_text()
                 ),
@@ -494,7 +494,7 @@ class Runtime:
 
         args = call.arguments if isinstance(call.arguments, dict) else {}
         if call.raw_arguments is not None and not args:
-            error: Optional[str] = f"arguments were not valid JSON: {call.raw_arguments[:200]!r}"
+            error: Optional[str] = f"arguments were not valid JSON: \"{call.raw_arguments[:200]}\""
         else:
             args = apply_defaults(capability.spec.parameters, args)
             error = validate_args(capability.spec.parameters, args)
@@ -505,13 +505,13 @@ class Runtime:
             limit = self.config.limits.max_validation_retries
             if n > limit:
                 observation = (
-                    f"Validation failed {n} times in a row for {call.name!r}; giving up on this call "
+                    f"Validation failed {n} times in a row for \"{call.name}\"; giving up on this call "
                     f"(limit {limit}). Last error: {error}. Try a different tool or approach."
                 )
             else:
                 self.seen_specs.add(capability.name)
                 observation = (
-                    f"Validation error calling {call.name!r}: {error}\n"
+                    f"Validation error calling \"{call.name}\": {error}\n"
                     "The call was NOT executed. The full spec follows — fix the arguments and retry.\n"
                     + capability.spec_text()
                 )
@@ -544,7 +544,7 @@ class Runtime:
             run.record_outcome(command, "failed", error="no_handler")
             return ToolResult(
                 call=call, ok=False, outcome="failed", error="no_handler", command_id=command.id,
-                observation=f"Error: capability {capability.name!r} has no executable handler registered.",
+                observation=f"Error: capability \"{capability.name}\" has no executable handler registered.",
             )
         resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
@@ -587,7 +587,7 @@ class Runtime:
             call=call, ok=False, error=last_error, outcome=last_outcome,
             command_id=command.id,
             observation=(
-                f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing {capability.name!r} "
+                f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing \"{capability.name}\" "
                 f"({attempts} attempt(s)): {last_error}. "
                 + ("Outcome is UNKNOWN — do not blindly retry a non-idempotent action; check state first."
                    if last_outcome == "unknown" else "The call failed; adjust and retry or use another tool.")
