@@ -406,9 +406,10 @@ class Runtime:
     async def resume_pending(
         self, run: Run, ctx: ToolContext, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
-        """Continue a run's ``pending_calls`` after its approval was resolved.
+        """Continue a run's ``pending_calls`` after its approval was resolved
+        or its question answered.
 
-        The first pending call already has a :class:`~state_projection_loop.run.Command`
+        After an approval the first pending call already has a :class:`~state_projection_loop.run.Command`
         (created when approval was requested) and is executed directly,
         reusing its ``command_id`` — no re-validation, no re-authorization,
         so an approved command cannot silently get a different idempotency
@@ -440,23 +441,22 @@ class Runtime:
                 for call in pending[1:]
             ]
             return ExecuteBatchResult(results=results, halted=False)
-        capability = self.registry.get(approved.capability_name) if approved else self.registry.get(first_call.name)
-        results: list[ToolResult] = []
+        run.pending_calls = []
+        if approved is None:
+            # Parked behind a question, not an approval: nothing here was
+            # checked yet, so every call takes the normal path.
+            return await self.execute(pending, ctx, run, policy)
+        capability = self.registry.get(approved.capability_name)
         if capability is None:
-            results.append(ToolResult(call=first_call, ok=False, outcome="failed", error="unknown_capability",
-                                       observation=f"Error: capability \"{first_call.name}\" no longer registered."))
+            results = [ToolResult(call=first_call, ok=False, outcome="failed", error="unknown_capability",
+                                  observation=f"Error: capability \"{first_call.name}\" no longer registered.")]
         else:
-            args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
-            results.append(await self._run(capability, args, ctx, run, first_call, command=approved))
+            results = [await self._run(capability, approved.arguments, ctx, run, first_call, command=approved)]
             if results[-1].outcome == "waiting_user":
                 run.pending_calls = list(pending[1:])
                 return ExecuteBatchResult(results=results, halted=True)
-        run.pending_calls = []
         rest = await self.execute(pending[1:], ctx, run, policy)
-        results.extend(rest.results)
-        if rest.halted:
-            return ExecuteBatchResult(results=results, halted=True)
-        return ExecuteBatchResult(results=results, halted=False)
+        return ExecuteBatchResult(results=results + rest.results, halted=rest.halted)
 
     # -- pre-checks: unknown capability / require_spec / validation ---------
 

@@ -10,6 +10,7 @@ from state_projection_loop import (
     FOLD_INSTRUCTIONS, Config, PendingQuestion, PolicyEngine, Registry, Run, ScriptedLLM, Session,
     install_toolkits, skill_capability,
 )
+from state_projection_loop.policy import Rule
 
 from _util import capability_dict
 
@@ -47,6 +48,25 @@ class TestAsk:
         types = {e.type for e in session.ledger.iter_run(session.run.id)}
         assert {"question_asked", "question_answered"} <= types
         assert [c.outcome for c in session.run.commands.values()] == ["ok"]
+
+    def test_calls_parked_behind_a_question_still_face_the_policy(self):
+        sent = []
+        registry = Registry()
+        registry.register(capability_dict("mail.message.send", effects=[("external", "smtp:*")]),
+                          handler=lambda: sent.append(True) or "sent")
+        policy = PolicyEngine(default_decision="allow")
+        policy.add_rule("admin", Rule(decision="deny", capability_pattern="mail.*"))
+        session = Session(
+            ScriptedLLM([ScriptedLLM.calls(("meta.user.ask", {"question": "Send it?"}), ("mail.message.send", {})),
+                         "ok"]),
+            registry=registry, builtins=["ask"], policy=policy,
+        )
+        session.send("mail the report")
+        session.answer("yes")
+        session.resume()
+        assert sent == [], "answering a question must not wave the next call past the policy"
+        assert ("mail.message.send", "Denied by policy (admin): ") == tuple(
+            (n, t[:len("Denied by policy (admin): ")]) for n, t in observations(session) if n == "mail.message.send")[0]
 
     def test_default_policy_lets_the_model_ask_without_approval(self):
         session = Session(ScriptedLLM([]), builtins=["ask"])
