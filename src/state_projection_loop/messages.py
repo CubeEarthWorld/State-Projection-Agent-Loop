@@ -35,6 +35,14 @@ class ToolCall:
     """Original argument string when the provider returned unparseable JSON;
     validation will fail and route through the self-repair path (§6)."""
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "arguments": self.arguments, "raw_arguments": self.raw_arguments}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ToolCall":
+        return cls(name=d["name"], arguments=d.get("arguments") or {}, id=d.get("id") or new_call_id(),
+                   raw_arguments=d.get("raw_arguments"))
+
 
 @dataclass
 class Message:
@@ -57,11 +65,7 @@ class Message:
     def from_dict(cls, d: dict[str, Any]) -> "Message":
         return cls(
             role=d["role"], content=d.get("content", ""),
-            tool_calls=[
-                ToolCall(name=tc["name"], arguments=tc.get("arguments") or {}, id=tc.get("id") or new_call_id(),
-                          raw_arguments=tc.get("raw_arguments"))
-                for tc in (d.get("tool_calls") or [])
-            ],
+            tool_calls=[ToolCall.from_dict(tc) for tc in (d.get("tool_calls") or [])],
             tool_call_id=d.get("tool_call_id"), name=d.get("name"),
         )
 

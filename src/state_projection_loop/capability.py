@@ -54,6 +54,13 @@ class Effect:
         if self.kind not in EFFECT_KINDS:
             raise ValueError(f"Effect.kind must be one of {EFFECT_KINDS}, got {self.kind!r}")
 
+    def to_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "resource": self.resource}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Effect":
+        return cls(kind=d.get("kind", "none"), resource=d.get("resource", "*"))
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses mirroring the projected shape of a capability
@@ -63,7 +70,7 @@ class Effect:
 class CapabilityCard:
     summary: str = ""
     tags: list[str] = field(default_factory=list)
-    signature: str = ""  # derived by Capability.derive_card(); never authored
+    signature: str = ""  # derived from the name and parameters; never authored
 
 
 @dataclass
@@ -201,6 +208,7 @@ class Capability:
 
     def __post_init__(self) -> None:
         validate_capability_name(self.name)
+        self._derive_card()
 
     @property
     def planned_effects(self) -> list[Effect]:
@@ -268,11 +276,7 @@ class Capability:
                 preview=op_d.get("preview", "head"),
             ),
         )
-        effects = [
-            Effect(kind=e.get("kind", "none"), resource=e.get("resource", "*"))
-            for e in (data.get("effects") or [])
-        ]
-        cap = cls(
+        return cls(
             name=data["name"],
             version=int(data.get("version", 1)),
             category=data.get("category", ""),
@@ -280,12 +284,10 @@ class Capability:
             spec=spec,
             discovery=discovery,
             execution=execution,
-            effects=effects,
+            effects=[Effect.from_dict(e) for e in (data.get("effects") or [])],
         )
-        cap.derive_card()
-        return cap
 
-    def derive_card(self) -> None:
+    def _derive_card(self) -> None:
         if not self.card.summary:
             self.card.summary = _first_sentence(self.spec.description) or self.name
         # The signature is always derived, never authored: it is the one
@@ -297,8 +299,7 @@ class Capability:
 
     def card_text(self) -> str:
         """~30-token one-liner: enough to call the capability directly."""
-        sig = self.card.signature or self.name
-        return f"- {sig} — {self.card.summary}"
+        return f"- {self.card.signature} — {self.card.summary}"
 
     def spec_text(self) -> str:
         lines = [f"### {self.qualified_name}", self.card.signature]
@@ -484,37 +485,21 @@ def build_capability_from_function(
     if required:
         parameters["required"] = required
 
-    data: dict[str, Any] = {
-        "name": name or fn.__name__.replace("_", "."),
-        "version": version,
-        "category": category,
-        "card": {"summary": summary or _first_sentence(description), "tags": tags or []},
-        "spec": {
-            "description": description,
-            "parameters": parameters,
-            "usage_notes": usage_notes,
-            "examples": examples or [],
-        },
-        "discovery": {
-            "pinned": pinned,
-            "require_spec": require_spec,
-            "embedding_text": embedding_text,
-            "no_embed": no_embed,
-            "kernel_note": kernel_note,
-        },
-        "execution": {
-            "timeout_s": timeout_s,
-            "retries": retries,
-            "retry_safety": retry_safety,
-            "output_policy": {
-                "max_inline_tokens": max_inline_tokens,
-                "overflow": overflow,
-                "preview": preview,
-            },
-        },
-        "effects": [{"kind": k, "resource": r} for k, r in (effects or [])],
-    }
-    return Capability.from_dict(data, handler=fn)
+    return Capability(
+        name=name or fn.__name__.replace("_", "."),
+        version=version,
+        category=category,
+        card=CapabilityCard(summary=summary or _first_sentence(description), tags=tags or []),
+        spec=CapabilitySpec(description=description, parameters=parameters, usage_notes=usage_notes,
+                            examples=examples or []),
+        discovery=CapabilityDiscovery(pinned=pinned, require_spec=require_spec, embedding_text=embedding_text,
+                                      no_embed=no_embed, kernel_note=kernel_note),
+        execution=CapabilityExecution(
+            handler=fn, timeout_s=timeout_s, retries=retries, retry_safety=retry_safety,
+            output_policy=OutputPolicy(max_inline_tokens=max_inline_tokens, overflow=overflow, preview=preview),
+        ),
+        effects=[Effect(kind=k, resource=r) for k, r in (effects or [])],
+    )
 
 
 def capability(fn: Optional[Callable[..., Any]] = None, /, **kwargs: Any):

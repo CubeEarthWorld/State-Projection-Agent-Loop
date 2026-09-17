@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from .context import TurnContext
 from .compression import compress_text, summarize_text
-from .events import RENDERABLE_TYPES, event_to_message
+from .events import renderable
 from .llm import FINISH_NAME
 from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM
 from .registry import Registry
@@ -181,34 +181,25 @@ class HistorySection(Section):
 
     def render(self, ctx: TurnContext) -> list[Message]:
         cfg = ctx.config.compression
-        events = [e for e in ctx.ledger.iter_run(ctx.run_id) if e.type in RENDERABLE_TYPES]
-        if not events:
-            return []
-
-        n = len(events)
+        history = renderable(ctx.ledger, ctx.run_id)
         messages: list[Message] = []
-        for i, event in enumerate(events):
-            age = n - 1 - i
-            msg_dict = event_to_message(event)
-            if msg_dict is None:
-                continue
-            content = msg_dict.get("content", "")
+        for i, (event, message) in enumerate(history):
+            age = len(history) - 1 - i
+            content = message.content
             if isinstance(content, str) and content:
                 if event.sequence <= ctx.working_state.folded_sequence:
                     content = summarize_text(content)  # folded into the working state
                 elif age < cfg.full_window:
                     pass
                 elif age < cfg.compressed_window:
-                    if msg_dict["role"] == OBSERVATION:
-                        content = compress_text(content, max_lines=cfg.observation_max_lines)
-                    else:
-                        content = compress_text(content, max_lines=cfg.compressed_max_lines)
+                    content = compress_text(content, max_lines=(
+                        cfg.observation_max_lines if message.role == OBSERVATION else cfg.compressed_max_lines))
                 elif age < cfg.summary_window:
                     content = summarize_text(content)
                 else:
                     continue
-                msg_dict = {**msg_dict, "content": content}
-            messages.append(Message.from_dict(msg_dict))
+                message.content = content
+            messages.append(message)
         return pair_tool_calls(messages)
 
     def shrink(self, ctx: TurnContext, current: list[Message]) -> Optional[list[Message]]:
@@ -268,7 +259,7 @@ class CandidatesSection(Section):
         if not ctx.candidates:
             return []
         if ctx.config.projection.dedupe_candidate_cards_against_schemas and ctx.api_tools:
-            lines = [s.tool.card.signature or s.tool.name for s in ctx.candidates]
+            lines = [s.tool.card.signature for s in ctx.candidates]
             header = "[Tool candidates — auto-selected for this turn; schemas sent natively]"
         else:
             lines = [s.tool.card_text() for s in ctx.candidates]

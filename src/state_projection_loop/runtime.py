@@ -59,13 +59,16 @@ _DIGITS = re.compile(r"\d")
 @dataclass
 class ToolResult:
     call: ToolCall
-    ok: bool
     value: Any = None
     error: Optional[str] = None
     observation: str = ""
     artifact_id: Optional[str] = None
     outcome: str = "ok"  # ok | failed | unknown | denied | waiting_approval | waiting_user
     command_id: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == "ok"
 
 
 @dataclass
@@ -113,8 +116,10 @@ class BudgetState:
         self.cost += prompt / 1000 * b.cost_per_1k_input + completion / 1000 * b.cost_per_1k_output
 
     def note_decision(self, decision: Decision, messages: list[Message], api_tools: list[dict], cfg: Config) -> None:
-        """Account one model turn: the adapter's reported usage when it has
-        one, otherwise an estimate from what was sent and what came back."""
+        """Account one model turn: a step, and the adapter's reported usage
+        when it has one, otherwise an estimate from what was sent and what
+        came back."""
+        self.steps += 1
         if decision.usage is not None:
             self.note_usage(decision.usage.prompt_tokens, decision.usage.completion_tokens, cfg)
             return
@@ -198,7 +203,7 @@ class Runtime:
         if why is None:
             return None
         return ToolResult(
-            call=call, ok=False, outcome="failed", error="loop_guard",
+            call=call, outcome="failed", error="loop_guard",
             observation=(
                 f"Loop guard: \"{capability.name}\" with these exact arguments {why}. "
                 "It was not executed again; change the arguments or the approach."
@@ -238,12 +243,7 @@ class Runtime:
         async def flush() -> None:
             if not buffer:
                 return
-            if len(buffer) == 1:
-                call, cap, args = buffer[0]
-                results.append(await self._run(cap, args, ctx, run, call))
-            else:
-                tasks = [self._run(cap, args, ctx, run, call) for call, cap, args in buffer]
-                results.extend(await asyncio.gather(*tasks))
+            results.extend(await asyncio.gather(*(self._run(cap, args, ctx, run, call) for call, cap, args in buffer)))
             buffer.clear()
 
         for idx, call in enumerate(calls):
@@ -262,7 +262,7 @@ class Runtime:
             if decision.decision == "deny":
                 await flush()
                 results.append(ToolResult(
-                    call=call, ok=False, outcome="denied", error=decision.reason,
+                    call=call, outcome="denied", error=decision.reason,
                     observation=f"Denied by policy ({decision.layer}): {decision.reason}",
                 ))
                 continue
@@ -274,7 +274,7 @@ class Runtime:
                                       policy_revision=policy.revision,
                                       expires_in_s=self.config.limits.approval_expires_s)
                 results.append(ToolResult(
-                    call=call, ok=False, outcome="waiting_approval", error="approval_required",
+                    call=call, outcome="waiting_approval", error="approval_required",
                     observation=f"Approval required: {decision.reason}", command_id=command.id,
                 ))
                 return ExecuteBatchResult(results=results, halted=True)
@@ -317,12 +317,12 @@ class Runtime:
             # rest of the decision too, and a call left without one would
             # take the whole decision out of the projection.
             results = [ToolResult(
-                call=first_call, ok=False, outcome="denied", error="approval_denied",
+                call=first_call, outcome="denied", error="approval_denied",
                 observation=f"Approval denied: {denied_name} was not executed.",
                 command_id=denied_command.id if denied_command else None,
             )]
             results += [
-                ToolResult(call=call, ok=False, outcome="denied", error="approval_denied",
+                ToolResult(call=call, outcome="denied", error="approval_denied",
                            observation=f"Not executed: the approval for {denied_name} was denied.")
                 for call in pending[1:]
             ]
@@ -334,7 +334,7 @@ class Runtime:
             return await self.execute(pending, ctx, run, policy)
         capability = self.registry.get(approved.capability_name)
         if capability is None:
-            results = [ToolResult(call=first_call, ok=False, outcome="failed", error="unknown_capability",
+            results = [ToolResult(call=first_call, outcome="failed", error="unknown_capability",
                                   observation=f"Error: capability \"{first_call.name}\" no longer registered.")]
         else:
             results = [await self._run(capability, approved.arguments, ctx, run, first_call, command=approved)]
@@ -357,7 +357,7 @@ class Runtime:
                 if "meta.tool.find" in self.registry else ""
             )
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="unknown_capability",
+                call=call, outcome="failed", error="unknown_capability",
                 observation=(
                     f"Error: capability \"{call.name}\" is not registered. "
                     f"Tool index: {toc or '(empty)'}.{hint}"
@@ -370,7 +370,7 @@ class Runtime:
         if needs_spec and capability.name not in self.seen_specs:
             self.seen_specs.add(capability.name)
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="require_spec",
+                call=call, outcome="failed", error="require_spec",
                 observation=(
                     f"Capability \"{call.name}\" requires its full spec to be reviewed before first use. "
                     f"The spec follows — verify your arguments against it and call again.\n"
@@ -401,7 +401,7 @@ class Runtime:
                     "The call was NOT executed. The full spec follows — fix the arguments and retry.\n"
                     + capability.spec_text()
                 )
-            return ToolResult(call=call, ok=False, outcome="failed", error=f"validation: {error}",
+            return ToolResult(call=call, outcome="failed", error=f"validation: {error}",
                                observation=observation)
 
         self._consecutive_validation_failures[call.name] = 0
@@ -425,7 +425,7 @@ class Runtime:
         if handler is None:
             run.record_outcome(command, "failed", error="no_handler")
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="no_handler", command_id=command.id,
+                call=call, outcome="failed", error="no_handler", command_id=command.id,
                 observation=f"Error: capability \"{capability.name}\" has no executable handler registered.",
             )
         resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
@@ -443,13 +443,13 @@ class Runtime:
                     # The command stays pending until Session.answer completes it.
                     run.ask_question(command, call.id, value)
                     return ToolResult(
-                        call=call, ok=False, outcome="waiting_user", error="question_pending",
+                        call=call, outcome="waiting_user", error="question_pending",
                         observation=f"Question pending: {value.text}", command_id=command.id,
                     )
                 observation, artifact_id = self._observation_for(capability, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id)
                 return ToolResult(
-                    call=call, ok=True, value=value, outcome="ok", command_id=command.id,
+                    call=call, value=value, outcome="ok", command_id=command.id,
                     observation=observation, artifact_id=artifact_id,
                 )
             except asyncio.TimeoutError:
@@ -466,7 +466,7 @@ class Runtime:
                 await asyncio.sleep(min(0.5 * (attempt + 1), 2.0))
         run.record_outcome(command, last_outcome, error=last_error)
         return ToolResult(
-            call=call, ok=False, error=last_error, outcome=last_outcome,
+            call=call, error=last_error, outcome=last_outcome,
             command_id=command.id,
             observation=(
                 f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing \"{capability.name}\" "

@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 from .ids import new_id
+from .messages import ASSISTANT, OBSERVATION, SYSTEM, USER, Message, ToolCall
 from .serialization import dumps
 
 EVENT_TYPES = (
@@ -93,6 +95,12 @@ class EventLedger(Protocol):
     def load_snapshot(self, run_id: str) -> Optional[Snapshot]: ...
 
 
+def _new_event(run_id: str, sequence: int, type: str, data: dict[str, Any]) -> Event:
+    if type not in EVENT_TYPES:
+        raise ValueError(f"Unknown event type {type!r}; expected one of {EVENT_TYPES}")
+    return Event(id=new_id("event"), run_id=run_id, sequence=sequence, type=type, ts=time.time(), data=data)
+
+
 class InMemoryLedger:
     """Process-local ledger: fast, exercised by every unit test, but does
     not survive a process restart. Use :class:`JsonlLedger` for that."""
@@ -103,13 +111,8 @@ class InMemoryLedger:
         self._lock = threading.Lock()
 
     def append(self, run_id: str, type: str, data: dict[str, Any]) -> Event:
-        if type not in EVENT_TYPES:
-            raise ValueError(f"Unknown event type {type!r}; expected one of {EVENT_TYPES}")
         with self._lock:
-            seq = len(self._events.get(run_id, [])) + 1
-            import time as _time
-            event = Event(id=new_id("event"), run_id=run_id, sequence=seq, type=type,
-                           ts=_time.time(), data=data)
+            event = _new_event(run_id, len(self._events.get(run_id, [])) + 1, type, data)
             self._events.setdefault(run_id, []).append(event)
             return event
 
@@ -161,16 +164,11 @@ class JsonlLedger:
         return n
 
     def append(self, run_id: str, type: str, data: dict[str, Any]) -> Event:
-        if type not in EVENT_TYPES:
-            raise ValueError(f"Unknown event type {type!r}; expected one of {EVENT_TYPES}")
         with self._lock:
-            import time as _time
-            seq = self._seq(run_id) + 1
-            event = Event(id=new_id("event"), run_id=run_id, sequence=seq, type=type,
-                           ts=_time.time(), data=data)
+            event = _new_event(run_id, self._seq(run_id) + 1, type, data)
             with self._path(run_id).open("a", encoding="utf-8") as f:
                 f.write(event.to_line() + "\n")
-            self._last_seq[run_id] = seq
+            self._last_seq[run_id] = event.sequence
             return event
 
     def iter_run(self, run_id: str, *, after: int = 0) -> Iterator[Event]:
@@ -239,29 +237,23 @@ class ObservedLedger:
         return self.inner.load_snapshot(run_id)
 
 
-def event_to_message(event: "Event") -> Optional[dict]:
-    """Convert a renderable event into a message dict for projection.
-
-    Returns None for non-renderable event types. The returned dict has the
-    shape needed by :func:`state_projection_loop.messages.Message.from_dict`.
-    """
-    from .messages import ASSISTANT, OBSERVATION, SYSTEM, USER
-
+def event_to_message(event: Event) -> Optional[Message]:
+    """The message a renderable event projects to; None for any other type."""
+    data = event.data
     if event.type == "user_input":
-        return {"role": USER, "content": event.data.get("text", "")}
+        return Message(role=USER, content=data.get("text", ""))
     if event.type == "model_response":
-        calls = [
-            {"name": c.get("name", ""), "arguments": c.get("arguments") or {}, "id": c.get("id", "")}
-            for c in (event.data.get("calls") or [])
-        ]
-        return {"role": ASSISTANT, "content": event.data.get("text", ""), "tool_calls": calls}
+        return Message(role=ASSISTANT, content=data.get("text", ""),
+                       tool_calls=[ToolCall.from_dict(c) for c in (data.get("calls") or [])])
     if event.type == "observation":
-        return {
-            "role": OBSERVATION,
-            "content": event.data.get("text", ""),
-            "tool_call_id": event.data.get("call_id"),
-            "name": event.data.get("name"),
-        }
+        return Message(role=OBSERVATION, content=data.get("text", ""), tool_call_id=data.get("call_id"),
+                       name=data.get("name"))
     if event.type == "notice":
-        return {"role": SYSTEM, "content": event.data.get("text", "")}
+        return Message(role=SYSTEM, content=data.get("text", ""))
     return None
+
+
+def renderable(ledger: EventLedger, run_id: str) -> list[tuple[Event, Message]]:
+    """The run's conversation, oldest first: each renderable event with the
+    message it projects to. The one scan every reader of the history shares."""
+    return [(e, m) for e in ledger.iter_run(run_id) if (m := event_to_message(e)) is not None]

@@ -32,7 +32,7 @@ from .compaction import FOLD_INSTRUCTIONS, apply_fold_delta, parse_fold_reply
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend
-from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, event_to_message
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, renderable
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
 from .messages import ASSISTANT, Message, SYSTEM, ToolCall, USER
@@ -40,7 +40,7 @@ from .policy import PolicyEngine
 from .context import TurnContext
 from .projection import Projection, Section, build_default_sections
 from .registry import Registry
-from .run import ApprovalRequest, PendingQuestion, Run, RunStateError
+from .run import TERMINAL_STATES, ApprovalRequest, PendingQuestion, Run, RunStateError
 from .json_schema import validate_value
 from .runtime import WAITING_OUTCOMES, BudgetState, Runtime
 from .tokens import estimate_tokens
@@ -168,12 +168,7 @@ class Session:
     def conversation(self) -> list[Message]:
         """Derived view of renderable ledger events as Messages. Read-only;
         the ledger is the source of truth, this is a convenience accessor."""
-        msgs: list[Message] = []
-        for event in self.ledger.iter_run(self.run.id):
-            msg_dict = event_to_message(event)
-            if msg_dict is not None:
-                msgs.append(Message.from_dict(msg_dict))
-        return msgs
+        return [message for _, message in renderable(self.ledger, self.run.id)]
 
     def send(self, text: str) -> Any:
         _ensure_no_running_loop()
@@ -185,15 +180,10 @@ class Session:
             self._checkpoint()
             return await self._loop()
 
-    def run_job(self, task: str) -> Any:
-        _ensure_no_running_loop()
-        return asyncio.run(self.arun_job(task))
-
-    async def arun_job(self, task: str) -> Any:
-        async with self._guarded():
-            self.ledger.append(self.run.id, "user_input", {"text": task})
-            self._checkpoint()
-            return await self._loop()
+    # A job is started the way a chat turn is; ``config.mode`` is what makes
+    # it run until finish(result).
+    run_job = send
+    arun_job = asend
 
     def interrupt(self) -> None:
         self._interrupted = True
@@ -257,13 +247,13 @@ class Session:
     def branch(self, *, at_message: Optional[int] = None) -> tuple["Session", list[str]]:
         new_session = Session(
             self.llm, kernel=self._kernel_text, config=copy.deepcopy(self.config), registry=self.registry,
-            embedder=getattr(self.search, "embedder", None),
+            embedder=self.search.embedder,
             spawn_llm_factory=self.spawn_llm_factory, policy=self.policy,
         )
         new_session.working_state = copy.deepcopy(self.working_state)
-        renderable = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
-        cut = len(renderable) if at_message is None else at_message
-        for event in renderable[:cut]:
+        events = [event for event, _ in renderable(self.ledger, self.run.id)]
+        cut = len(events) if at_message is None else at_message
+        for event in events[:cut]:
             new_session.ledger.append(new_session.run.id, event.type, dict(event.data))
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
@@ -306,7 +296,7 @@ class Session:
 
         old_run_id = self.run.id
         self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
-        if self.run.state not in ("COMPLETED", "FAILED", "CANCELLED"):
+        if self.run.state not in TERMINAL_STATES:
             self.run.cancel(f"rewound to turn {to_turn}")
 
         self.run = Run(new_id("run"), self.session_id, self.ledger)
@@ -393,7 +383,7 @@ class Session:
                 self._interrupted = False
                 self.ledger.append(self.run.id, "run_state_changed",
                                     {"from": self.run.state, "to": self.run.state, "reason": "interrupted"})
-                return self._last_assistant_text() or "[interrupted]"
+                return self._last_text(ASSISTANT) or "[interrupted]"
 
             stop = self._enforce_budget()
             if stop is not None:
@@ -414,10 +404,9 @@ class Session:
             self.budget.note_decision(decision, messages, ctx.api_tools, self.config)
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
-            self.budget.steps += 1
             self.ledger.append(self.run.id, "model_response", {
                 "text": decision.text, "finish": decision.finish,
-                "calls": [{"name": c.name, "arguments": c.arguments, "id": c.id} for c in decision.calls],
+                "calls": [c.to_dict() for c in decision.calls],
             })
 
             if decision.finish and decision.calls:
@@ -479,19 +468,15 @@ class Session:
         used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
         if used <= ratio * self.config.projection.window_tokens:
             return False
-        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
+        history = renderable(self.ledger, self.run.id)
         keep = self.config.compression.full_window
-        foldable = [e for e in events[:max(0, len(events) - keep)] if e.sequence > self.working_state.folded_sequence]
+        foldable = [(e, m) for e, m in history[:max(0, len(history) - keep)]
+                    if e.sequence > self.working_state.folded_sequence]
         if not foldable:
             return False
-        lines = []
-        for e in foldable:
-            m = event_to_message(e)
-            if m is not None:
-                lines.append(f"{m['role']}: {m.get('content', '')}")
+        lines = [f"{m.role}: {m.content}" for _, m in foldable]
         prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content="\n".join(lines))]
         decision = await self.llm.complete(prompt)
-        self.budget.steps += 1
         self.budget.note_decision(decision, prompt, [], self.config)
         delta = parse_fold_reply(decision.text)
         before = self.working_state.to_dict()
@@ -499,7 +484,7 @@ class Session:
         if error is not None:
             self._notice(f"[runtime] compaction skipped: {error}")
             return False
-        self.working_state.folded_sequence = foldable[-1].sequence
+        self.working_state.folded_sequence = foldable[-1][0].sequence
         self.ledger.append(self.run.id, "state_folded", {
             "through_sequence": self.working_state.folded_sequence, "before": before, "delta": delta,
         })
@@ -530,10 +515,10 @@ class Session:
             self._notice(f"[runtime] Budget exceeded: {reason}. Wrap up now with a final answer{hint}.")
             return None
         if self.config.mode == "job":
-            if self.run.state not in ("COMPLETED", "FAILED", "CANCELLED"):
+            if self.run.state not in TERMINAL_STATES:
                 self.run.fail(f"budget_stop: {reason}")
-            return self.run.result if self.run.result is not None else self._last_assistant_text()
-        return self._last_assistant_text() or "[budget exhausted]"
+            return self.run.result if self.run.result is not None else self._last_text(ASSISTANT)
+        return self._last_text(ASSISTANT) or "[budget exhausted]"
 
     def _context(self) -> TurnContext:
         return TurnContext(
@@ -561,17 +546,10 @@ class Session:
         return parts
 
     def _last_text(self, role: str) -> str:
-        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
-        for event in reversed(events):
-            msg_dict = event_to_message(event)
-            if msg_dict and msg_dict.get("role") == role:
-                content = msg_dict.get("content", "")
-                if isinstance(content, str) and content:
-                    return content
+        for _, message in reversed(renderable(self.ledger, self.run.id)):
+            if message.role == role and isinstance(message.content, str) and message.content:
+                return message.content
         return ""
-
-    def _last_assistant_text(self) -> str:
-        return self._last_text(ASSISTANT)
 
     def _api_tools(self, ctx: TurnContext) -> list[dict]:
         names: "OrderedDict[str, None]" = OrderedDict()
@@ -621,8 +599,4 @@ class Session:
         self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
 
 
-class _Continue:
-    """Sentinel: the loop should keep going."""
-
-
-_CONTINUE = _Continue()
+_CONTINUE = object()  # sentinel: the loop should keep going

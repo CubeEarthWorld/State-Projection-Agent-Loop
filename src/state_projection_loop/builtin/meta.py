@@ -80,7 +80,7 @@ async def _spawn(
         kernel=kernel or "You are a focused sub-agent. Complete the task, then call finish(result) with the outcome.",
         config=child_config,
         registry=child_registry,
-        embedder=getattr(parent.search, "embedder", None),
+        embedder=parent.search.embedder,
         seed={"checklists": {"version": 1, "checklists": documents}},
         policy=parent.policy,
     )

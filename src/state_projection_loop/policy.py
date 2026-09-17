@@ -43,7 +43,38 @@ SCOPES: dict[str, tuple[Optional[str], str]] = {
     "host_access": (None, "host:*"),
 }
 
-PRESETS = ("deny_all", "approve_all_effects", "auto_safe", "auto_workspace_dev")
+# Writes confined to the session's own working state never leave the process,
+# so the auto presets allow them; they are declared as writes so the runtime
+# keeps them in the model's stated order.
+_LOCAL_STATE = (
+    dict(decision="allow", capability_pattern="planning.checklist.manage", effect_kind="write",
+         resource_pattern="working_state:checklists", reason="preset:local_checklists"),
+    dict(decision="allow", capability_pattern="meta.user.ask", effect_kind="external",
+         resource_pattern="user:*", reason="preset:ask_user"),
+    dict(decision="allow", capability_pattern="state.*", effect_kind="write",
+         resource_pattern="working_state:*", reason="preset:local_working_state"),
+)
+
+# Each preset is the rules it installs, in order; a rule without a reason gets
+# "preset:<name>". Specs rather than Rule objects, so no two engines share one.
+PRESETS: dict[str, tuple[dict[str, Any], ...]] = {
+    "deny_all": (dict(decision="deny"),),
+    "approve_all_effects": (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="require_approval"),
+    ),
+    "auto_safe": _LOCAL_STATE + (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="allow", effect_kind="read", resource_pattern="workspace:*"),
+        dict(decision="require_approval"),
+    ),
+    "auto_workspace_dev": _LOCAL_STATE + (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="allow", resource_pattern="workspace:*"),
+        dict(decision="allow", resource_pattern="sandbox:*"),
+        dict(decision="require_approval"),
+    ),
+}
 
 
 # Case-sensitive on every platform (fnmatch.fnmatch folds case on Windows),
@@ -120,38 +151,10 @@ class PolicyEngine:
 
     def apply_preset(self, preset: str, *, layer: str = "workspace") -> None:
         if preset not in PRESETS:
-            raise ValueError(f"Unknown preset {preset!r}; expected one of {PRESETS}")
+            raise ValueError(f"Unknown preset {preset!r}; expected one of {tuple(PRESETS)}")
         self.clear_layer(layer)
-        if preset in ("auto_safe", "auto_workspace_dev"):
-            # Writes confined to the session's own working state never leave
-            # the process, so they are auto-allowed; they are declared as
-            # writes so the runtime keeps them in the model's stated order.
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="planning.checklist.manage",
-                                     effect_kind="write", resource_pattern="working_state:checklists",
-                                     reason="preset:local_checklists"))
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="meta.user.ask",
-                                     effect_kind="external", resource_pattern="user:*",
-                                     reason="preset:ask_user"))
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="state.*",
-                                     effect_kind="write", resource_pattern="working_state:*",
-                                     reason="preset:local_working_state"))
-        if preset == "deny_all":
-            self.add_rule(layer, Rule(decision="deny", reason="preset:deny_all"))
-        elif preset == "approve_all_effects":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:approve_all_effects"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:approve_all_effects"))
-        elif preset == "auto_safe":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:auto_safe"))
-            self.add_rule(layer, Rule(decision="allow", effect_kind="read", resource_pattern="workspace:*",
-                                       reason="preset:auto_safe"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:auto_safe"))
-        elif preset == "auto_workspace_dev":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="allow", resource_pattern="workspace:*",
-                                       reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="allow", resource_pattern="sandbox:*",
-                                       reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:auto_workspace_dev"))
+        for spec in PRESETS[preset]:
+            self.add_rule(layer, Rule(**{"reason": f"preset:{preset}", **spec}))
 
     def set_llm_safety_mode(self, mode: str) -> None:
         if mode not in ("disabled", "advisory", "approval_routing"):
