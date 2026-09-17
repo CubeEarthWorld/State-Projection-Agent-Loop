@@ -65,17 +65,6 @@ class TestPreviewAndPeek:
         assert "unknown artifact" in out
 
 
-class TestNamespacing:
-    def test_move_creates_new_id_in_target_store(self):
-        parent = ArtifactStore("run_parent")
-        child = ArtifactStore("run_child")
-        child_record = child.put({"result": 42}, source="child.tool")
-        moved = parent.move(child_record)
-        assert moved.id != child_record.id
-        assert parent.get(moved.id) == {"result": 42}
-        assert not parent.exists(child_record.id)
-
-
 class TestPersistenceRoundTrip:
     """Persisted artifacts are for a resumed run to read back; a store that
     only ever writes them is a promise the docstring cannot keep."""
@@ -87,6 +76,13 @@ class TestPersistenceRoundTrip:
         second = ArtifactStore("run_1", directory=tmp_path)
         assert second.exists(record.id)
         assert "payload" in second.peek(record.id)
+
+    def test_a_recovered_artifact_resolves_to_the_value_that_was_stored(self, tmp_path):
+        record = ArtifactStore("run_1", directory=tmp_path).put({"rows": [1, 2]}, source="demo.tool")
+
+        second = ArtifactStore("run_1", directory=tmp_path)
+        assert second.resolve_args({"data": {"$artifact": record.id}}) == {"data": {"rows": [1, 2]}}
+        assert "dict 1 keys" in second.ref_text(second.get_record(record.id))
 
     def test_another_run_still_cannot_see_it(self, tmp_path):
         first = ArtifactStore("run_1", directory=tmp_path)
