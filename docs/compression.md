@@ -65,9 +65,14 @@ The point is part of the working state, so it survives a restart and
 ## The fold
 
 With `compaction.trigger_ratio > 0`, a prompt that exceeds that fraction of
-the window triggers one model call that folds history into the working
+the *room* — the window less `reserved_output_tokens` and provider
+overhead, which is what the render actually budgets messages and schemas
+against — triggers one model call that folds history into the working
 state as a JSON delta (`facts_add`, `decisions_add`, `questions_add`,
-`questions_resolve`, `next_actions`). Three rules keep it honest:
+`questions_resolve`, `next_actions`). Measured against the whole window the
+trigger is unreachable as soon as the reserve exceeds the slack (a 4k
+window with the default 1k reserve never folded); measured with the
+reserve counted it fires nearly every turn. Three rules keep it honest:
 
 - **Fold from the ledger, never from the projection.** What masking
   cleared from the prompt is exactly what the fold must still read. The
