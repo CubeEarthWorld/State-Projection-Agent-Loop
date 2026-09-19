@@ -35,14 +35,14 @@ from .embeddings import EmbeddingBackend
 from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, renderable
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
-from .messages import ASSISTANT, Message, SYSTEM, ToolCall, USER
+from .messages import ASSISTANT, Decision, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
 from .context import TurnContext
 from .projection import Projection, Section, build_default_sections
 from .registry import Registry
 from .run import TERMINAL_STATES, ApprovalRequest, PendingQuestion, Run, RunStateError
 from .json_schema import validate_value
-from .runtime import WAITING_OUTCOMES, BudgetState, Runtime
+from .runtime import WAITING_OUTCOMES, BudgetState, Hooks, Runtime
 from .tokens import estimate_tokens
 from .working_state import WORKING_STATE_FIELDS, WorkingState
 
@@ -87,6 +87,8 @@ class Session:
         ledger: Optional[EventLedger] = None,
         builtins: Iterable[str] = DEFAULT_BUILTINS,
         on_event: Optional[Callable[[Event], None]] = None,
+        on_delta: Optional[Callable[[str, str], None]] = None,
+        hooks: Optional[Hooks] = None,
         _restored: Optional[Snapshot] = None,
     ) -> None:
         """``_restored`` is :meth:`resume_from_ledger`'s way in: the session
@@ -120,7 +122,12 @@ class Session:
                 self.config.projection.sections, kernel_text=kernel,
             )
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
-        self.runtime = Runtime(self.registry, self.config)
+        self.runtime = Runtime(self.registry, self.config, hooks=hooks)
+        # ``on_delta(source, text)`` sees assistant text as it streams in
+        # (source "model") and tool progress from ctx.emit (source "tool").
+        # Delivery only: the ledger still records whole turns.
+        self.on_delta = on_delta
+        self._inflight: Optional["asyncio.Future[Decision]"] = None
 
         if _restored is None:
             # Typed fields go through the same parser snapshots use, so a
@@ -172,13 +179,16 @@ class Session:
         the ledger is the source of truth, this is a convenience accessor."""
         return [message for _, message in renderable(self.ledger, self.run.id)]
 
-    def send(self, text: str) -> Any:
+    def send(self, content: Any) -> Any:
+        """``content`` is a string, or a list of content parts (``{"type":
+        "text", ...}``, ``{"type": "image_url", ...}``) passed through to the
+        adapter as the user message."""
         _ensure_no_running_loop()
-        return asyncio.run(self.asend(text))
+        return asyncio.run(self.asend(content))
 
-    async def asend(self, text: str) -> Any:
+    async def asend(self, content: Any) -> Any:
         async with self._guarded():
-            self.ledger.append(self.run.id, "user_input", {"text": text})
+            self.ledger.append(self.run.id, "user_input", {"text": content})
             self._checkpoint()
             return await self._loop()
 
@@ -188,7 +198,13 @@ class Session:
     arun_job = asend
 
     def interrupt(self) -> None:
+        """Stop after the current step. A model call still waiting for the
+        provider is cancelled outright; a tool that is already running
+        finishes, so its outcome is recorded."""
         self._interrupted = True
+        inflight = self._inflight
+        if inflight is not None:
+            inflight.get_loop().call_soon_threadsafe(inflight.cancel)
 
     def add_section(self, section: Section, *, before: str = "candidates") -> None:
         self.projection.insert_before(before, section)
@@ -401,7 +417,12 @@ class Session:
                 "candidates": [s.tool.name for s in ctx.candidates],
             })
 
-            decision = extract_finish(await self.llm.complete(messages, ctx.api_tools or None))
+            try:
+                decision = extract_finish(await self._complete(messages, ctx.api_tools or None))
+            except asyncio.CancelledError:
+                if not self._interrupted:
+                    raise
+                continue  # interrupt() cancelled the call; the loop head records it
             self.budget.note_decision(decision, messages, ctx.api_tools, self.config)
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
@@ -449,6 +470,34 @@ class Session:
             if batch.halted:
                 return self._pending
 
+    async def _complete(self, messages: list[Message], tools: Optional[list[dict]]) -> Decision:
+        """One model call under ``config.model``: a timeout, retries with
+        backoff, cancellation by :meth:`interrupt`. Every failed attempt is a
+        ``model_call_failed`` event; when the last one fails, a job run fails
+        and the exception reaches the caller."""
+        cfg = self.config.model
+        # Only a host that observes deltas asks the adapter to stream.
+        streaming = {"on_delta": lambda text: self.on_delta("model", text)} if self.on_delta else {}
+        for attempt in range(1, cfg.retries + 2):
+            self._inflight = asyncio.ensure_future(self.llm.complete(messages, tools, **streaming))
+            try:
+                return await asyncio.wait_for(self._inflight, timeout=cfg.timeout_s)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — every provider error is one attempt
+                error = (f"timed out after {cfg.timeout_s}s" if isinstance(exc, asyncio.TimeoutError)
+                         else f"{type(exc).__name__}: {exc}")
+                self.ledger.append(self.run.id, "model_call_failed", {"attempt": attempt, "error": error})
+                if attempt > cfg.retries:
+                    if self.config.mode == "job" and self.run.state not in TERMINAL_STATES:
+                        self.run.fail(f"model_error: {error}")
+                    self._snapshot()
+                    raise
+                await asyncio.sleep(cfg.backoff_s * attempt)
+            finally:
+                self._inflight = None
+        raise AssertionError("unreachable")
+
     def _project(self) -> tuple[TurnContext, list[Message]]:
         ctx = self._context()
         cfg = self.config.projection
@@ -477,7 +526,7 @@ class Session:
             return False
         lines = [f"{m.role}: {m.content}" for _, m in foldable]
         prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content="\n".join(lines))]
-        decision = await self.llm.complete(prompt)
+        decision = await self._complete(prompt, None)
         self.budget.note_decision(decision, prompt, [], self.config)
         delta = parse_fold_reply(decision.text)
         before = self.working_state.to_dict()
@@ -525,8 +574,12 @@ class Session:
         return TurnContext(
             config=self.config, registry=self.registry, ledger=self.ledger, run=self.run,
             working_state=self.working_state, session=self, store=self.store, search=self.search,
-            candidates=self._layer2_candidates(),
+            candidates=self._layer2_candidates(), emit=self._emit,
         )
+
+    def _emit(self, text: str) -> None:
+        if self.on_delta is not None:
+            self.on_delta("tool", text)
 
     def _layer2_candidates(self) -> list[ScoredTool]:
         query = "\n".join(q for q in self._candidate_queries() if q)

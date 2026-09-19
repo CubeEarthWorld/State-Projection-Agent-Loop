@@ -29,7 +29,7 @@ import inspect
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .artifacts import ArtifactStore, serialize_value
 from .capability import Capability
@@ -150,14 +150,32 @@ class BudgetState:
 # Runtime
 # ---------------------------------------------------------------------------
 
+@dataclass
+class Hooks:
+    """Host code around each tool call, run after policy has authorised it.
+
+    ``before_call(capability, args, ctx)`` may return replacement arguments
+    (validated like the model's) or a string, which rejects the call with
+    that text as the observation — a correctness gate like validation, not
+    a second grant path: nothing a hook returns can allow a denied call.
+    ``after_call(capability, args, result, ctx)`` may return a replacement
+    observation (redaction, an attached diff). Every intervention is a
+    ``hook_intervened`` ledger event.
+    """
+
+    before_call: Optional[Callable[[Capability, dict[str, Any], ToolContext], Any]] = None
+    after_call: Optional[Callable[[Capability, dict[str, Any], "ToolResult", ToolContext], Any]] = None
+
+
 class Runtime:
     # No artifact store of its own: it uses ctx.store, the session's current
     # one. A resumed run installs a fresh store for its new run id, and a
     # second copy captured here would silently keep writing artifacts the
     # session (and therefore meta.artifact.peek) could no longer read.
-    def __init__(self, registry: Registry, config: Config) -> None:
+    def __init__(self, registry: Registry, config: Config, *, hooks: Optional[Hooks] = None) -> None:
         self.registry = registry
         self.config = config
+        self.hooks = hooks or Hooks()
         # Capabilities whose full spec has already been projected into the
         # conversation. Used by the require_spec gate; pinned capabilities
         # are exempt because their spec is always in the kernel section.
@@ -428,6 +446,34 @@ class Runtime:
                 call=call, outcome="failed", error="no_handler", command_id=command.id,
                 observation=f"Error: capability \"{capability.name}\" has no executable handler registered.",
             )
+        if self.hooks.before_call is not None:
+            verdict = self.hooks.before_call(capability, args, call_ctx)
+            if isinstance(verdict, dict):
+                error = validate_args(capability.spec.parameters, verdict)
+                verdict = f"hook returned invalid arguments: {error}" if error else verdict
+            if isinstance(verdict, dict):
+                run.ledger.append(run.id, "hook_intervened",
+                                  {"command_id": command.id, "stage": "before", "arguments": verdict})
+                args = verdict
+            elif verdict is not None:
+                run.ledger.append(run.id, "hook_intervened",
+                                  {"command_id": command.id, "stage": "before", "rejected": str(verdict)})
+                run.record_outcome(command, "failed", error="hook_rejected")
+                return ToolResult(call=call, outcome="failed", error="hook_rejected", command_id=command.id,
+                                  observation=f"Rejected by hook: {verdict}")
+        result = await self._attempts(capability, args, ctx, run, call, command, handler, call_ctx)
+        if self.hooks.after_call is not None and result.outcome not in WAITING_OUTCOMES:
+            replacement = self.hooks.after_call(capability, args, result, call_ctx)
+            if isinstance(replacement, str):
+                run.ledger.append(run.id, "hook_intervened",
+                                  {"command_id": command.id, "stage": "after", "observation": replacement})
+                result.observation = replacement
+        return result
+
+    async def _attempts(
+        self, capability: Capability, args: dict[str, Any], ctx: ToolContext, run: Run, call: ToolCall,
+        command: Command, handler: Any, call_ctx: ToolContext,
+    ) -> ToolResult:
         resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
         last_error = ""

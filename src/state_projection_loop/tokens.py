@@ -44,6 +44,10 @@ def estimate_text_tokens(text: str) -> int:
 
 _estimator: Callable[[str], int] = estimate_text_tokens
 
+# What one image part costs: a provider's typical per-image charge. Counting
+# the base64 text instead would overshoot by two orders of magnitude.
+IMAGE_TOKENS = 1000
+
 
 def set_estimator(fn: Callable[[str], int]) -> None:
     """Replace the global token estimator (e.g. with a real tokenizer)."""
@@ -68,6 +72,8 @@ def estimate_tokens(obj: Any) -> int:
             )
         return total
     if isinstance(obj, dict):
+        if obj.get("type") in ("image_url", "image"):
+            return IMAGE_TOKENS
         return _estimator(dumps(obj))
     return _estimator(str(obj))
 

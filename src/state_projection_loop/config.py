@@ -105,6 +105,17 @@ class CompactionConfig:
 
 
 @dataclass
+class ModelConfig:
+    # One model call: how long to wait, how often to retry a failed call
+    # (any exception, including the timeout), and the pause between tries
+    # (multiplied by the attempt number). Every failed attempt is a
+    # `model_call_failed` ledger event; the last one also raises.
+    timeout_s: Optional[float] = None
+    retries: int = 0
+    backoff_s: float = 1.0
+
+
+@dataclass
 class Config:
     mode: str = "chat"  # "chat" | "job"
     # Job mode: JSON Schema finish(result) must satisfy; a failing result is
@@ -118,6 +129,7 @@ class Config:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     persistence: PersistenceConfig = field(default_factory=PersistenceConfig)
     compaction: CompactionConfig = field(default_factory=CompactionConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":

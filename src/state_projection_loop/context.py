@@ -6,7 +6,7 @@ import another just to name a field's type.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     from .artifacts import ArtifactStore
@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from .run import Run
     from .session import Session
     from .working_state import WorkingState
+
+
+def _no_emit(text: str) -> None:
+    pass
 
 
 @dataclass
@@ -43,6 +47,9 @@ class ToolContext:
     store: Optional["ArtifactStore"] = None
     search: Optional["ToolSearch"] = None
     command_id: str = ""
+    # Hands a chunk of the tool's progress output to the session's on_delta
+    # observer, if any. Delivery only: nothing emitted reaches the ledger.
+    emit: Callable[[str], None] = _no_emit
 
     @property
     def run_id(self) -> str:

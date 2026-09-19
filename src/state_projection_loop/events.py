@@ -47,6 +47,8 @@ EVENT_TYPES = (
     "question_asked",
     "question_answered",
     "state_folded",
+    "model_call_failed",
+    "hook_intervened",
 )
 
 RENDERABLE_TYPES = ("user_input", "model_response", "observation", "notice")

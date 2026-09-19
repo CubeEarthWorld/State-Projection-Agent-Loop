@@ -19,7 +19,7 @@ from .checklists import ChecklistStore
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend, HashingEmbedding
 from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, event_to_message
-from .llm import LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
+from .llm import FallbackAdapter, LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
 from .messages import Decision, Message, ToolCall, Usage
 from .policy import PolicyEngine, PolicyDecision, Rule
 from .projection import (
@@ -36,7 +36,7 @@ from .projection import (
 from .registry import Registry, ToolProvider
 from .run import ApprovalRequest, Command, PendingQuestion, Question, Run, RunStateError
 from .json_schema import validate_args, validate_value
-from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult
+from .runtime import BudgetState, ExecuteBatchResult, Hooks, Runtime, ToolResult
 from .session import ConcurrencyError, Session
 from .working_state import RecordedDecision, WorkingState
 
@@ -99,6 +99,8 @@ __all__ = [
     "EmbeddingBackend",
     "HashingEmbedding",
     "LLMAdapter",
+    "FallbackAdapter",
+    "Hooks",
     "ScriptedLLM",
     "extract_finish",
     "parse_text_tool_calls",

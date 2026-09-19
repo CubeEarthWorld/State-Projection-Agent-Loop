@@ -17,10 +17,9 @@ Requires the corresponding optional client library:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from state_projection_loop.llm import extract_finish, parse_text_tool_calls
 from state_projection_loop.messages import Decision, Message, ToolCall, Usage
@@ -39,7 +38,7 @@ class OpenAICompatAdapter:
     differs only in ``base_url``/``model``/``api_key``. Point this at
     DeepSeek with::
 
-        OpenAICompatAdapter(model="deepseek-v4-flash", api_key=..., base_url="https://api.deepseek.com")
+        OpenAICompatAdapter(model="deepseek-flash", api_key=..., base_url="https://api.deepseek.com")
 
     Native function calling is used when tool schemas are supplied; if the
     provider returns fenced ``tool_call`` JSON in plain text instead, the
@@ -53,13 +52,13 @@ class OpenAICompatAdapter:
         / ``LLM_BASE_URL`` from the environment (a ``.env`` file is loaded when
         python-dotenv is installed), defaulting to DeepSeek."""
         try:
-            from dotenv import load_dotenv
+            from dotenv import find_dotenv, load_dotenv
 
-            load_dotenv()
+            load_dotenv(find_dotenv(usecwd=True))
         except ImportError:
             pass
         return cls(
-            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            model=os.environ.get("LLM_MODEL", "deepseek-flash"),
             api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
             base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
             **kwargs,
@@ -85,10 +84,12 @@ class OpenAICompatAdapter:
             self._client = client
         else:
             try:
-                from openai import OpenAI
+                from openai import AsyncOpenAI
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("pip install openai") from exc
-            self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+            # The async client, so that Session.interrupt() cancelling the
+            # call really abandons the request instead of waiting on a thread.
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
     @staticmethod
     def _to_api(message: Message) -> dict[str, Any]:
@@ -116,7 +117,10 @@ class OpenAICompatAdapter:
             }
         return {"role": message.role, "content": message.content}
 
-    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
+    async def complete(
+        self, messages: list[Message], tools: Optional[list[dict]] = None, *,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> Decision:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [self._to_api(m) for m in messages],
@@ -130,35 +134,62 @@ class OpenAICompatAdapter:
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
 
-        # The SDK call blocks; keep the host's event loop free while it runs.
-        response = await asyncio.to_thread(lambda: self._client.chat.completions.create(**kwargs))
-        choice = response.choices[0].message
+        if on_delta is None:
+            response = await self._client.chat.completions.create(**kwargs)
+            choice = response.choices[0].message
+            text, thought = choice.content or "", getattr(choice, "reasoning_content", None) or ""
+            raw_calls = [(tc.id, tc.function.name, tc.function.arguments or "{}") for tc in choice.tool_calls or []]
+            usage = getattr(response, "usage", None)
+        else:
+            text, thought, raw_calls, usage = await self._stream(kwargs, on_delta)
+            response = None
 
         calls: list[ToolCall] = []
-        for tc in choice.tool_calls or []:
-            raw = tc.function.arguments or "{}"
+        for call_id, name, raw in raw_calls:
             try:
                 arguments = json.loads(raw)
                 if not isinstance(arguments, dict):
                     raise ValueError
-                calls.append(ToolCall(name=tc.function.name, arguments=arguments, id=tc.id))
+                calls.append(ToolCall(name=name, arguments=arguments, id=call_id))
             except (json.JSONDecodeError, ValueError):
-                calls.append(ToolCall(name=tc.function.name, arguments={}, id=tc.id, raw_arguments=raw))
-
-        text = choice.content or ""
+                calls.append(ToolCall(name=name, arguments={}, id=call_id, raw_arguments=raw))
         if not calls and "```tool_call" in text:
             text, calls = parse_text_tool_calls(text)
-
-        usage = None
-        if getattr(response, "usage", None) is not None:
-            usage = Usage(
-                prompt_tokens=response.usage.prompt_tokens or 0,
-                completion_tokens=response.usage.completion_tokens or 0,
-            )
         return extract_finish(Decision(
-            text=text, calls=calls, thought=getattr(choice, "reasoning_content", None) or "",
-            usage=usage, raw=response,
+            text=text, calls=calls, thought=thought,
+            usage=Usage(prompt_tokens=usage.prompt_tokens or 0, completion_tokens=usage.completion_tokens or 0)
+            if usage is not None else None,
+            raw=response,
         ))
+
+    async def _stream(self, kwargs: dict[str, Any], on_delta: Callable[[str], None]) -> tuple[str, str, list, Any]:
+        """The streaming form of the same call: text chunks go to ``on_delta``
+        as they arrive; tool calls are assembled from their indexed deltas."""
+        text: list[str] = []
+        thought: list[str] = []
+        calls: dict[int, list] = {}  # index -> [id, name, arguments]
+        usage = None
+        stream = await self._client.chat.completions.create(
+            **kwargs, stream=True, stream_options={"include_usage": True})
+        async for chunk in stream:
+            if getattr(chunk, "usage", None) is not None:
+                usage = chunk.usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                text.append(delta.content)
+                on_delta(delta.content)
+            if getattr(delta, "reasoning_content", None):
+                thought.append(delta.reasoning_content)
+            for tc in delta.tool_calls or []:
+                slot = calls.setdefault(tc.index, ["", "", ""])
+                if tc.id:
+                    slot[0] = tc.id
+                if tc.function is not None:
+                    slot[1] = slot[1] or (tc.function.name or "")
+                    slot[2] += tc.function.arguments or ""
+        return "".join(text), "".join(thought), [tuple(c) for _, c in sorted(calls.items())], usage
 
 
 # ---------------------------------------------------------------------------

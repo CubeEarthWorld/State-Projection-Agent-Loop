@@ -56,7 +56,37 @@ class LLMAdapter(Protocol):
     blocking SDK should hand the call to ``asyncio.to_thread``.
     """
 
-    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision: ...
+    async def complete(
+        self, messages: list[Message], tools: Optional[list[dict]] = None, *,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> Decision:
+        """``on_delta``, when given, receives the assistant text as it
+        streams in; the returned Decision is still the whole turn. An
+        adapter that cannot stream simply ignores it."""
+        ...
+
+
+class FallbackAdapter:
+    """Try each adapter in turn; the first that answers wins. A retry never
+    reaches the tools — it happens before any Decision exists."""
+
+    def __init__(self, adapters: list[LLMAdapter]) -> None:
+        if not adapters:
+            raise ValueError("FallbackAdapter needs at least one adapter")
+        self.adapters = list(adapters)
+
+    async def complete(
+        self, messages: list[Message], tools: Optional[list[dict]] = None, *,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> Decision:
+        error: Optional[Exception] = None
+        for adapter in self.adapters:
+            try:
+                return await adapter.complete(messages, tools, on_delta=on_delta)
+            except Exception as exc:  # noqa: BLE001 — the next adapter gets its turn
+                error = exc
+        assert error is not None
+        raise error
 
 
 def extract_finish(decision: Decision) -> Decision:
@@ -143,8 +173,17 @@ class ScriptedLLM:
     def finish(result: Any = None, *, text: str = "") -> Decision:
         return Decision(text=text, finish=True, result=result)
 
-    async def complete(self, messages: list[Message], tools: Optional[list[dict]] = None) -> Decision:
+    async def complete(
+        self, messages: list[Message], tools: Optional[list[dict]] = None, *,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> Decision:
         self.requests.append({"messages": list(messages), "tools": list(tools or [])})
+        decision = await self._next(messages, tools)
+        if on_delta is not None and decision.text:
+            on_delta(decision.text)  # one chunk: enough to test a streaming host
+        return decision
+
+    async def _next(self, messages: list[Message], tools: Optional[list[dict]]) -> Decision:
         if self._i >= len(self._steps):
             if self.strict:
                 raise AssertionError(
