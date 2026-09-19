@@ -1,28 +1,24 @@
-"""Structured working state (P1-1): a finite, typed record of what the agent
-knows and has decided, replacing an unbounded stack of free-text summaries.
+"""Structured working state: a finite, typed record of what the agent
+knows and has decided, rather than an unbounded stack of free-text summaries.
 
-The old summary contract asked an LLM to write prose that "preserves
-reasons" and hoped later re-folds wouldn't lose them. Prose has no schema,
-so nothing enforced that promise — a decision's reason was exactly as likely
-to survive a second fold as any other sentence, which is to say: not
-reliably. ``WorkingState`` makes the shape the promise: decisions are
-``(text, reason)`` pairs in a list, not sentences buried in a paragraph, so
-folding *appends* to a field instead of re-summarizing a summary.
+Prose has no schema: a summary asked to "preserve reasons" keeps a
+decision's reason exactly as reliably as any other sentence survives a
+second fold, which is to say not reliably. ``WorkingState`` makes the shape
+the promise: decisions are ``(text, reason)`` pairs in a list, not sentences
+buried in a paragraph, so folding *appends* to a field instead of
+re-summarizing a summary.
 
 The original conversation text is never lost either way — it stays in the
 Event Ledger (``user_input``/``model_response``/``command_*`` events) and is
-reachable via the ``search_history`` capability even after being folded out
+reachable via ``meta.history.search`` even after being folded out
 of the live projection.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, fields
-from typing import Any, Optional
+from typing import Any
 
-from .messages import Message, SYSTEM
-from .projection import Section
-from .tokens import estimate_tokens
+from .tokens import truncate_to_tokens
 from .checklists import ChecklistStore
 from .serialization import dumps
 
@@ -40,6 +36,11 @@ class RecordedDecision:
         return cls(text=str(d.get("text", "")), reason=str(d.get("reason", "")))
 
 
+# The fields that are plain lists of text: copied and parsed alike.
+_LIST_FIELDS = ("acceptance_criteria", "constraints", "confirmed_facts", "open_questions", "next_actions",
+                "artifact_refs")
+
+
 @dataclass
 class WorkingState:
     goal: str = ""
@@ -52,8 +53,8 @@ class WorkingState:
     artifact_refs: list[str] = field(default_factory=list)
     # Free-form escape hatch for application-specific state (game flags,
     # domain variables) that doesn't fit the fixed fields above. Editors of
-    # `extra` are the same three as before: user code, the LLM (via the
-    # state.extra.* capabilities), and the session seed.
+    # `extra` are user code, the LLM (via the state.extra.* capabilities) and
+    # the session seed.
     extra: dict[str, Any] = field(default_factory=dict)
     checklists: ChecklistStore = field(default_factory=ChecklistStore)
     # Ledger sequence up to which history has been folded into this state by
@@ -61,87 +62,44 @@ class WorkingState:
     folded_sequence: int = 0
 
     def is_empty(self) -> bool:
-        return not any([
-            self.goal, self.acceptance_criteria, self.constraints, self.confirmed_facts,
-            self.decisions, self.open_questions, self.next_actions, self.artifact_refs, self.extra, self.checklists,
-        ])
+        return not any(getattr(self, f.name) for f in fields(self) if f.name != "folded_sequence")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "goal": self.goal,
-            "acceptance_criteria": list(self.acceptance_criteria),
-            "constraints": list(self.constraints),
-            "confirmed_facts": list(self.confirmed_facts),
-            "decisions": [d.to_dict() for d in self.decisions],
-            "open_questions": list(self.open_questions),
-            "next_actions": list(self.next_actions),
-            "artifact_refs": list(self.artifact_refs),
-            "extra": dict(self.extra),
-            "checklists": self.checklists.to_dict(),
-            "folded_sequence": self.folded_sequence,
-        }
+        out: dict[str, Any] = {f.name: getattr(self, f.name) for f in fields(self)}  # declaration order
+        out.update({name: list(out[name]) for name in _LIST_FIELDS})
+        out.update(decisions=[d.to_dict() for d in self.decisions], extra=dict(self.extra),
+                   checklists=self.checklists.to_dict())
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "WorkingState":
         return cls(
             goal=str(d.get("goal", "")),
-            acceptance_criteria=list(d.get("acceptance_criteria") or []),
-            constraints=list(d.get("constraints") or []),
-            confirmed_facts=list(d.get("confirmed_facts") or []),
             decisions=[RecordedDecision.from_dict(x) for x in (d.get("decisions") or [])],
-            open_questions=list(d.get("open_questions") or []),
-            next_actions=list(d.get("next_actions") or []),
-            artifact_refs=list(d.get("artifact_refs") or []),
             extra=dict(d.get("extra") or {}),
             checklists=ChecklistStore.from_dict(d["checklists"]) if "checklists" in d else ChecklistStore(),
             folded_sequence=int(d.get("folded_sequence") or 0),
+            **{name: list(d.get(name) or []) for name in _LIST_FIELDS},
         )
 
     def render(self, *, max_tokens: int = 800) -> str:
-        parts: list[str] = []
-        if self.goal:
-            parts.append(f"goal: {self.goal}")
-        if self.acceptance_criteria:
-            parts.append("acceptance_criteria:\n" + "\n".join(f"- {c}" for c in self.acceptance_criteria))
-        if self.constraints:
-            parts.append("constraints:\n" + "\n".join(f"- {c}" for c in self.constraints))
-        if self.confirmed_facts:
-            parts.append("confirmed_facts:\n" + "\n".join(f"- {c}" for c in self.confirmed_facts))
-        if self.decisions:
-            parts.append("decisions:\n" + "\n".join(
-                f"- {d.text}" + (f" (because: {d.reason})" if d.reason else "") for d in self.decisions
-            ))
-        if self.open_questions:
-            parts.append("open_questions:\n" + "\n".join(f"- {q}" for q in self.open_questions))
-        if self.next_actions:
-            parts.append("next_actions:\n" + "\n".join(f"- {a}" for a in self.next_actions))
+        parts: list[str] = [f"goal: {self.goal}"] if self.goal else []
+
+        def bullets(name: str, lines: list[str]) -> None:
+            if lines:
+                parts.append(f"{name}:\n" + "\n".join(f"- {line}" for line in lines))
+
+        bullets("acceptance_criteria", self.acceptance_criteria)
+        bullets("constraints", self.constraints)
+        bullets("confirmed_facts", self.confirmed_facts)
+        bullets("decisions", [d.text + (f" (because: {d.reason})" if d.reason else "") for d in self.decisions])
+        bullets("open_questions", self.open_questions)
+        bullets("next_actions", self.next_actions)
         if self.artifact_refs:
             parts.append("artifact_refs: " + ", ".join(self.artifact_refs))
         if self.extra:
             parts.append("extra: " + dumps(self.extra))
-        body = "\n".join(parts)
-        if estimate_tokens(body) > max_tokens:
-            # Truncate the least time-critical sections first: facts, then
-            # decisions, keeping goal/constraints/open_questions/next_actions
-            # (the parts most load-bearing for not losing the thread).
-            body = body[: max_tokens * 4]
-        return body
-
-
-class WorkingStateSection(Section):
-    """Projects the working state each turn (volatile — always near the tail)."""
-
-    name = "working_state"
-
-    def __init__(self, *, max_tokens: int = 800) -> None:
-        self.max_tokens = max_tokens
-
-    def render(self, turn: Any) -> list[Message]:
-        ws: Optional[WorkingState] = getattr(turn, "working_state", None)
-        if ws is None or ws.is_empty():
-            return []
-        body = ws.render(max_tokens=self.max_tokens)
-        return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []
+        return truncate_to_tokens("\n".join(parts), max_tokens)
 
 
 # The typed fields of WorkingState, i.e. the keys from_dict understands.

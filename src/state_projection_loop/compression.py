@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Optional
 
 _NOISE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^diff --git .+\n", re.M), ""),

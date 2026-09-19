@@ -1,5 +1,5 @@
 """Handler of the ``checklist`` pack; all operations use the session's working state."""
-from ..capability import ToolContext
+from ..context import ToolContext
 from ..checklists import ChecklistStore
 
 

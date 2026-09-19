@@ -1,18 +1,16 @@
-"""Artifact store (replaces the old string-handle ``ValueStore``).
+"""Artifact store.
 
 Large tool results, stored projections, and model responses never pass
 through the model's context a second time: they are stored here and
 projected as a preview card. A reference is a *structured* JSON object,
-never a bare string — ``"$h1"`` used to be silently rewritten into a lookup
-whenever it appeared as an argument, which meant a user could never pass
-that literal string through a tool, and a mis-detected reference could leak
-one tool's output into another tool's arguments. The fix is representational:
-only ``{"$artifact": "<id>"}`` is ever resolved; every other string,
-including one that happens to look like an id, passes through untouched.
+never a bare string: if a string could be a reference, a user could never
+pass that literal string through a tool, and a mis-detected reference could
+leak one tool's output into another tool's arguments. Only
+``{"$artifact": "<id>"}`` is ever resolved; every other string, including
+one that happens to look like an id, passes through untouched.
 
 Artifacts are namespaced by run so a sub-agent (or a resumed run) can never
-address another run's data by guessing an id; a parent must explicitly
-``move()`` a child artifact into its own namespace to receive it (I9).
+address another run's data by guessing an id.
 """
 from __future__ import annotations
 
@@ -24,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .ids import new_id
-from .tokens import estimate_tokens
+from .tokens import estimate_tokens, truncate_to_tokens
 from .serialization import dumps
 
 REF_KEY = "$artifact"
@@ -45,19 +43,6 @@ def is_ref(value: Any) -> bool:
 
 def ref(artifact_id: str) -> dict[str, str]:
     return {REF_KEY: artifact_id}
-
-
-def truncate_to_tokens(text: str, max_tokens: int) -> str:
-    if estimate_tokens(text) <= max_tokens:
-        return text
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if estimate_tokens(text[:mid]) <= max_tokens:
-            lo = mid
-        else:
-            hi = mid - 1
-    return text[:lo]
 
 
 @dataclass
@@ -81,10 +66,30 @@ class ArtifactRecord:
             return f"{len(v)} keys"
         return f"{len(self.text)} chars"
 
+    def to_payload(self) -> dict[str, Any]:
+        return {"id": self.id, "run_id": self.run_id, "type_name": self.type_name,
+                "source": self.source, "created": self.created, "text": self.text}
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ArtifactRecord":
+        """Only the serialized text is persisted; anything that was not a
+        string is parsed back, so a handler resolving the reference gets the
+        dict it stored rather than its JSON."""
+        text, type_name = payload["text"], payload.get("type_name", "str")
+        value: Any = text
+        if type_name != "str":
+            try:
+                value = json.loads(text)
+            except ValueError:
+                pass  # serialized with str(): the text is all there is
+        return cls(id=payload["id"], run_id=payload["run_id"], value=value, text=text, type_name=type_name,
+                   tokens=estimate_tokens(text), source=payload.get("source", ""),
+                   created=payload.get("created", 0.0))
+
 
 class ArtifactStore:
     """Namespaced by ``run_id``: artifacts from one run are invisible to
-    another unless explicitly moved. Optionally persists to
+    another. Optionally persists to
     ``directory/<run_id>/<artifact_id>.json`` so a resumed run can recover
     large payloads that never made it into the ledger body."""
 
@@ -109,44 +114,28 @@ class ArtifactStore:
         self._persist(record)
         return record
 
+    def _path(self, aid: str) -> Path:
+        return self.directory / self.run_id / f"{aid}.json"
+
     def _persist(self, record: ArtifactRecord) -> None:
         if self.directory is None:
             return
-        run_dir = self.directory / self.run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "id": record.id, "run_id": record.run_id, "type_name": record.type_name,
-            "source": record.source, "created": record.created, "text": record.text,
-        }
-        (run_dir / f"{record.id}.json").write_text(
-            dumps(payload), encoding="utf-8"
-        )
+        path = self._path(record.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dumps(record.to_payload()), encoding="utf-8")
 
-    def _load(self, aid: str) -> Optional[ArtifactRecord]:
-        """Recover a persisted record written by an earlier process.
-
-        Only the serialized text survives a restart, so the recovered value
-        is that text — enough for meta.artifact.peek, which is the whole
-        point of persisting: a resumed run can still inspect a payload that
-        was too large to keep in the ledger body.
-        """
-        if self.directory is None:
-            return None
-        path = self.directory / self.run_id / f"{aid}.json"
-        if not path.exists():
-            return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        record = ArtifactRecord(
-            id=payload["id"], run_id=payload["run_id"], value=payload["text"],
-            text=payload["text"], type_name=payload.get("type_name", "str"),
-            tokens=estimate_tokens(payload["text"]), source=payload.get("source", ""),
-            created=payload.get("created", 0.0),
-        )
-        self._records[aid] = record
+    def _find(self, aid: str) -> Optional[ArtifactRecord]:
+        """The record, recovered from disk when an earlier process wrote it:
+        a resumed run can still read a payload that was too large to keep
+        in the ledger body."""
+        record = self._records.get(aid)
+        if record is None and self.directory is not None and self._path(aid).exists():
+            record = ArtifactRecord.from_payload(json.loads(self._path(aid).read_text(encoding="utf-8")))
+            self._records[aid] = record
         return record
 
     def get_record(self, aid: str) -> ArtifactRecord:
-        record = self._records.get(aid) or self._load(aid)
+        record = self._find(aid)
         if record is None:
             raise KeyError(aid)
         return record
@@ -155,15 +144,10 @@ class ArtifactStore:
         return self.get_record(aid).value
 
     def exists(self, aid: str) -> bool:
-        return aid in self._records or self._load(aid) is not None
-
-    def move(self, record: ArtifactRecord, *, source: str = "") -> ArtifactRecord:
-        """Explicitly import a record from another store's namespace into
-        this one (spawn child -> parent handoff, I9)."""
-        return self.put(record.value, source=source or record.source)
+        return self._find(aid) is not None
 
     def ref_text(self, record: ArtifactRecord, *, preview: str = "head", preview_tokens: int = 120) -> str:
-        """Projection form of an artifact: id + type + size + preview (I7)."""
+        """Projection form of an artifact: id + type + size + preview."""
         if preview == "tail":
             body = record.text[-preview_tokens * 6:]
             body = truncate_to_tokens(body[::-1], preview_tokens)[::-1]

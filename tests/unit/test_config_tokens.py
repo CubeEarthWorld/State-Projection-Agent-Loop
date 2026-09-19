@@ -1,4 +1,4 @@
-"""Config defaults (§13) and token estimation."""
+"""Config defaults and token estimation."""
 from __future__ import annotations
 
 import pytest
@@ -48,6 +48,10 @@ class TestConfigDefaults:
             Config.from_dict({"projektion": {}})
         with pytest.raises(ValueError, match="Unknown config key"):
             Config.from_dict({"discovery": {"vektor": "on"}})
+
+    def test_from_dict_rejects_a_scalar_where_a_section_belongs(self):
+        with pytest.raises(ValueError, match="expects a map"):
+            Config.from_dict({"budget": 5})
 
 
 class TestTokenEstimation:

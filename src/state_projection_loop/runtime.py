@@ -6,13 +6,13 @@ policy authorization and output shaping are enforced here in code.
 Two correctness properties this module exists to guarantee, both violated
 by naive "batch of tool calls" runtimes:
 
-* **Order** (P0-1): calls execute in the model's stated order by default.
+* **Order**: calls execute in the model's stated order by default.
   The only concurrency allowed is a run of *adjacent* calls whose
   capabilities declare no write/external effects — reads never race a
   write, and a write never jumps ahead of an earlier read or write. There
   is no cross-batch dependency solver; that complexity is deliberately out
   of scope (see the design spec's "later" list).
-* **Idempotency** (P0-2): a capability may only be auto-retried by this
+* **Idempotency**: a capability may only be auto-retried by this
   runtime if its ``retry_safety`` is ``pure`` or ``idempotent`` —
   :class:`~state_projection_loop.capability.CapabilityExecution` refuses to
   even construct with ``retries > 0`` otherwise. A timeout is recorded as
@@ -21,9 +21,6 @@ by naive "batch of tool calls" runtimes:
   awaiting task gave up on it, and collapsing that distinction is exactly
   what lets non-idempotent operations double-fire.
 
-JSON Schema validation uses one small built-in validator (``_mini_validate``)
-— see :func:`validate_args` for why that is deliberate rather than a
-fallback.
 """
 from __future__ import annotations
 
@@ -34,145 +31,23 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .artifacts import ArtifactStore, serialize_value, truncate_to_tokens
-from .capability import Capability, Effect, ToolContext
+from .artifacts import ArtifactStore, serialize_value
+from .capability import Capability
+from .context import ToolContext
 from .compression import content_hash
 from .config import Config
+from .json_schema import apply_defaults, validate_args
 from .llm import FINISH_NAME
 from .messages import Decision, Message, ToolCall
 from .policy import PolicyEngine
 from .registry import Registry
 from .run import Command, Question, Run
 from .serialization import dumps
-from .tokens import estimate_tokens
-
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-_TYPE_MAP = {
-    "string": str, "integer": int, "number": (int, float), "boolean": bool,
-    "array": list, "object": dict, "null": type(None),
-}
-
-
-def _json_type_name(value: Any) -> str:
-    """Name a value's type in the JSON Schema vocabulary.
-
-    The message this feeds is a self-repair prompt sent to the model, so it
-    names types the way the schema beside it does — and identically in the
-    Dart port, which has no Python type names to fall back on.
-    """
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int):
-        return "integer"
-    if isinstance(value, float):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return type(value).__name__
-
-
-def _type_ok(expected: str, value: Any) -> bool:
-    py = _TYPE_MAP.get(expected)
-    if py is None:
-        return True
-    if expected in ("integer", "number") and isinstance(value, bool):
-        return False
-    return isinstance(value, py)
-
-
-def _mini_validate(schema: dict[str, Any], value: Any, path: str = "") -> Optional[str]:
-    """The JSON Schema subset a tool-argument schema actually uses."""
-    where = path or "arguments"
-    t = schema.get("type")
-    if t is not None:
-        types = t if isinstance(t, list) else [t]
-        if not any(_type_ok(x, value) for x in types):
-            return f"{where}: expected type {dumps(t)}, got {_json_type_name(value)}"
-    if "enum" in schema and value not in schema["enum"]:
-        return f"{where}: {dumps(value)} is not one of {dumps(schema['enum'])}"
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if "minimum" in schema and value < schema["minimum"]:
-            return f"{where}: {value} is less than minimum {schema['minimum']}"
-        if "maximum" in schema and value > schema["maximum"]:
-            return f"{where}: {value} is greater than maximum {schema['maximum']}"
-    if isinstance(value, str):
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            return f"{where}: shorter than minLength {schema['minLength']}"
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            return f"{where}: longer than maxLength {schema['maxLength']}"
-    if isinstance(value, dict):
-        for req in schema.get("required", []):
-            if req not in value:
-                return f"{where}: missing required property {dumps(req)}"
-        props = schema.get("properties", {})
-        for key, sub in props.items():
-            if key in value and isinstance(sub, dict):
-                err = _mini_validate(sub, value[key], f"{where}.{key}")
-                if err:
-                    return err
-        if schema.get("additionalProperties") is False:
-            extra = set(value) - set(props)
-            if extra:
-                return f"{where}: unexpected properties {dumps(sorted(extra))}"
-    if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        for i, item in enumerate(value):
-            err = _mini_validate(schema["items"], item, f"{where}[{i}]")
-            if err:
-                return err
-    if "anyOf" in schema:
-        errs = []
-        for sub in schema["anyOf"]:
-            err = _mini_validate(sub, value, where)
-            if err is None:
-                break
-            errs.append(err)
-        else:
-            return f"{where}: no anyOf branch matched ({'; '.join(errs)})"
-    return None
-
-
-def apply_defaults(schema: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
-    """Fill missing top-level arguments that declare a schema default."""
-    out = dict(args)
-    for key, sub in (schema.get("properties") or {}).items():
-        if key not in out and isinstance(sub, dict) and "default" in sub:
-            out[key] = sub["default"]
-    return out
-
-
-def validate_value(schema: dict[str, Any], value: Any) -> Optional[str]:
-    """Validate any JSON value against a schema; error message or None."""
-    return _mini_validate(schema, value)
-
-
-def validate_args(schema: dict[str, Any], args: Any) -> Optional[str]:
-    """Return an error message, or None when the arguments pass.
-
-    Deliberately one small validator rather than ``jsonschema``: the error
-    text goes to the model as a self-repair prompt, and two different
-    validators meant this package and its Dart port rejected different
-    arguments with different wording for the same schema. The subset covers
-    what a tool-argument schema actually uses.
-    """
-    if not isinstance(args, dict):
-        return f"arguments must be a JSON object, got {_json_type_name(args)}"
-    return _mini_validate(schema, args)
-
+from .tokens import estimate_tokens, truncate_to_tokens
 
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
-
-OUTCOMES = ("ok", "failed", "unknown", "denied", "waiting_approval", "waiting_user")
 
 # Outcomes whose result arrives later (approval, answer): nothing is recorded
 # for the call until then, so the decision stays out of the projection as a
@@ -184,13 +59,16 @@ _DIGITS = re.compile(r"\d")
 @dataclass
 class ToolResult:
     call: ToolCall
-    ok: bool
     value: Any = None
     error: Optional[str] = None
     observation: str = ""
     artifact_id: Optional[str] = None
-    outcome: str = "ok"  # one of OUTCOMES
+    outcome: str = "ok"  # ok | failed | unknown | denied | waiting_approval | waiting_user
     command_id: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == "ok"
 
 
 @dataclass
@@ -220,6 +98,17 @@ class BudgetState:
     cost: float = 0.0
     started: float = field(default_factory=time.time)
 
+    def to_dict(self) -> dict[str, Any]:
+        """What a snapshot keeps. Not ``started``: the wall clock restarts
+        with the process that resumes the run."""
+        return {"steps": self.steps, "prompt_tokens": self.prompt_tokens,
+                "completion_tokens": self.completion_tokens, "cost": self.cost}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BudgetState":
+        return cls(steps=d.get("steps", 0), prompt_tokens=d.get("prompt_tokens", 0),
+                   completion_tokens=d.get("completion_tokens", 0), cost=d.get("cost", 0.0))
+
     def note_usage(self, prompt: int, completion: int, cfg: Config) -> None:
         self.prompt_tokens += prompt
         self.completion_tokens += completion
@@ -227,8 +116,10 @@ class BudgetState:
         self.cost += prompt / 1000 * b.cost_per_1k_input + completion / 1000 * b.cost_per_1k_output
 
     def note_decision(self, decision: Decision, messages: list[Message], api_tools: list[dict], cfg: Config) -> None:
-        """Account one model turn: the adapter's reported usage when it has
-        one, otherwise an estimate from what was sent and what came back."""
+        """Account one model turn: a step, and the adapter's reported usage
+        when it has one, otherwise an estimate from what was sent and what
+        came back."""
+        self.steps += 1
         if decision.usage is not None:
             self.note_usage(decision.usage.prompt_tokens, decision.usage.completion_tokens, cfg)
             return
@@ -312,9 +203,9 @@ class Runtime:
         if why is None:
             return None
         return ToolResult(
-            call=call, ok=False, outcome="failed", error="loop_guard",
+            call=call, outcome="failed", error="loop_guard",
             observation=(
-                f"Loop guard: {capability.name!r} with these exact arguments {why}. "
+                f"Loop guard: \"{capability.name}\" with these exact arguments {why}. "
                 "It was not executed again; change the arguments or the approach."
             ),
         )
@@ -340,7 +231,7 @@ class Runtime:
     async def execute(
         self, calls: list[ToolCall], ctx: ToolContext, run: Run, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
-        """Validate, authorize and run a batch of calls, in order (P0-1).
+        """Validate, authorize and run a batch of calls, in order.
 
         A contiguous run of calls whose capabilities declare no write/
         external effects may execute concurrently; anything else runs one
@@ -352,12 +243,7 @@ class Runtime:
         async def flush() -> None:
             if not buffer:
                 return
-            if len(buffer) == 1:
-                call, cap, args = buffer[0]
-                results.append(await self._run(cap, args, ctx, run, call))
-            else:
-                tasks = [self._run(cap, args, ctx, run, call) for call, cap, args in buffer]
-                results.extend(await asyncio.gather(*tasks))
+            results.extend(await asyncio.gather(*(self._run(cap, args, ctx, run, call) for call, cap, args in buffer)))
             buffer.clear()
 
         for idx, call in enumerate(calls):
@@ -376,7 +262,7 @@ class Runtime:
             if decision.decision == "deny":
                 await flush()
                 results.append(ToolResult(
-                    call=call, ok=False, outcome="denied", error=decision.reason,
+                    call=call, outcome="denied", error=decision.reason,
                     observation=f"Denied by policy ({decision.layer}): {decision.reason}",
                 ))
                 continue
@@ -388,7 +274,7 @@ class Runtime:
                                       policy_revision=policy.revision,
                                       expires_in_s=self.config.limits.approval_expires_s)
                 results.append(ToolResult(
-                    call=call, ok=False, outcome="waiting_approval", error="approval_required",
+                    call=call, outcome="waiting_approval", error="approval_required",
                     observation=f"Approval required: {decision.reason}", command_id=command.id,
                 ))
                 return ExecuteBatchResult(results=results, halted=True)
@@ -406,9 +292,10 @@ class Runtime:
     async def resume_pending(
         self, run: Run, ctx: ToolContext, policy: PolicyEngine,
     ) -> ExecuteBatchResult:
-        """Continue a run's ``pending_calls`` after its approval was resolved.
+        """Continue a run's ``pending_calls`` after its approval was resolved
+        or its question answered.
 
-        The first pending call already has a :class:`~state_projection_loop.run.Command`
+        After an approval the first pending call already has a :class:`~state_projection_loop.run.Command`
         (created when approval was requested) and is executed directly,
         reusing its ``command_id`` — no re-validation, no re-authorization,
         so an approved command cannot silently get a different idempotency
@@ -430,33 +317,32 @@ class Runtime:
             # rest of the decision too, and a call left without one would
             # take the whole decision out of the projection.
             results = [ToolResult(
-                call=first_call, ok=False, outcome="denied", error="approval_denied",
+                call=first_call, outcome="denied", error="approval_denied",
                 observation=f"Approval denied: {denied_name} was not executed.",
                 command_id=denied_command.id if denied_command else None,
             )]
             results += [
-                ToolResult(call=call, ok=False, outcome="denied", error="approval_denied",
+                ToolResult(call=call, outcome="denied", error="approval_denied",
                            observation=f"Not executed: the approval for {denied_name} was denied.")
                 for call in pending[1:]
             ]
             return ExecuteBatchResult(results=results, halted=False)
-        capability = self.registry.get(approved.capability_name) if approved else self.registry.get(first_call.name)
-        results: list[ToolResult] = []
+        run.pending_calls = []
+        if approved is None:
+            # Parked behind a question, not an approval: nothing here was
+            # checked yet, so every call takes the normal path.
+            return await self.execute(pending, ctx, run, policy)
+        capability = self.registry.get(approved.capability_name)
         if capability is None:
-            results.append(ToolResult(call=first_call, ok=False, outcome="failed", error="unknown_capability",
-                                       observation=f"Error: capability {first_call.name!r} no longer registered."))
+            results = [ToolResult(call=first_call, outcome="failed", error="unknown_capability",
+                                  observation=f"Error: capability \"{first_call.name}\" no longer registered.")]
         else:
-            args = approved.arguments if approved else (first_call.arguments if isinstance(first_call.arguments, dict) else {})
-            results.append(await self._run(capability, args, ctx, run, first_call, command=approved))
+            results = [await self._run(capability, approved.arguments, ctx, run, first_call, command=approved)]
             if results[-1].outcome == "waiting_user":
                 run.pending_calls = list(pending[1:])
                 return ExecuteBatchResult(results=results, halted=True)
-        run.pending_calls = []
         rest = await self.execute(pending[1:], ctx, run, policy)
-        results.extend(rest.results)
-        if rest.halted:
-            return ExecuteBatchResult(results=results, halted=True)
-        return ExecuteBatchResult(results=results, halted=False)
+        return ExecuteBatchResult(results=results + rest.results, halted=rest.halted)
 
     # -- pre-checks: unknown capability / require_spec / validation ---------
 
@@ -471,9 +357,9 @@ class Runtime:
                 if "meta.tool.find" in self.registry else ""
             )
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="unknown_capability",
+                call=call, outcome="failed", error="unknown_capability",
                 observation=(
-                    f"Error: capability {call.name!r} is not registered. "
+                    f"Error: capability \"{call.name}\" is not registered. "
                     f"Tool index: {toc or '(empty)'}.{hint}"
                 ),
             )
@@ -484,9 +370,9 @@ class Runtime:
         if needs_spec and capability.name not in self.seen_specs:
             self.seen_specs.add(capability.name)
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="require_spec",
+                call=call, outcome="failed", error="require_spec",
                 observation=(
-                    f"Capability {call.name!r} requires its full spec to be reviewed before first use. "
+                    f"Capability \"{call.name}\" requires its full spec to be reviewed before first use. "
                     f"The spec follows — verify your arguments against it and call again.\n"
                     + capability.spec_text()
                 ),
@@ -494,7 +380,7 @@ class Runtime:
 
         args = call.arguments if isinstance(call.arguments, dict) else {}
         if call.raw_arguments is not None and not args:
-            error: Optional[str] = f"arguments were not valid JSON: {call.raw_arguments[:200]!r}"
+            error: Optional[str] = f"arguments were not valid JSON: \"{call.raw_arguments[:200]}\""
         else:
             args = apply_defaults(capability.spec.parameters, args)
             error = validate_args(capability.spec.parameters, args)
@@ -505,17 +391,17 @@ class Runtime:
             limit = self.config.limits.max_validation_retries
             if n > limit:
                 observation = (
-                    f"Validation failed {n} times in a row for {call.name!r}; giving up on this call "
+                    f"Validation failed {n} times in a row for \"{call.name}\"; giving up on this call "
                     f"(limit {limit}). Last error: {error}. Try a different tool or approach."
                 )
             else:
                 self.seen_specs.add(capability.name)
                 observation = (
-                    f"Validation error calling {call.name!r}: {error}\n"
+                    f"Validation error calling \"{call.name}\": {error}\n"
                     "The call was NOT executed. The full spec follows — fix the arguments and retry.\n"
                     + capability.spec_text()
                 )
-            return ToolResult(call=call, ok=False, outcome="failed", error=f"validation: {error}",
+            return ToolResult(call=call, outcome="failed", error=f"validation: {error}",
                                observation=observation)
 
         self._consecutive_validation_failures[call.name] = 0
@@ -523,11 +409,7 @@ class Runtime:
 
     @staticmethod
     def is_read_only(capability: Capability) -> bool:
-        # Mirrors PolicyEngine.evaluate: undeclared effects are treated as
-        # the most restrictive kind, so an author who forgot to declare
-        # effects doesn't also get free parallel execution.
-        effects = capability.effects or [Effect(kind="external", resource="undeclared:*")]
-        return all(e.kind in ("none", "read") for e in effects)
+        return all(e.kind in ("none", "read") for e in capability.planned_effects)
 
     # -- execution ------------------------------------------------------------
 
@@ -543,8 +425,8 @@ class Runtime:
         if handler is None:
             run.record_outcome(command, "failed", error="no_handler")
             return ToolResult(
-                call=call, ok=False, outcome="failed", error="no_handler", command_id=command.id,
-                observation=f"Error: capability {capability.name!r} has no executable handler registered.",
+                call=call, outcome="failed", error="no_handler", command_id=command.id,
+                observation=f"Error: capability \"{capability.name}\" has no executable handler registered.",
             )
         resolved = ctx.store.resolve_args(args) if capability.execution.resolve_handles else args
         attempts = max(1, capability.execution.retries + 1)
@@ -561,19 +443,19 @@ class Runtime:
                     # The command stays pending until Session.answer completes it.
                     run.ask_question(command, call.id, value)
                     return ToolResult(
-                        call=call, ok=False, outcome="waiting_user", error="question_pending",
+                        call=call, outcome="waiting_user", error="question_pending",
                         observation=f"Question pending: {value.text}", command_id=command.id,
                     )
                 observation, artifact_id = self._observation_for(capability, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id)
                 return ToolResult(
-                    call=call, ok=True, value=value, outcome="ok", command_id=command.id,
+                    call=call, value=value, outcome="ok", command_id=command.id,
                     observation=observation, artifact_id=artifact_id,
                 )
             except asyncio.TimeoutError:
                 # We cannot confirm whether the underlying effect completed
                 # after the awaiting task gave up — never collapse this into
-                # "failed" (P0-2). A retry only proceeds below if the
+                # "failed". A retry only proceeds below if the
                 # capability's retry_safety already permits blind retries.
                 last_error = f"timed out after {capability.execution.timeout_s}s"
                 last_outcome = "unknown"
@@ -584,10 +466,10 @@ class Runtime:
                 await asyncio.sleep(min(0.5 * (attempt + 1), 2.0))
         run.record_outcome(command, last_outcome, error=last_error)
         return ToolResult(
-            call=call, ok=False, error=last_error, outcome=last_outcome,
+            call=call, error=last_error, outcome=last_outcome,
             command_id=command.id,
             observation=(
-                f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing {capability.name!r} "
+                f"{'Timed out' if last_outcome == 'unknown' else 'Error'} executing \"{capability.name}\" "
                 f"({attempts} attempt(s)): {last_error}. "
                 + ("Outcome is UNKNOWN — do not blindly retry a non-idempotent action; check state first."
                    if last_outcome == "unknown" else "The call failed; adjust and retry or use another tool.")
@@ -596,12 +478,12 @@ class Runtime:
 
     @staticmethod
     async def _invoke(handler: Any, capability: Capability, args: dict[str, Any], ctx: ToolContext) -> Any:
-        kwargs = dict(args)
-        if capability.wants_ctx:
-            kwargs = {"ctx": ctx, **kwargs}
+        # The context is the first parameter whatever it is called, so it
+        # goes in positionally.
+        positional = (ctx,) if capability.wants_ctx else ()
         if inspect.iscoroutinefunction(handler):
-            return await handler(**kwargs)
-        return await asyncio.to_thread(handler, **kwargs)
+            return await handler(*positional, **args)
+        return await asyncio.to_thread(handler, *positional, **args)
 
     # -- output policy --------------------------------------------------------
 

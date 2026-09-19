@@ -1,4 +1,4 @@
-"""Policy engine: the sole owner of execution permission (P1-2, §7).
+"""Policy engine: the sole owner of execution permission.
 
 The LLM proposes; it never decides. Every planned effect of a capability
 call is evaluated here, in a fixed layer order, before the runtime is
@@ -18,13 +18,12 @@ Declared effects (:class:`~state_projection_loop.capability.Effect`) are
 self-reported by the capability author. This engine is the *policy*
 boundary, not the *sandbox* boundary — pairing it with OS/process-level
 restrictions on network, filesystem and credentials is the caller's
-responsibility (§7.4).
+responsibility.
 """
 from __future__ import annotations
 
 import fnmatch
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from .capability import Capability, Effect
@@ -33,7 +32,7 @@ LAYER_ORDER = ("absolute", "admin", "developer", "workspace", "session", "llm")
 DECISIONS = ("allow", "deny", "require_approval")
 _SEVERITY = {"allow": 1, "require_approval": 2, "deny": 3}
 
-# Convenience scopes mapped onto effect-kind + resource patterns (§7.2).
+# Convenience scopes mapped onto effect-kind + resource patterns.
 SCOPES: dict[str, tuple[Optional[str], str]] = {
     "workspace_read": ("read", "workspace:*"),
     "workspace_write": ("write", "workspace:*"),
@@ -44,7 +43,43 @@ SCOPES: dict[str, tuple[Optional[str], str]] = {
     "host_access": (None, "host:*"),
 }
 
-PRESETS = ("deny_all", "approve_all_effects", "auto_safe", "auto_workspace_dev")
+# Writes confined to the session's own working state never leave the process,
+# so the auto presets allow them; they are declared as writes so the runtime
+# keeps them in the model's stated order.
+_LOCAL_STATE = (
+    dict(decision="allow", capability_pattern="planning.checklist.manage", effect_kind="write",
+         resource_pattern="working_state:checklists", reason="preset:local_checklists"),
+    dict(decision="allow", capability_pattern="meta.user.ask", effect_kind="external",
+         resource_pattern="user:*", reason="preset:ask_user"),
+    dict(decision="allow", capability_pattern="state.*", effect_kind="write",
+         resource_pattern="working_state:*", reason="preset:local_working_state"),
+)
+
+# Each preset is the rules it installs, in order; a rule without a reason gets
+# "preset:<name>". Specs rather than Rule objects, so no two engines share one.
+PRESETS: dict[str, tuple[dict[str, Any], ...]] = {
+    "deny_all": (dict(decision="deny"),),
+    "approve_all_effects": (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="require_approval"),
+    ),
+    "auto_safe": _LOCAL_STATE + (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="allow", effect_kind="read", resource_pattern="workspace:*"),
+        dict(decision="require_approval"),
+    ),
+    "auto_workspace_dev": _LOCAL_STATE + (
+        dict(decision="allow", effect_kind="none"),
+        dict(decision="allow", resource_pattern="workspace:*"),
+        dict(decision="allow", resource_pattern="sandbox:*"),
+        dict(decision="require_approval"),
+    ),
+}
+
+
+# Case-sensitive on every platform (fnmatch.fnmatch folds case on Windows),
+# and the function the shared spec fixtures pin against the Dart port.
+glob_match = fnmatch.fnmatchcase
 
 
 @dataclass
@@ -56,12 +91,19 @@ class Rule:
     arg_predicate: Optional[Callable[[dict[str, Any]], bool]] = None
     reason: str = ""
 
+    @property
+    def is_catch_all(self) -> bool:
+        """Matches every call: the layer's fallback, consulted after every
+        rule that names something (see :meth:`PolicyEngine._match_layer`)."""
+        return (self.capability_pattern == "*" and self.effect_kind is None
+                and self.resource_pattern == "*" and self.arg_predicate is None)
+
     def matches(self, capability: Capability, effect: Effect, arguments: dict[str, Any]) -> bool:
-        if not fnmatch.fnmatch(capability.name, self.capability_pattern):
+        if not glob_match(capability.name, self.capability_pattern):
             return False
         if self.effect_kind is not None and effect.kind != self.effect_kind:
             return False
-        if not fnmatch.fnmatch(effect.resource, self.resource_pattern):
+        if not glob_match(effect.resource, self.resource_pattern):
             return False
         if self.arg_predicate is not None and not self.arg_predicate(arguments):
             return False
@@ -73,7 +115,6 @@ class PolicyDecision:
     decision: str
     reason: str
     layer: str = ""
-    per_effect: list[tuple[Effect, str, str]] = field(default_factory=list)  # (effect, decision, layer)
 
 
 class PolicyEngine:
@@ -106,7 +147,7 @@ class PolicyEngine:
         self._changed(f"clear_layer layer={layer}")
 
     def set_scope(self, scope: str, decision: str, *, layer: str = "workspace") -> None:
-        """Grant/deny/gate one of the named scopes (§7.2), e.g.
+        """Grant/deny/gate one of the named scopes, e.g.
         ``set_scope("network_access", "deny")``."""
         if scope not in SCOPES:
             raise ValueError(f"Unknown scope {scope!r}; expected one of {sorted(SCOPES)}")
@@ -117,38 +158,10 @@ class PolicyEngine:
 
     def apply_preset(self, preset: str, *, layer: str = "workspace") -> None:
         if preset not in PRESETS:
-            raise ValueError(f"Unknown preset {preset!r}; expected one of {PRESETS}")
+            raise ValueError(f"Unknown preset {preset!r}; expected one of {tuple(PRESETS)}")
         self.clear_layer(layer)
-        if preset in ("auto_safe", "auto_workspace_dev"):
-            # Writes confined to the session's own working state never leave
-            # the process, so they are auto-allowed; they are declared as
-            # writes so the runtime keeps them in the model's stated order.
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="planning.checklist.manage",
-                                     effect_kind="write", resource_pattern="working_state:checklists",
-                                     reason="preset:local_checklists"))
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="meta.user.ask",
-                                     effect_kind="external", resource_pattern="user:*",
-                                     reason="preset:ask_user"))
-            self.add_rule(layer, Rule(decision="allow", capability_pattern="state.*",
-                                     effect_kind="write", resource_pattern="working_state:*",
-                                     reason="preset:local_working_state"))
-        if preset == "deny_all":
-            self.add_rule(layer, Rule(decision="deny", reason="preset:deny_all"))
-        elif preset == "approve_all_effects":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:approve_all_effects"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:approve_all_effects"))
-        elif preset == "auto_safe":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:auto_safe"))
-            self.add_rule(layer, Rule(decision="allow", effect_kind="read", resource_pattern="workspace:*",
-                                       reason="preset:auto_safe"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:auto_safe"))
-        elif preset == "auto_workspace_dev":
-            self.add_rule(layer, Rule(decision="allow", effect_kind="none", reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="allow", resource_pattern="workspace:*",
-                                       reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="allow", resource_pattern="sandbox:*",
-                                       reason="preset:auto_workspace_dev"))
-            self.add_rule(layer, Rule(decision="require_approval", reason="preset:auto_workspace_dev"))
+        for spec in PRESETS[preset]:
+            self.add_rule(layer, Rule(**{"reason": f"preset:{preset}", **spec}))
 
     def set_llm_safety_mode(self, mode: str) -> None:
         if mode not in ("disabled", "advisory", "approval_routing"):
@@ -160,10 +173,13 @@ class PolicyEngine:
 
     def _match_layer(self, layer: str, capability: Capability, effect: Effect,
                       arguments: dict[str, Any]) -> Optional[Rule]:
-        for rule in self.layers[layer]:
-            if rule.matches(capability, effect, arguments):
-                return rule
-        return None
+        """The first matching rule in the layer. A rule that matches
+        everything (a preset's closing ``require_approval``) is the layer's
+        fallback and is consulted last, so a grant added after
+        ``apply_preset`` on the same layer takes effect instead of being
+        shadowed by it."""
+        matched = [rule for rule in self.layers[layer] if rule.matches(capability, effect, arguments)]
+        return next((rule for rule in matched if not rule.is_catch_all), matched[0] if matched else None)
 
     def _evaluate_effect(self, capability: Capability, effect: Effect,
                           arguments: dict[str, Any]) -> tuple[str, str, str]:
@@ -195,21 +211,13 @@ class PolicyEngine:
         return best[1], best[2], best[3]
 
     def evaluate(self, capability: Capability, arguments: dict[str, Any]) -> PolicyDecision:
-        # A capability that declares no effects at all is NOT assumed safe —
-        # that would reward an author who simply forgot to declare effects
-        # with maximum trust. Treat undeclared effects as the most
-        # restrictive kind so the default posture stays conservative.
-        effects = capability.effects or [Effect(kind="external", resource="undeclared:*")]
-        per_effect: list[tuple[Effect, str, str]] = []
         worst_decision, worst_layer, worst_reason = "allow", "default", "no effects"
         worst_severity = 0
-        for effect in effects:
+        for effect in capability.planned_effects:
             decision, layer, reason = self._evaluate_effect(capability, effect, arguments)
-            per_effect.append((effect, decision, layer))
             severity = _SEVERITY[decision]
             if severity > worst_severity:
                 worst_decision, worst_layer, worst_reason, worst_severity = decision, layer, reason, severity
-        return PolicyDecision(decision=worst_decision, reason=worst_reason, layer=worst_layer,
-                               per_effect=per_effect)
+        return PolicyDecision(decision=worst_decision, reason=worst_reason, layer=worst_layer)
 
 

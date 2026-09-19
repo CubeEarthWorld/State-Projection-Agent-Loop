@@ -9,10 +9,10 @@ truth; the projection is a disposable window over it.
 
 Two correctness properties enforced here that a naive loop gets wrong:
 
-* **P0-3** — completion (``Decision.finish``) is validated *before* any
+* completion (``Decision.finish``) is validated *before* any
   side-effecting call in the same decision executes; a decision that mixes
   the two is rejected outright, never partially honored.
-* **P0-4** — at most one in-flight turn per session. A second concurrent
+* at most one in-flight turn per session. A second concurrent
   ``asend``/``arun_job`` raises :class:`ConcurrencyError` immediately
   instead of interleaving state.
 """
@@ -28,20 +28,21 @@ from typing import Any, Callable, Iterable, Optional
 from .artifacts import ArtifactStore
 from .builtin import DEFAULT_BUILTINS, install_builtins
 from .checklists import ChecklistStore
-from .capability import ToolContext
 from .compaction import FOLD_INSTRUCTIONS, apply_fold_delta, parse_fold_reply
 from .config import Config
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend
-from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, event_to_message
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, renderable
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
 from .messages import ASSISTANT, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
-from .projection import Projection, Section, TurnContext, build_default_sections
+from .context import TurnContext
+from .projection import Projection, Section, build_default_sections
 from .registry import Registry
-from .run import ApprovalRequest, PendingQuestion, Run, RunStateError
-from .runtime import WAITING_OUTCOMES, BudgetState, Runtime, validate_value
+from .run import TERMINAL_STATES, ApprovalRequest, PendingQuestion, Run, RunStateError
+from .json_schema import validate_value
+from .runtime import WAITING_OUTCOMES, BudgetState, Runtime
 from .tokens import estimate_tokens
 from .working_state import WORKING_STATE_FIELDS, WorkingState
 
@@ -49,7 +50,7 @@ from .working_state import WORKING_STATE_FIELDS, WorkingState
 
 class ConcurrencyError(RuntimeError):
     """Raised when a second turn is attempted on a session with one already
-    in flight (P0-4). Sessions are single-writer by design; run concurrent
+    in flight. Sessions are single-writer by design; run concurrent
     conversations as separate Sessions."""
 
 
@@ -86,17 +87,24 @@ class Session:
         ledger: Optional[EventLedger] = None,
         builtins: Iterable[str] = DEFAULT_BUILTINS,
         on_event: Optional[Callable[[Event], None]] = None,
+        _restored: Optional[Snapshot] = None,
     ) -> None:
+        """``_restored`` is :meth:`resume_from_ledger`'s way in: the session
+        continues that snapshot's run instead of starting one."""
         self.config = config or Config()
         self.llm = llm
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
         install_builtins(self.registry, builtins)
 
-        self.session_id = new_id("session")
         base = ledger if ledger is not None else _make_ledger(self.config)
         self.ledger = base if on_event is None else ObservedLedger(base, on_event)
-        self.run = Run(new_id("run"), self.session_id, self.ledger)
+        if _restored is None:
+            self.session_id = new_id("session")
+            self.run = Run(new_id("run"), self.session_id, self.ledger)
+        else:
+            self.run = Run.from_snapshot_state(_restored.run_id, self.ledger, _restored.state)
+            self.session_id = self.run.session_id
 
         self.policy = policy if policy is not None else self._default_policy()
 
@@ -112,18 +120,25 @@ class Session:
         self.projection = Projection(sections, window_tokens=self.config.projection.window_tokens)
         self.runtime = Runtime(self.registry, self.config)
 
-        # Typed fields go through the same parser snapshots use, so a seeded
-        # `decisions` becomes RecordedDecision objects rather than raw dicts
-        # that blow up on the next to_dict(). Anything else is app-specific
-        # state and lands in `extra`, the documented escape hatch.
-        seed = dict(seed or {})
-        known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
-        self.working_state = WorkingState.from_dict(known)
-        self.working_state.extra.update(
-            {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
-        )
-
-        self.budget = BudgetState()
+        if _restored is None:
+            # Typed fields go through the same parser snapshots use, so a
+            # seeded `decisions` becomes RecordedDecision objects rather than
+            # raw dicts that blow up on the next to_dict(). Anything else is
+            # app-specific state and lands in `extra`, the documented escape hatch.
+            seed = dict(seed or {})
+            known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
+            self.working_state = WorkingState.from_dict(known)
+            self.working_state.extra.update(
+                {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
+            )
+            self.budget = BudgetState()
+        else:
+            self.working_state = WorkingState.from_dict(_restored.state.get("working_state") or {})
+            # Plans changed after the snapshot are in the ledger.
+            for event in self.ledger.iter_run(self.run.id, after=_restored.sequence):
+                if event.type == "checklists_changed":
+                    self.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
+            self.budget = BudgetState.from_dict(_restored.state.get("budget") or {})
 
         # Recently used non-pinned tools (an LRU). Pinned capabilities are
         # added by _api_tools straight from the registry, so they are never
@@ -133,8 +148,9 @@ class Session:
         self._idle_turns = 0
         self._budget_grace_used = False
         self._lock = asyncio.Lock()
-        self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
-        self._snapshot()
+        if _restored is None:
+            self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
+            self._snapshot()
 
     @staticmethod
     def _default_policy() -> PolicyEngine:
@@ -152,12 +168,7 @@ class Session:
     def conversation(self) -> list[Message]:
         """Derived view of renderable ledger events as Messages. Read-only;
         the ledger is the source of truth, this is a convenience accessor."""
-        msgs: list[Message] = []
-        for event in self.ledger.iter_run(self.run.id):
-            msg_dict = event_to_message(event)
-            if msg_dict is not None:
-                msgs.append(Message.from_dict(msg_dict))
-        return msgs
+        return [message for _, message in renderable(self.ledger, self.run.id)]
 
     def send(self, text: str) -> Any:
         _ensure_no_running_loop()
@@ -169,15 +180,10 @@ class Session:
             self._checkpoint()
             return await self._loop()
 
-    def run_job(self, task: str) -> Any:
-        _ensure_no_running_loop()
-        return asyncio.run(self.arun_job(task))
-
-    async def arun_job(self, task: str) -> Any:
-        async with self._guarded():
-            self.ledger.append(self.run.id, "user_input", {"text": task})
-            self._checkpoint()
-            return await self._loop()
+    # A job is started the way a chat turn is; ``config.mode`` is what makes
+    # it run until finish(result).
+    run_job = send
+    arun_job = asend
 
     def interrupt(self) -> None:
         self._interrupted = True
@@ -241,13 +247,13 @@ class Session:
     def branch(self, *, at_message: Optional[int] = None) -> tuple["Session", list[str]]:
         new_session = Session(
             self.llm, kernel=self._kernel_text, config=copy.deepcopy(self.config), registry=self.registry,
-            embedder=getattr(self.search, "embedder", None),
+            embedder=self.search.embedder,
             spawn_llm_factory=self.spawn_llm_factory, policy=self.policy,
         )
         new_session.working_state = copy.deepcopy(self.working_state)
-        renderable = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
-        cut = len(renderable) if at_message is None else at_message
-        for event in renderable[:cut]:
+        events = [event for event, _ in renderable(self.ledger, self.run.id)]
+        cut = len(events) if at_message is None else at_message
+        for event in events[:cut]:
             new_session.ledger.append(new_session.run.id, event.type, dict(event.data))
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
@@ -290,7 +296,7 @@ class Session:
 
         old_run_id = self.run.id
         self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
-        if self.run.state not in ("COMPLETED", "FAILED", "CANCELLED"):
+        if self.run.state not in TERMINAL_STATES:
             self.run.cancel(f"rewound to turn {to_turn}")
 
         self.run = Run(new_id("run"), self.session_id, self.ledger)
@@ -334,12 +340,12 @@ class Session:
 
     @classmethod
     def resume_from_ledger(
-        cls, llm: LLMAdapter, run_id: str, *, config: Optional[Config] = None,
-        registry: Optional[Registry] = None, policy: Optional[PolicyEngine] = None,
-        embedder: Optional[EmbeddingBackend] = None,
-        spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
-        on_event: Optional[Callable[[Event], None]] = None,
+        cls, llm: LLMAdapter, run_id: str, *, config: Optional[Config] = None, **session_args: Any,
     ) -> "Session":
+        """Continue a persisted run in a new process. ``session_args`` are
+        :class:`Session`'s own (``kernel``, ``registry``, ``policy``,
+        ``sections``, ``builtins``, ...): they are code, not state, so the
+        caller passes what the first process passed."""
         config = config or Config()
         if not config.persistence.ledger_directory:
             raise RunStateError("resume_from_ledger requires config.persistence.ledger_directory")
@@ -347,42 +353,19 @@ class Session:
         snapshot = ledger.load_snapshot(run_id)
         if snapshot is None:
             raise RunStateError(f"No snapshot found for run {run_id!r}; nothing to resume")
-
-        session = cls(
-            llm, config=config, registry=registry, policy=policy, embedder=embedder,
-            spawn_llm_factory=spawn_llm_factory, ledger=ledger, on_event=on_event,
-        )
-        session.run = Run.from_snapshot_state(run_id, session.ledger, snapshot.state)
-        session.session_id = snapshot.state.get("session_id", session.session_id)
-        session.working_state = WorkingState.from_dict(snapshot.state.get("working_state") or {})
-        for event in ledger.iter_run(run_id, after=snapshot.sequence):
-            if event.type == "checklists_changed":
-                session.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
-        budget_data = snapshot.state.get("budget") or {}
-        session.budget = BudgetState(
-            steps=budget_data.get("steps", 0), prompt_tokens=budget_data.get("prompt_tokens", 0),
-            completion_tokens=budget_data.get("completion_tokens", 0), cost=budget_data.get("cost", 0.0),
-        )
-        session.store = ArtifactStore(
-            session.run.id, directory=Path(config.artifacts.directory) if config.artifacts.directory else None,
-        )
-        return session
+        return cls(llm, config=config, ledger=ledger, _restored=snapshot, **session_args)
 
     def _snapshot(self) -> None:
         state = {
-            "session_id": self.session_id,
             "working_state": self.working_state.to_dict(),
-            "budget": {
-                "steps": self.budget.steps, "prompt_tokens": self.budget.prompt_tokens,
-                "completion_tokens": self.budget.completion_tokens, "cost": self.budget.cost,
-            },
+            "budget": self.budget.to_dict(),
             **self.run.to_snapshot_state(),
         }
         self.ledger.save_snapshot(Snapshot(
             run_id=self.run.id, sequence=self.ledger.last_sequence(self.run.id), ts=time.time(), state=state,
         ))
 
-    # -- concurrency guard (P0-4) ---------------------------------------------
+    # -- concurrency guard ---------------------------------------------
 
     def _guarded(self):
         if self._lock.locked():
@@ -400,20 +383,18 @@ class Session:
                 self._interrupted = False
                 self.ledger.append(self.run.id, "run_state_changed",
                                     {"from": self.run.state, "to": self.run.state, "reason": "interrupted"})
-                return self._last_assistant_text() or "[interrupted]"
+                return self._last_text(ASSISTANT) or "[interrupted]"
 
             stop = self._enforce_budget()
             if stop is not None:
                 self._snapshot()
                 return stop
 
-            ctx = self._context()
-            api_tools = self._api_tools(ctx)
-            ctx.dedupe_candidate_cards = self.config.projection.dedupe_candidate_cards_against_schemas
-            reserved = self.config.projection.reserved_output_tokens + self.config.projection.provider_overhead_tokens
-            messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
+            ctx, messages = self._project()
             if await self._fold(ctx, messages):
-                messages = self.projection.render(ctx, api_tools=api_tools, reserved_tokens=reserved)
+                # From scratch: shrinking the first rendering consumed its
+                # candidates and schemas, and the fold may have moved the goal.
+                ctx, messages = self._project()
             self.ledger.append(self.run.id, "projection_compiled", {
                 "tokens": estimate_tokens(messages), "messages": len(messages),
                 "candidates": [s.tool.name for s in ctx.candidates],
@@ -423,10 +404,9 @@ class Session:
             self.budget.note_decision(decision, messages, ctx.api_tools, self.config)
             for call in decision.calls:
                 call.name = self.registry.resolve_api_name(call.name)
-            self.budget.steps += 1
             self.ledger.append(self.run.id, "model_response", {
                 "text": decision.text, "finish": decision.finish,
-                "calls": [{"name": c.name, "arguments": c.arguments, "id": c.id} for c in decision.calls],
+                "calls": [c.to_dict() for c in decision.calls],
             })
 
             if decision.finish and decision.calls:
@@ -468,6 +448,15 @@ class Session:
             if batch.halted:
                 return self._pending
 
+    def _project(self) -> tuple[TurnContext, list[Message]]:
+        ctx = self._context()
+        cfg = self.config.projection
+        messages = self.projection.render(
+            ctx, api_tools=self._api_tools(ctx),
+            reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens,
+        )
+        return ctx, messages
+
     async def _fold(self, ctx: TurnContext, messages: list[Message]) -> bool:
         """Compaction: when the prompt exceeds ``compaction.trigger_ratio`` of
         the window, fold history older than the full-fidelity window into the
@@ -479,19 +468,15 @@ class Session:
         used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
         if used <= ratio * self.config.projection.window_tokens:
             return False
-        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
+        history = renderable(self.ledger, self.run.id)
         keep = self.config.compression.full_window
-        foldable = [e for e in events[:max(0, len(events) - keep)] if e.sequence > self.working_state.folded_sequence]
+        foldable = [(e, m) for e, m in history[:max(0, len(history) - keep)]
+                    if e.sequence > self.working_state.folded_sequence]
         if not foldable:
             return False
-        lines = []
-        for e in foldable:
-            m = event_to_message(e)
-            if m is not None:
-                lines.append(f"{m['role']}: {m.get('content', '')}")
+        lines = [f"{m.role}: {m.content}" for _, m in foldable]
         prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content="\n".join(lines))]
         decision = await self.llm.complete(prompt)
-        self.budget.steps += 1
         self.budget.note_decision(decision, prompt, [], self.config)
         delta = parse_fold_reply(decision.text)
         before = self.working_state.to_dict()
@@ -499,7 +484,7 @@ class Session:
         if error is not None:
             self._notice(f"[runtime] compaction skipped: {error}")
             return False
-        self.working_state.folded_sequence = foldable[-1].sequence
+        self.working_state.folded_sequence = foldable[-1][0].sequence
         self.ledger.append(self.run.id, "state_folded", {
             "through_sequence": self.working_state.folded_sequence, "before": before, "delta": delta,
         })
@@ -530,10 +515,10 @@ class Session:
             self._notice(f"[runtime] Budget exceeded: {reason}. Wrap up now with a final answer{hint}.")
             return None
         if self.config.mode == "job":
-            if self.run.state not in ("COMPLETED", "FAILED", "CANCELLED"):
+            if self.run.state not in TERMINAL_STATES:
                 self.run.fail(f"budget_stop: {reason}")
-            return self.run.result if self.run.result is not None else self._last_assistant_text()
-        return self._last_assistant_text() or "[budget exhausted]"
+            return self.run.result if self.run.result is not None else self._last_text(ASSISTANT)
+        return self._last_text(ASSISTANT) or "[budget exhausted]"
 
     def _context(self) -> TurnContext:
         return TurnContext(
@@ -561,17 +546,10 @@ class Session:
         return parts
 
     def _last_text(self, role: str) -> str:
-        events = [e for e in self.ledger.iter_run(self.run.id) if e.type in RENDERABLE_TYPES]
-        for event in reversed(events):
-            msg_dict = event_to_message(event)
-            if msg_dict and msg_dict.get("role") == role:
-                content = msg_dict.get("content", "")
-                if isinstance(content, str) and content:
-                    return content
+        for _, message in reversed(renderable(self.ledger, self.run.id)):
+            if message.role == role and isinstance(message.content, str) and message.content:
+                return message.content
         return ""
-
-    def _last_assistant_text(self) -> str:
-        return self._last_text(ASSISTANT)
 
     def _api_tools(self, ctx: TurnContext) -> list[dict]:
         names: "OrderedDict[str, None]" = OrderedDict()
@@ -621,8 +599,4 @@ class Session:
         self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
 
 
-class _Continue:
-    """Sentinel: the loop should keep going."""
-
-
-_CONTINUE = _Continue()
+_CONTINUE = object()  # sentinel: the loop should keep going

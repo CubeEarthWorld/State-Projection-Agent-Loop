@@ -1,7 +1,7 @@
 """Identifiers: dependency-free ULIDs with typed, human-readable prefixes.
 
 Every entity that appears in the Event Ledger carries a prefixed ULID
-(``ses_``, ``run_``, ``evt_``, ``cmd_``, ``apr_``, ``art_``). ULIDs are
+(``ses_``, ``run_``, ``evt_``, ``cmd_``, ``apr_``, ``art_``, ``call_``). ULIDs are
 lexicographically sortable by creation time, which keeps ledger files and
 directory listings naturally ordered without a separate index.
 
@@ -57,6 +57,7 @@ _PREFIXES = {
     "approval": "apr",
     "artifact": "art",
     "question": "qst",
+    "call": "call",
 }
 
 

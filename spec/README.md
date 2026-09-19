@@ -18,6 +18,11 @@ Each of the divergences these fixtures cover (two different content hashes,
 two glob dialects, two truncation rules, two JSON separator styles) reached
 production unnoticed because nothing compared the two implementations.
 
+`projection.json` is one whole turn exactly as the model receives it
+(messages and native tool schemas): no change to either package may alter a
+byte of it unnoticed. `checklists_v1.json` is the checklist wire format, the
+one fixture here that is authored by hand rather than generated.
+
 ## Bundled tool definitions
 
 The definitions of the capabilities this package bundles (`meta.*`,

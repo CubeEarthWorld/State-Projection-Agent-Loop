@@ -13,7 +13,7 @@ import json
 import re
 from typing import Any, Optional
 
-from .runtime import validate_value
+from .json_schema import validate_value
 from .working_state import RecordedDecision, WorkingState
 
 _ITEM = {"type": "string", "maxLength": 500}

@@ -1,4 +1,4 @@
-"""Capabilities: versioned execution contracts (replaces the old ``ToolDef``).
+"""Capabilities: versioned execution contracts.
 
 A Capability is not just a function signature — it is a full contract the
 runtime and policy engine can reason about *without* running the handler:
@@ -25,6 +25,7 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from .context import ToolContext
 from .serialization import dumps
 
 # ---------------------------------------------------------------------------
@@ -53,49 +54,12 @@ class Effect:
         if self.kind not in EFFECT_KINDS:
             raise ValueError(f"Effect.kind must be one of {EFFECT_KINDS}, got {self.kind!r}")
 
+    def to_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "resource": self.resource}
 
-# ---------------------------------------------------------------------------
-# Tool context (injected into handlers that declare a `ctx` parameter)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ToolContext:
-    """What a tool handler receives.
-
-    A handler opts in by declaring a first parameter named ``ctx`` (or
-    annotated with ``ToolContext``); it is excluded from the JSON schema and
-    injected by the runtime with ``command_id`` set. ``command_id`` is stable
-    across retries of the *same* logical attempt and is the correct
-    idempotency key to hand to an external API. Fields are typed ``Any`` only
-    to avoid circular imports; they hold the session's Config, Registry,
-    EventLedger, Run, WorkingState, ArtifactStore and ToolSearch.
-
-    Sections render from the superset :class:`~state_projection_loop.projection.TurnContext`;
-    the runtime narrows it with :meth:`for_command` before a handler runs, so
-    projection state never reaches a tool.
-    """
-
-    config: Any = None
-    registry: Any = None
-    ledger: Any = None
-    run: Any = None
-    working_state: Any = None
-    session: Any = None
-    store: Any = None
-    search: Any = None
-    command_id: str = ""
-
-    @property
-    def run_id(self) -> str:
-        return self.run.id if self.run is not None else ""
-
-    def for_command(self, command_id: str) -> "ToolContext":
-        """The handler-facing view of this context for one command."""
-        return ToolContext(
-            config=self.config, registry=self.registry, ledger=self.ledger, run=self.run,
-            working_state=self.working_state, session=self.session, store=self.store,
-            search=self.search, command_id=command_id,
-        )
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Effect":
+        return cls(kind=d.get("kind", "none"), resource=d.get("resource", "*"))
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +70,7 @@ class ToolContext:
 class CapabilityCard:
     summary: str = ""
     tags: list[str] = field(default_factory=list)
-    signature: str = ""  # derived by Capability.derive_card(); never authored
+    signature: str = ""  # derived from the name and parameters; never authored
 
 
 @dataclass
@@ -241,10 +205,24 @@ class Capability:
     discovery: CapabilityDiscovery = field(default_factory=CapabilityDiscovery)
     execution: CapabilityExecution = field(default_factory=CapabilityExecution)
     effects: list[Effect] = field(default_factory=list)
-    wants_ctx: bool = False
 
     def __post_init__(self) -> None:
         validate_capability_name(self.name)
+        self._derive_card()
+
+    @property
+    def planned_effects(self) -> list[Effect]:
+        """The effects the policy engine and the runtime reason about. A
+        capability that declares none is NOT assumed safe — that would reward
+        an author who forgot to declare effects with maximum trust and free
+        parallel execution — so it counts as the most restrictive kind."""
+        return self.effects or [Effect(kind="external", resource="undeclared:*")]
+
+    @property
+    def wants_ctx(self) -> bool:
+        """Derived from the handler it describes, so it cannot go stale when
+        a handler is attached after construction."""
+        return _handler_wants_ctx(self.execution.handler)
 
     @property
     def qualified_name(self) -> str:
@@ -298,13 +276,7 @@ class Capability:
                 preview=op_d.get("preview", "head"),
             ),
         )
-        if execution.handler is None and callable(exe_d.get("handler")):
-            execution.handler = exe_d["handler"]
-        effects = [
-            Effect(kind=e.get("kind", "none"), resource=e.get("resource", "*"))
-            for e in (data.get("effects") or [])
-        ]
-        cap = cls(
+        return cls(
             name=data["name"],
             version=int(data.get("version", 1)),
             category=data.get("category", ""),
@@ -312,13 +284,10 @@ class Capability:
             spec=spec,
             discovery=discovery,
             execution=execution,
-            effects=effects,
+            effects=[Effect.from_dict(e) for e in (data.get("effects") or [])],
         )
-        cap.derive_card()
-        cap.wants_ctx = _handler_wants_ctx(cap.execution.handler)
-        return cap
 
-    def derive_card(self) -> None:
+    def _derive_card(self) -> None:
         if not self.card.summary:
             self.card.summary = _first_sentence(self.spec.description) or self.name
         # The signature is always derived, never authored: it is the one
@@ -330,12 +299,9 @@ class Capability:
 
     def card_text(self) -> str:
         """~30-token one-liner: enough to call the capability directly."""
-        sig = self.card.signature or self.name
-        return f"- {sig} — {self.card.summary}"
+        return f"- {self.card.signature} — {self.card.summary}"
 
     def spec_text(self) -> str:
-        import json as _json
-
         lines = [f"### {self.qualified_name}", self.card.signature]
         if self.spec.description:
             lines.append(self.spec.description)
@@ -499,15 +465,15 @@ def build_capability_from_function(
     except Exception:
         hints = {}
     sig = inspect.signature(fn)
+    wants_ctx = _handler_wants_ctx(fn)
     properties: dict[str, Any] = {}
     required: list[str] = []
     for i, (pname, param) in enumerate(sig.parameters.items()):
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        ann = hints.get(pname, param.annotation)
-        if i == 0 and (pname == "ctx" or ann is ToolContext):
+        if i == 0 and wants_ctx:
             continue
-        schema = _hint_to_schema(ann)
+        schema = _hint_to_schema(hints.get(pname, param.annotation))
         if pname in param_docs:
             schema = {**schema, "description": param_docs[pname]}
         if param.default is inspect.Parameter.empty:
@@ -519,37 +485,21 @@ def build_capability_from_function(
     if required:
         parameters["required"] = required
 
-    data: dict[str, Any] = {
-        "name": name or fn.__name__.replace("_", "."),
-        "version": version,
-        "category": category,
-        "card": {"summary": summary or _first_sentence(description), "tags": tags or []},
-        "spec": {
-            "description": description,
-            "parameters": parameters,
-            "usage_notes": usage_notes,
-            "examples": examples or [],
-        },
-        "discovery": {
-            "pinned": pinned,
-            "require_spec": require_spec,
-            "embedding_text": embedding_text,
-            "no_embed": no_embed,
-            "kernel_note": kernel_note,
-        },
-        "execution": {
-            "timeout_s": timeout_s,
-            "retries": retries,
-            "retry_safety": retry_safety,
-            "output_policy": {
-                "max_inline_tokens": max_inline_tokens,
-                "overflow": overflow,
-                "preview": preview,
-            },
-        },
-        "effects": [{"kind": k, "resource": r} for k, r in (effects or [])],
-    }
-    return Capability.from_dict(data, handler=fn)
+    return Capability(
+        name=name or fn.__name__.replace("_", "."),
+        version=version,
+        category=category,
+        card=CapabilityCard(summary=summary or _first_sentence(description), tags=tags or []),
+        spec=CapabilitySpec(description=description, parameters=parameters, usage_notes=usage_notes,
+                            examples=examples or []),
+        discovery=CapabilityDiscovery(pinned=pinned, require_spec=require_spec, embedding_text=embedding_text,
+                                      no_embed=no_embed, kernel_note=kernel_note),
+        execution=CapabilityExecution(
+            handler=fn, timeout_s=timeout_s, retries=retries, retry_safety=retry_safety,
+            output_policy=OutputPolicy(max_inline_tokens=max_inline_tokens, overflow=overflow, preview=preview),
+        ),
+        effects=[Effect(kind=k, resource=r) for k, r in (effects or [])],
+    )
 
 
 def capability(fn: Optional[Callable[..., Any]] = None, /, **kwargs: Any):

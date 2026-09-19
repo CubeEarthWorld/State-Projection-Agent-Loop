@@ -16,29 +16,16 @@ nothing can give back more.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .capability import ToolContext
+from .context import TurnContext
 from .compression import compress_text, summarize_text
-from .events import RENDERABLE_TYPES, event_to_message
+from .events import renderable
 from .llm import FINISH_NAME
 from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM
 from .registry import Registry
 from .tokens import estimate_tokens
 from .serialization import dumps
-
-
-@dataclass
-class TurnContext(ToolContext):
-    """What a section renders from: the handler context plus this turn's
-    projection state. ``api_tools`` is the list of native schemas that will
-    be sent; sections may drop entries from it while shrinking, and the
-    session sends whatever is left."""
-
-    candidates: list[Any] = field(default_factory=list)  # list[ScoredTool]
-    api_tools: list[dict[str, Any]] = field(default_factory=list)
-    dedupe_candidate_cards: bool = False
 
 
 def _schema_name(schema: dict[str, Any]) -> Any:
@@ -126,7 +113,7 @@ class KernelSection(Section):
         if key != self._cached_key:
             self._rebuild(ctx.registry, ctx.config.mode)
             self._cached_key = key
-        native_names = {t.get("function", {}).get("name") for t in ctx.api_tools}
+        native_names = {_schema_name(t) for t in ctx.api_tools}
         if ctx.api_tools and self._pinned_api_names <= native_names:
             return list(self._native_messages)
         return list(self._messages)
@@ -194,34 +181,25 @@ class HistorySection(Section):
 
     def render(self, ctx: TurnContext) -> list[Message]:
         cfg = ctx.config.compression
-        events = [e for e in ctx.ledger.iter_run(ctx.run_id) if e.type in RENDERABLE_TYPES]
-        if not events:
-            return []
-
-        n = len(events)
+        history = renderable(ctx.ledger, ctx.run_id)
         messages: list[Message] = []
-        for i, event in enumerate(events):
-            age = n - 1 - i
-            msg_dict = event_to_message(event)
-            if msg_dict is None:
-                continue
-            content = msg_dict.get("content", "")
+        for i, (event, message) in enumerate(history):
+            age = len(history) - 1 - i
+            content = message.content
             if isinstance(content, str) and content:
                 if event.sequence <= ctx.working_state.folded_sequence:
                     content = summarize_text(content)  # folded into the working state
                 elif age < cfg.full_window:
                     pass
                 elif age < cfg.compressed_window:
-                    if msg_dict["role"] == OBSERVATION:
-                        content = compress_text(content, max_lines=cfg.observation_max_lines)
-                    else:
-                        content = compress_text(content, max_lines=cfg.compressed_max_lines)
+                    content = compress_text(content, max_lines=(
+                        cfg.observation_max_lines if message.role == OBSERVATION else cfg.compressed_max_lines))
                 elif age < cfg.summary_window:
                     content = summarize_text(content)
                 else:
                     continue
-                msg_dict = {**msg_dict, "content": content}
-            messages.append(Message.from_dict(msg_dict))
+                message.content = content
+            messages.append(message)
         return pair_tool_calls(messages)
 
     def shrink(self, ctx: TurnContext, current: list[Message]) -> Optional[list[Message]]:
@@ -231,6 +209,22 @@ class HistorySection(Section):
         while i < len(current) and current[i].role == OBSERVATION:
             i += 1
         return pair_tool_calls(current[i:])
+
+
+class WorkingStateSection(Section):
+    """Projects the working state each turn (volatile — always near the tail)."""
+
+    name = "working_state"
+
+    def __init__(self, *, max_tokens: int = 800) -> None:
+        self.max_tokens = max_tokens
+
+    def render(self, ctx: TurnContext) -> list[Message]:
+        ws = ctx.working_state
+        if ws.is_empty():
+            return []
+        body = ws.render(max_tokens=self.max_tokens)
+        return [Message(role=SYSTEM, content="[Working state]\n" + body)] if body else []
 
 
 class ChecklistSection(Section):
@@ -264,8 +258,8 @@ class CandidatesSection(Section):
     def render(self, ctx: TurnContext) -> list[Message]:
         if not ctx.candidates:
             return []
-        if ctx.dedupe_candidate_cards and ctx.api_tools:
-            lines = [s.tool.card.signature or s.tool.name for s in ctx.candidates]
+        if ctx.config.projection.dedupe_candidate_cards_against_schemas and ctx.api_tools:
+            lines = [s.tool.card.signature for s in ctx.candidates]
             header = "[Tool candidates — auto-selected for this turn; schemas sent natively]"
         else:
             lines = [s.tool.card_text() for s in ctx.candidates]
@@ -361,8 +355,6 @@ def build_default_sections(
     *,
     kernel_text: str,
 ) -> list[Section]:
-    from .working_state import WorkingStateSection
-
     factories = {
         "kernel": lambda: KernelSection(kernel_text),
         "toc": TocSection,

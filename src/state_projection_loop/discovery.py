@@ -1,9 +1,9 @@
 """Tool discovery search engine, shared by layer 2 (auto candidates) and
-layer 3 (find_tools) — spec §5, §9.
+layer 3 (``meta.tool.find``).
 
 Pure computation: no LLM is ever involved. Scoring mixes vector similarity,
 BM25 lexical match, and tag/name match. With vectors disabled or
-unavailable, weights renormalize over the remaining components (§9).
+unavailable, weights renormalize over the remaining components.
 """
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ class ToolSearch:
     ) -> list[ScoredTool]:
         """Rank tools for a natural-language query.
 
-        ``layer=2`` (auto candidates) excludes ``no_embed`` tools (§4.2);
+        ``layer=2`` (auto candidates) excludes ``no_embed`` tools;
         ``layer=3`` (find_tools) searches everything.
         """
         self._ensure_index()

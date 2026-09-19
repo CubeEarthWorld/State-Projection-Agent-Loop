@@ -1,6 +1,6 @@
 """Customer-support scenario toolkit.
 
-A realistic web-support agent built purely from tool registration (§1):
+A realistic web-support agent built purely from tool registration:
 manual search, human escalation (records the full transcript), and an
 artifact-style chart card. ``SupportBackend`` is an in-memory stand-in for
 a real datastore (e.g. Firestore) and also aggregates the usage metrics a
@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from state_projection_loop import Registry, ToolContext
+from state_projection_loop import Registry, Session, ToolContext
+from state_projection_loop.policy import Rule
 
 MANUALS_DIR = Path(__file__).parent / "manuals"
 
@@ -233,3 +234,12 @@ SUPPORT_KERNEL = """あなたは家電メーカーのカスタマーサポート
   support.ticket.escalate で担当者へ引き継ぐ。
 - 数値の比較や推移を示すときは support.chart.render でチャートカードを表示できる。
 - 丁寧な日本語で簡潔に答える。答え終えたら finish(result) を呼ぶ。"""
+
+
+def make_session(llm, backend: SupportBackend, **session_args) -> Session:
+    """The support agent. Escalation and chart rendering are its two effectful
+    actions; the whole ``support.*`` namespace is granted so a demo does not
+    stop to ask for approval on every reply."""
+    session = Session(llm, kernel=SUPPORT_KERNEL, registry=build_support_registry(backend), **session_args)
+    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="support.*"))
+    return session

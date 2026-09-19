@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Iterator, Optional, Protocol, runtime_checkable
 
-from .capability import Capability, from_api_name
+from .capability import Capability, build_capability_from_function, from_api_name
 
 
 @runtime_checkable
@@ -76,9 +76,7 @@ class Registry:
         if cap.qualified_name in self._capabilities and not replace:
             raise ValueError(f"Capability {cap.qualified_name!r} is already registered (use replace=True)")
         self._capabilities[cap.qualified_name] = cap
-        current = self._latest.get(cap.name)
-        if current is None or self._capabilities[current].version < cap.version:
-            self._latest[cap.name] = cap.qualified_name
+        self._track_latest(cap)
         self._epoch += 1
         return cap
 
@@ -99,9 +97,12 @@ class Registry:
     def _recompute_latest(self) -> None:
         self._latest = {}
         for cap in self._capabilities.values():
-            current = self._latest.get(cap.name)
-            if current is None or self._capabilities[current].version < cap.version:
-                self._latest[cap.name] = cap.qualified_name
+            self._track_latest(cap)
+
+    def _track_latest(self, cap: Capability) -> None:
+        current = self._latest.get(cap.name)
+        if current is None or self._capabilities[current].version < cap.version:
+            self._latest[cap.name] = cap.qualified_name
 
     @staticmethod
     def _coerce(capability: Any, handler: Optional[Callable[..., Any]] = None) -> Capability:
@@ -114,8 +115,6 @@ class Registry:
         if callable(capability):
             cap = getattr(capability, "__spal_capability__", None)
             if cap is None:
-                from .capability import build_capability_from_function
-
                 cap = build_capability_from_function(capability)
             return cap
         raise TypeError(f"Cannot register {capability!r} as a capability")

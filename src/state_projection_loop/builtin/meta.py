@@ -12,15 +12,15 @@ import copy
 from typing import Any, Optional
 
 from ..artifacts import is_ref
-from ..capability import ToolContext
-from ..registry import Registry
+from ..context import ToolContext
+from ..serialization import dumps
 
 
 def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k: int = 8) -> Any:
     results = ctx.search.search(query, category=category, k=k, layer=3)
     if not results:
         toc = ctx.registry.toc_text()
-        return f"No tools matched {query!r}. Categories: {toc or '(none)'}"
+        return f"No tools matched \"{query}\". Categories: {toc or '(none)'}"
     if ctx.session is not None:
         ctx.session.activate([s.tool.name for s in results])
     return [
@@ -31,7 +31,7 @@ def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k:
 
 def _peek(ctx: ToolContext, artifact: dict, query: Optional[str] = None, range: Optional[str] = None) -> str:  # noqa: A002
     if not is_ref(artifact):
-        return f"Error: {artifact!r} is not a valid artifact reference; expected {{'$artifact': '<id>'}}"
+        return f'Error: {dumps(artifact)} is not a valid artifact reference; expected {{"$artifact": "<id>"}}'
     return ctx.store.peek(artifact["$artifact"], query=query, range_=range)
 
 
@@ -46,7 +46,7 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
             hits.append(f"[{event.sequence}] {event.type}: {blob[:300]}")
             if len(hits) >= k:
                 break
-    return hits or [f"No ledger events matched {query!r}."]
+    return hits or [f"No ledger events matched \"{query}\"."]
 
 
 async def _spawn(
@@ -65,11 +65,10 @@ async def _spawn(
         raise ValueError("Duplicate checklist_ids")
     llm = parent.spawn_llm_factory(model) if parent.spawn_llm_factory else parent.llm
 
-    child_registry = parent.registry.subset(tool_scope) if tool_scope else Registry()
-    if not tool_scope:
-        for cap in parent.registry:
-            if cap.name != "meta.agent.spawn":  # no recursive swarm by default
-                child_registry.register(cap, replace=True)
+    # No scope means everything but spawn itself (no recursive swarm by
+    # default). Always a subset(), so the parent's deny-list carries over.
+    child_registry = parent.registry.subset(
+        tool_scope or [c.name for c in parent.registry if c.name != "meta.agent.spawn"])
 
     child_config = copy.deepcopy(parent.config)
     child_config.mode = "job"
@@ -81,7 +80,7 @@ async def _spawn(
         kernel=kernel or "You are a focused sub-agent. Complete the task, then call finish(result) with the outcome.",
         config=child_config,
         registry=child_registry,
-        embedder=getattr(parent.search, "embedder", None),
+        embedder=parent.search.embedder,
         seed={"checklists": {"version": 1, "checklists": documents}},
         policy=parent.policy,
     )

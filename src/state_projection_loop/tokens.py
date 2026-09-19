@@ -1,4 +1,4 @@
-"""Token estimation utilities (spec §3.3, §13).
+"""Token estimation utilities.
 
 Budgets are enforced against a conservative estimate, never an exact
 tokenizer count. The estimator is pluggable via :func:`set_estimator` so a
@@ -10,7 +10,6 @@ for Japanese, which keeps budget enforcement on the safe side.
 """
 from __future__ import annotations
 
-import json
 import math
 from typing import Any, Callable
 
@@ -71,3 +70,17 @@ def estimate_tokens(obj: Any) -> int:
     if isinstance(obj, dict):
         return _estimator(dumps(obj))
     return _estimator(str(obj))
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """The longest prefix of ``text`` that fits ``max_tokens``."""
+    if estimate_tokens(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if estimate_tokens(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]

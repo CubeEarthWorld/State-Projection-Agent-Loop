@@ -9,7 +9,6 @@ editing a JSON file to match new behaviour.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from state_projection_loop.compression import (
     strip_noise,
     summarize_text,
 )
+from state_projection_loop.policy import glob_match
 from state_projection_loop.serialization import dumps
 from state_projection_loop.tokens import estimate_tokens
 
@@ -57,7 +57,7 @@ class TestCompression:
 class TestPolicyGlob:
     @pytest.mark.parametrize("case", cases("policy_glob", "glob_match"))
     def test_glob_match(self, case):
-        assert fnmatch.fnmatchcase(case["value"], case["pattern"]) is case["expected"]
+        assert glob_match(case["value"], case["pattern"]) is case["expected"]
 
 
 class TestCapability:
@@ -78,6 +78,19 @@ class TestSerialization:
     @pytest.mark.parametrize("case", cases("serialization", "estimate_tokens"))
     def test_estimate_tokens(self, case):
         assert estimate_tokens(case["value"]) == case["expected"]
+
+
+class TestProjection:
+    """One whole turn as the model receives it, shared with the Dart port:
+    no refactor of either package may change a byte of it."""
+
+    def test_projection_matches_the_golden_turn(self):
+        import sys
+
+        sys.path.insert(0, str(FIXTURES.parent))
+        from generate_fixtures import projection_scenario
+
+        assert projection_scenario() == load("projection")
 
 
 class TestBundledDefinitions:
@@ -111,12 +124,12 @@ class TestValidation:
 
     @pytest.mark.parametrize("case", cases("validation", "validate_args"))
     def test_validate_args(self, case):
-        from state_projection_loop.runtime import validate_args
+        from state_projection_loop.json_schema import validate_args
 
         assert validate_args(case["schema"], case["arguments"]) == case["expected"]
 
     @pytest.mark.parametrize("case", cases("validation", "apply_defaults"))
     def test_apply_defaults(self, case):
-        from state_projection_loop.runtime import apply_defaults
+        from state_projection_loop.json_schema import apply_defaults
 
         assert apply_defaults(case["schema"], case["arguments"]) == case["expected"]

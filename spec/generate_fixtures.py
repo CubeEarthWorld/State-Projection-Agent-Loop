@@ -10,7 +10,6 @@ paper over an unexplained diff.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 import sys
 from pathlib import Path
@@ -25,7 +24,8 @@ from state_projection_loop.compression import (  # noqa: E402
     strip_noise,
     summarize_text,
 )
-from state_projection_loop.runtime import apply_defaults, validate_args  # noqa: E402
+from state_projection_loop.policy import glob_match  # noqa: E402
+from state_projection_loop.json_schema import apply_defaults, validate_args  # noqa: E402
 from state_projection_loop.serialization import dumps  # noqa: E402
 from state_projection_loop.tokens import estimate_tokens  # noqa: E402
 
@@ -82,6 +82,53 @@ VALIDATION = [
     ({"type": "object", "properties": {"a": {"type": "string", "default": "d"}}}, {}),
 ]
 
+def projection_scenario() -> dict:
+    """One whole turn, as the model receives it: the pin that a refactor of
+    either port changed no model-visible text. Ids are given, so the output
+    is deterministic."""
+    from state_projection_loop import Config, Registry, ScriptedLLM, Session
+    from state_projection_loop.messages import Decision, ToolCall
+    from state_projection_loop.policy import PolicyEngine
+
+    def cap(name, **kw):
+        return {"name": name, "category": kw.pop("category", "demo"),
+                "spec": {"description": kw.pop("description"), "parameters": kw.pop("parameters")},
+                "discovery": kw, "effects": [{"kind": "read", "resource": "workspace:*"}]}
+
+    warehouse = {"type": "object", "properties": {"warehouse": {"type": "string"}}, "required": ["warehouse"]}
+    registry = Registry()
+    registry.register(cap("demo.echo.say", description="Echo the text back. Useful for tests.",
+                          parameters={"type": "object", "properties": {"text": {"type": "string", "default": "hi"}}},
+                          pinned=True, kernel_note="Use demo.echo.say to repeat text."),
+                      handler=lambda text="hi": f"echo: {text}")
+    registry.register(cap("inventory.stock.get", category="inventory", description="在庫数を返す。Returns the stock count.",
+                          parameters=warehouse, embedding_text="在庫 stock warehouse inventory"),
+                      handler=lambda warehouse: {"warehouse": warehouse, "stock": 42})
+    registry.register(cap("inventory.stock.audit", category="inventory", description="Audit the stock of a warehouse.",
+                          parameters=warehouse, require_spec=True),
+                      handler=lambda warehouse: "audited")
+    llm = ScriptedLLM([
+        Decision(text="checking", calls=[ToolCall(name="inventory.stock.get", arguments={"warehouse": "tokyo"}, id="c1"),
+                                         ToolCall(name="inventory.stock.audit", arguments={"warehouse": 7}, id="c2")]),
+        ScriptedLLM.finish(result="42"),
+    ])
+    session = Session(llm, kernel="You are a stock agent.", registry=registry,
+                      config=Config.from_dict({"mode": "job"}), policy=PolicyEngine(default_decision="allow"),
+                      seed={"goal": "report tokyo stock", "confirmed_facts": ["tokyo is a warehouse"],
+                            "decisions": [{"text": "use inventory tools", "reason": "they are authoritative"}],
+                            "flags": {"urgent": True}})
+    session.run_job("How much stock does the tokyo warehouse have?")
+    request = llm.requests[-1]
+    return {
+        "messages": [
+            {"role": m.role, "content": m.content, "tool_call_id": m.tool_call_id, "name": m.name,
+             "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in m.tool_calls]}
+            for m in request["messages"]
+        ],
+        "tools": request["tools"],
+    }
+
+
 JSON_VALUES = [
     {"a": 1, "b": [1, 2, {"c": None}]},
     {"日本語": "🎌", "n": 1.5, "t": True},
@@ -106,7 +153,7 @@ def main() -> None:
 
     (out / "policy_glob.json").write_text(json.dumps({
         "glob_match": [
-            {"value": v, "pattern": p, "expected": fnmatch.fnmatchcase(v, p)}
+            {"value": v, "pattern": p, "expected": glob_match(v, p)}
             for v, p in GLOBS
         ],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -137,6 +184,9 @@ def main() -> None:
         "dumps": [{"value": v, "expected": dumps(v)} for v in JSON_VALUES],
         "estimate_tokens": [{"value": t, "expected": estimate_tokens(t)} for t in TEXTS],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    (out / "projection.json").write_text(
+        json.dumps(projection_scenario(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"wrote {len(list(out.glob('*.json')))} fixture files to {out}")
 

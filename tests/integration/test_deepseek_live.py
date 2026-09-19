@@ -14,11 +14,12 @@ import os
 import pytest
 
 from state_projection_loop import Config, Registry, Session
-from state_projection_loop.policy import PolicyEngine
 
 from examples.coding_agent.tools import CODING_KERNEL, build_coding_registry, seed_workspace
 from examples.customer_support.tools import SUPPORT_KERNEL, SupportBackend, build_support_registry
 from examples.llm_adapters import OpenAICompatAdapter
+
+from _util import allow_all
 
 pytestmark = [
     pytest.mark.integration,
@@ -31,16 +32,7 @@ pytestmark = [
 
 
 def adapter(**kw) -> OpenAICompatAdapter:
-    return OpenAICompatAdapter(
-        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
-        api_key=os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"),
-        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-        temperature=kw.pop("temperature", 0.0), **kw,
-    )
-
-
-def allow_all() -> PolicyEngine:
-    return PolicyEngine(default_decision="allow")
+    return OpenAICompatAdapter.from_env(temperature=kw.pop("temperature", 0.0), **kw)
 
 
 class TestBasicChat:

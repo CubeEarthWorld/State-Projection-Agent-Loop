@@ -89,7 +89,7 @@ class TestDecorator:
         assert cap.execution.timeout_s == 5.0
 
     def test_optional_param_gets_default_and_ctx_excluded(self):
-        from state_projection_loop.capability import ToolContext
+        from state_projection_loop.context import ToolContext
 
         def handler(ctx: ToolContext, path: str, verbose: bool = False) -> str:
             return path
@@ -98,6 +98,29 @@ class TestDecorator:
         assert "ctx" not in cap.spec.parameters["properties"]
         assert cap.spec.parameters["properties"]["verbose"]["default"] is False
         assert cap.wants_ctx is True
+
+    def test_a_handler_attached_later_still_gets_its_context_whatever_it_calls_it(self):
+        import asyncio
+
+        from state_projection_loop import Config, Registry, Run, Runtime
+        from state_projection_loop.capability import Capability
+        from state_projection_loop.context import ToolContext
+        from state_projection_loop.events import InMemoryLedger
+        from state_projection_loop.artifacts import ArtifactStore
+        from state_projection_loop.messages import ToolCall
+        from state_projection_loop.policy import PolicyEngine
+
+        def handler(context: ToolContext) -> str:
+            return f"command {context.command_id[:4]}"
+
+        registry = Registry()
+        registry.register(Capability(name="demo.ctx.echo"), handler=handler)
+        ledger = InMemoryLedger()
+        run = Run("run_1", "ses_1", ledger)
+        ctx = ToolContext(registry=registry, ledger=ledger, run=run, store=ArtifactStore("run_1"))
+        batch = asyncio.run(Runtime(registry, Config()).execute(
+            [ToolCall(name="demo.ctx.echo")], ctx, run, PolicyEngine(default_decision="allow")))
+        assert batch.results[0].value == "command cmd_"
 
 
 class TestProjections:

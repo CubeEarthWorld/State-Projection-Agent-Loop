@@ -1,28 +1,20 @@
-"""Runtime: validation & self-repair, require_spec gate, ordering (P0-1),
-retry-safety-gated retries and OUTCOME_UNKNOWN (P0-2), output policy,
+"""Runtime: validation & self-repair, require_spec gate, ordering,
+retry-safety-gated retries and OUTCOME_UNKNOWN, output policy,
 budget arithmetic."""
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
-import pytest
 
 from state_projection_loop import Config, Registry, ToolCall
 from state_projection_loop.artifacts import ArtifactStore, ref
-from state_projection_loop.capability import ToolContext
+from state_projection_loop.context import ToolContext
 from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.run import Run
 from state_projection_loop.builtin import install_builtins
-from state_projection_loop.runtime import (
-    BudgetState,
-    Runtime,
-    _mini_validate,
-    apply_defaults,
-    validate_args,
-)
+from state_projection_loop.runtime import BudgetState, Runtime
 
 from _util import capability_dict, echo_handler
 
@@ -113,7 +105,7 @@ class TestRequireSpec:
 
 
 class TestOrdering:
-    """P0-1: calls execute in the model's stated order; only a contiguous
+    """Calls execute in the model's stated order; only a contiguous
     run of read-only capabilities may run concurrently."""
 
     def test_write_then_read_preserves_order(self):
@@ -141,19 +133,23 @@ class TestOrdering:
     def test_adjacent_read_only_calls_run_concurrently(self):
         reg = Registry()
 
-        async def slow(**kwargs: Any) -> str:
-            await asyncio.sleep(0.15)
+        started = 0
+
+        async def barrier(**kwargs: Any) -> str:
+            # Returns only once all three have started: run serially, the
+            # first would wait forever and hit its timeout instead.
+            nonlocal started
+            started += 1
+            while started < 3:
+                await asyncio.sleep(0)
             return "done"
 
         for name in ("demo.p1", "demo.p2", "demo.p3"):
-            reg.register(capability_dict(name, effects=[("read", "workspace:*")]), handler=slow)
+            reg.register(capability_dict(name, effects=[("read", "workspace:*")], timeout_s=5), handler=barrier)
         runtime, turn, ctx, run, policy = make_runtime(reg)
         calls = [ToolCall(name=n, arguments={}) for n in ("demo.p1", "demo.p2", "demo.p3")]
-        start = time.perf_counter()
         batch = run_batch(runtime, calls, turn, ctx, run, policy)
-        elapsed = time.perf_counter() - start
         assert all(r.ok for r in batch.results)
-        assert elapsed < 0.4  # 3 x 0.15s would be ~0.45s serially
 
     def test_write_breaks_the_parallel_streak(self):
         reg = Registry()
@@ -168,7 +164,7 @@ class TestOrdering:
 
 
 class TestRetrySafety:
-    """P0-2: retries are only permitted for pure/idempotent capabilities;
+    """Retries are only permitted for pure/idempotent capabilities;
     a timeout is OUTCOME_UNKNOWN, never silently 'failed'."""
 
     def test_timeout_is_outcome_unknown_not_failed(self):
@@ -330,51 +326,6 @@ class TestOutputPolicy:
             runtime, [ToolCall(name="demo.echo2", arguments={"data": record.id})], turn, ctx, run, policy,
         )
         assert batch.results[0].value == record.id  # literal string passed through
-
-
-class TestMiniValidator:
-    """The dependency-free fallback (used when jsonschema is absent)."""
-
-    SCHEMA = {
-        "type": "object",
-        "properties": {
-            "q": {"type": "string", "minLength": 2},
-            "n": {"type": "integer", "minimum": 1, "maximum": 10},
-            "mode": {"enum": ["a", "b"]},
-            "items": {"type": "array", "items": {"type": "string"}},
-            "opt": {"type": ["string", "null"]},
-        },
-        "required": ["q"],
-        "additionalProperties": False,
-    }
-
-    def test_accepts_valid(self):
-        assert _mini_validate(self.SCHEMA, {"q": "ok", "n": 5, "mode": "a",
-                                            "items": ["x"], "opt": None}) is None
-
-    @pytest.mark.parametrize("args,fragment", [
-        ({}, "required"),
-        ({"q": "ok", "n": "5"}, "expected type"),
-        ({"q": "ok", "n": 0}, "minimum"),
-        ({"q": "ok", "n": 11}, "maximum"),
-        ({"q": "x"}, "minLength"),
-        ({"q": "ok", "mode": "c"}, "not one of"),
-        ({"q": "ok", "items": ["x", 1]}, "expected type"),
-        ({"q": "ok", "zzz": 1}, "unexpected properties"),
-        ({"q": "ok", "n": True}, "expected type"),
-    ])
-    def test_rejects_invalid(self, args, fragment):
-        assert fragment in _mini_validate(self.SCHEMA, args)
-
-    def test_validate_args_agrees(self):
-        assert validate_args(self.SCHEMA, {"q": "ok"}) is None
-        assert validate_args(self.SCHEMA, {"q": 1}) is not None
-        assert validate_args(self.SCHEMA, "not a dict") is not None
-
-    def test_apply_defaults(self):
-        schema = {"type": "object", "properties": {"k": {"type": "integer", "default": 7}}}
-        assert apply_defaults(schema, {}) == {"k": 7}
-        assert apply_defaults(schema, {"k": 1}) == {"k": 1}
 
 
 class TestBudgetState:

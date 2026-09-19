@@ -1,4 +1,4 @@
-"""Run state machine: the unit of resumable execution (P1-2).
+"""Run state machine: the unit of resumable execution.
 
 A :class:`Run` is one job/conversation execution. Its state is not implicit
 in "is the Python object still alive" — it is an explicit, ledger-recorded
@@ -18,7 +18,7 @@ the timeout fired mid-flight (``unknown`` — never safe to blindly retry).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from .capability import Effect
@@ -47,10 +47,12 @@ class Command:
     result_ref: Optional[str] = None  # artifact id, when ok
     error: Optional[str] = None
 
+    def to_dict(self) -> dict[str, Any]:
+        return dict(vars(self))
+
     @classmethod
-    def new(cls, capability_name: str, arguments: dict[str, Any], retry_safety: str) -> "Command":
-        return cls(id=new_id("command"), capability_name=capability_name,
-                    arguments=arguments, retry_safety=retry_safety)
+    def from_dict(cls, d: dict[str, Any]) -> "Command":
+        return cls(**d)
 
 
 @dataclass
@@ -62,7 +64,13 @@ class ApprovalRequest:
     policy_revision: int
     expires_at: Optional[float] = None
     resolution: Optional[str] = None  # "approved" | "denied" | "expired" | None (pending)
-    resolved_at: Optional[float] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**vars(self), "effects": [e.to_dict() for e in self.effects]}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ApprovalRequest":
+        return cls(**{**d, "effects": [Effect.from_dict(e) for e in d["effects"]]})
 
     def is_expired(self, *, now: Optional[float] = None) -> bool:
         now = now if now is not None else time.time()
@@ -91,13 +99,11 @@ class PendingQuestion:
     answer: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "command_id": self.command_id, "call_id": self.call_id,
-                "text": self.text, "choices": self.choices, "answer": self.answer}
+        return dict(vars(self))
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "PendingQuestion":
-        return cls(id=d["id"], command_id=d["command_id"], call_id=d["call_id"], text=d["text"],
-                   choices=d.get("choices"), answer=d.get("answer"))
+        return cls(**d)
 
 
 class Run:
@@ -115,7 +121,7 @@ class Run:
         self.pending_approval: Optional[ApprovalRequest] = None
         # Kept around after resolve_approval() clears pending_approval, so
         # resume can find the exact command_id that was approved instead of
-        # minting a fresh one (P0-2: an approved command must keep its
+        # minting a fresh one (an approved command must keep its
         # idempotency key across the pause). The runtime clears it once consumed.
         self.last_resolved_approval: Optional[ApprovalRequest] = None
         self.pending_question: Optional[PendingQuestion] = None
@@ -151,7 +157,8 @@ class Run:
 
     def new_command(self, capability_name: str, arguments: dict[str, Any], retry_safety: str) -> Command:
         self._assert_not_terminal()
-        cmd = Command.new(capability_name, arguments, retry_safety)
+        cmd = Command(id=new_id("command"), capability_name=capability_name, arguments=arguments,
+                      retry_safety=retry_safety)
         self.commands[cmd.id] = cmd
         self.ledger.append(self.id, "command_started",
                             {"command_id": cmd.id, "capability": capability_name, "arguments": arguments})
@@ -183,7 +190,7 @@ class Run:
         self.pending_approval = request
         self.ledger.append(self.id, "approval_requested", {
             "approval_id": request.id, "command_id": command.id, "reason": reason,
-            "effects": [{"kind": e.kind, "resource": e.resource} for e in effects],
+            "effects": [e.to_dict() for e in effects],
             "policy_revision": policy_revision, "expires_at": expires_at,
         })
         self.transition("WAITING_FOR_APPROVAL", reason=reason)
@@ -194,7 +201,7 @@ class Run:
         'denied'. If the policy revision has moved since the request was
         made, the approval is stale and must be re-requested — approving
         blind to a changed policy would defeat the whole point of layered
-        deny (P1-2 "premise changed" rule)."""
+        deny ("premise changed" rule)."""
         request = self.pending_approval
         if request is None:
             raise RunStateError(f"Run {self.id} has no pending approval to resolve")
@@ -211,7 +218,6 @@ class Run:
         if decision not in ("approved", "denied"):
             raise ValueError("decision must be 'approved' or 'denied'")
         request.resolution = decision
-        request.resolved_at = time.time()
         self.ledger.append(self.id, "approval_resolved", {"approval_id": request.id, "resolution": decision})
         self.pending_approval = None
         self.last_resolved_approval = request
@@ -251,32 +257,18 @@ class Run:
     # -- persistence snapshot ------------------------------------------------
 
     def to_snapshot_state(self) -> dict[str, Any]:
+        def optional(record: Any) -> Optional[dict[str, Any]]:
+            return None if record is None else record.to_dict()
+
         return {
             "session_id": self.session_id,
             "state": self.state,
             "result": self.result,
-            "commands": {
-                cid: {"capability_name": c.capability_name, "arguments": c.arguments,
-                      "retry_safety": c.retry_safety, "outcome": c.outcome,
-                      "attempts": c.attempts, "result_ref": c.result_ref, "error": c.error}
-                for cid, c in self.commands.items()
-            },
-            "pending_approval": None if self.pending_approval is None else {
-                "id": self.pending_approval.id, "command_id": self.pending_approval.command_id,
-                "reason": self.pending_approval.reason,
-                "effects": [{"kind": e.kind, "resource": e.resource} for e in self.pending_approval.effects],
-                "policy_revision": self.pending_approval.policy_revision,
-                "expires_at": self.pending_approval.expires_at,
-            },
-            "pending_question": None if self.pending_question is None else self.pending_question.to_dict(),
-            "pending_calls": [
-                {"id": c.id, "name": c.name, "arguments": c.arguments, "raw_arguments": c.raw_arguments}
-                for c in self.pending_calls
-            ],
-            "last_resolved_approval": None if self.last_resolved_approval is None else {
-                "id": self.last_resolved_approval.id, "command_id": self.last_resolved_approval.command_id,
-                "resolution": self.last_resolved_approval.resolution,
-            },
+            "commands": {cid: c.to_dict() for cid, c in self.commands.items()},
+            "pending_approval": optional(self.pending_approval),
+            "pending_question": optional(self.pending_question),
+            "pending_calls": [c.to_dict() for c in self.pending_calls],
+            "last_resolved_approval": optional(self.last_resolved_approval),
         }
 
     @classmethod
@@ -284,31 +276,12 @@ class Run:
         run = cls(run_id, state["session_id"], ledger)
         run.state = state["state"]
         run.result = state.get("result")
-        for cid, c in (state.get("commands") or {}).items():
-            run.commands[cid] = Command(
-                id=cid, capability_name=c["capability_name"], arguments=c["arguments"],
-                retry_safety=c["retry_safety"], outcome=c["outcome"], attempts=c["attempts"],
-                result_ref=c.get("result_ref"), error=c.get("error"),
-            )
-        pa = state.get("pending_approval")
-        if pa:
-            run.pending_approval = ApprovalRequest(
-                id=pa["id"], command_id=pa["command_id"],
-                effects=[Effect(kind=e["kind"], resource=e["resource"]) for e in pa["effects"]],
-                reason=pa["reason"], policy_revision=pa["policy_revision"],
-                expires_at=pa.get("expires_at"),
-            )
-        pq = state.get("pending_question")
-        if pq:
-            run.pending_question = PendingQuestion.from_dict(pq)
-        run.pending_calls = [
-            ToolCall(id=c["id"], name=c["name"], arguments=c["arguments"], raw_arguments=c.get("raw_arguments"))
-            for c in (state.get("pending_calls") or [])
-        ]
-        lra = state.get("last_resolved_approval")
-        if lra:
-            run.last_resolved_approval = ApprovalRequest(
-                id=lra["id"], command_id=lra["command_id"], effects=[], reason="", policy_revision=0,
-                resolution=lra.get("resolution"),
-            )
+        run.commands = {cid: Command.from_dict(c) for cid, c in (state.get("commands") or {}).items()}
+        if state.get("pending_approval"):
+            run.pending_approval = ApprovalRequest.from_dict(state["pending_approval"])
+        if state.get("pending_question"):
+            run.pending_question = PendingQuestion.from_dict(state["pending_question"])
+        run.pending_calls = [ToolCall.from_dict(c) for c in (state.get("pending_calls") or [])]
+        if state.get("last_resolved_approval"):
+            run.last_resolved_approval = ApprovalRequest.from_dict(state["last_resolved_approval"])
         return run

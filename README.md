@@ -1,11 +1,5 @@
 # state-projection-loop
 
-**v0.4: Built-in planning checklists.** Every session includes one unified
-`planning.checklist.manage` tool for named ULID plans, item edits, progress,
-context visibility and JSON handoff. Plans use the same in-memory or JSONL
-storage as the conversation and survive history compression and completion.
-See [the checklist specification and Python/Dart examples](docs/checklists.md).
-
 **State-Projection Agent Loop** — a vendor-agnostic, resumable LLM agent
 runtime built on two principles:
 
@@ -35,8 +29,7 @@ a one-method `LLMAdapter` Protocol (`async complete(messages, tools) -> Decision
 and a scripted test double (`ScriptedLLM`) for deterministic tests. Talking
 to a real model — OpenAI, Anthropic, DeepSeek, a local server, anything — is
 entirely your own adapter, implementing that Protocol however you like.
-Reference implementations (`OpenAICompatAdapter`, `AnthropicAdapter`,
-`OpenAICompatEmbedding`, `LlamaCppEmbedding`) live in
+Reference implementations (`OpenAICompatAdapter`, `LlamaCppEmbedding`) live in
 [`examples/llm_adapters.py`](examples/llm_adapters.py) — copy and adapt them
 freely; they are examples, not a package API with a stability contract.
 
@@ -76,15 +69,16 @@ Every registered capability stays reachable even with vectors disabled.
 ## Install
 
 ```bash
-pip install state-projection-loop                  # core: jsonschema only
+pip install state-projection-loop                  # core: no dependencies
 pip install "state-projection-loop[dev]"            # + pytest for running the test suite
-pip install "state-projection-loop[examples]"       # + openai/anthropic/llama-cpp-python
+pip install "state-projection-loop[examples]"       # + openai/llama-cpp-python
                                                      #   (only needed to run examples/llm_adapters.py)
 ```
 
-The core has a single dependency (`jsonschema`) and even falls back to a
-built-in mini validator when it's absent. The sync API (`session.send`,
-`session.run_job`) hides asyncio entirely.
+The core has no dependencies: JSON Schema validation is one small built-in
+validator, so this package and its Dart port reject the same arguments with
+the same words. The sync API (`session.send`, `session.run_job`) hides
+asyncio entirely.
 
 ## Quickstart
 
@@ -164,7 +158,10 @@ if session.run.state == "WAITING_FOR_APPROVAL":
 
 Evaluation order is fixed: `absolute > admin > developer > workspace > session > llm`.
 The most restrictive matching rule wins across layers — a `deny` at any
-layer can never be relaxed by one below it. An LLM-proposed safety
+layer can never be relaxed by one below it. Within a layer the first
+matching rule wins, except that a rule matching everything (a preset's
+closing `require_approval`) is that layer's fallback, so a grant added after
+`apply_preset` takes effect instead of being shadowed by it. An LLM-proposed safety
 assessment (`policy.set_llm_safety_mode("advisory" | "approval_routing")`)
 can escalate toward approval but can never grant a bare `allow` or issue the
 final `deny` by itself.
@@ -181,7 +178,7 @@ session.run_job("delete the old backups")
 run_id = session.run.id   # paused: WAITING_FOR_APPROVAL
 
 # process 2 (hours later, no reference to the first Session)
-restored = Session.resume_from_ledger(llm, run_id, config=cfg, registry=registry)
+restored = Session.resume_from_ledger(llm, run_id, config=cfg, kernel=KERNEL, registry=registry)
 restored.resolve_approval("approved")
 result = restored.resume()
 ```
@@ -189,7 +186,9 @@ result = restored.resume()
 Every projection, decision, policy verdict, command start/outcome, approval,
 and run-state change is an `Event` in the append-only ledger
 (`InMemoryLedger` by default, `JsonlLedger` when `persistence.ledger_directory`
-is set). `Session` state is a *derived* view of that ledger, recoverable from
+is set). `resume_from_ledger` takes `Session`'s own arguments (`kernel`,
+`registry`, `policy`, `sections`, `builtins`, ...): they are code, not state,
+so the second process passes what the first one passed. `Session` state is a *derived* view of that ledger, recoverable from
 Events + a periodic `Snapshot`.
 
 ## Rewinding without losing history
@@ -313,11 +312,11 @@ artifacts must be explicitly moved into the parent's namespace.
 ## Swappable everything
 
 - **Models**: `LLMAdapter` Protocol — bring your own; see
-  `examples/llm_adapters.py` for `OpenAICompatAdapter` / `AnthropicAdapter`
-  reference implementations. `ScriptedLLM` drives deterministic tests.
+  `examples/llm_adapters.py` for the `OpenAICompatAdapter` reference
+  implementation. `ScriptedLLM` drives deterministic tests.
 - **Embeddings**: `EmbeddingBackend` Protocol. The package ships only
-  `HashingEmbedding` (dependency-free, deterministic); real embedding
-  backends (`OpenAICompatEmbedding`, `LlamaCppEmbedding`) are examples too.
+  `HashingEmbedding` (dependency-free, deterministic); a real embedding
+  backend (`LlamaCppEmbedding`) is an example too.
 - **Capability sources**: `ToolProvider` Protocol — sync external
   capability servers into the registry mid-session.
 - **Sections**: subclass `Section` (`render`, optional `shrink`) and pass the
@@ -356,27 +355,6 @@ Config.from_dict({
 
 Cross-session memory is specified but not built; see [docs/roadmap.md](docs/roadmap.md).
 
-## Changes in 0.5 (pre-1.0: breaking, no aliases)
-
-- `Session(builtins=...)` / `install_builtins()` replace `ensure_meta_tools`,
-  `ensure_checklist_tool`, `install_state`, `install_spawn`.
-- One `ToolContext` for sections and handlers replaces `TurnContext`.
-- `Section.shrink` replaces the hard-coded overflow ladder; `extra_sections`
-  is gone (pass `sections=`).
-- `discovery.kernel_note` replaces the hard-coded runtime-note table.
-- `Registry.categories()` returns `(total, pinned)`; `categories_with_pinned`,
-  `register_many`, `Message.meta`, `ToolResult.elapsed_s`, four never-emitted
-  event types and the unused `WAITING_FOR_USER` state are removed.
-- `Session.activate()` and `Runtime.reset()` are public; `discovery.active_tools`
-  replaces a hard-coded LRU size.
-- Handlers receive `ToolContext`; sections receive its superset `TurnContext`
-  (candidates, native schemas, dedupe flag), so projection state never reaches a tool.
-- Shrinking now counts native schemas: a dropped candidate takes its schema with it,
-  and the least recently used non-pinned schema is dropped as a last resort.
-- New standard features, each optional: `ask` pack, loop guard, `result_schema`,
-  `on_event` observers, compaction, `skill_capability`, `install_toolkits`.
-  `WAITING_FOR_USER` is back, now in use.
-
 ## Examples & scenarios
 
 | Scenario | Code | What it shows |
@@ -402,16 +380,16 @@ pip install -e ".[dev,examples]"
 pytest tests --ignore=tests/integration     # offline: unit + acceptance + scenarios
 ```
 
-`tests/acceptance/test_p0_p1_acceptance.py` is the redesign's own checklist:
-execution order, finish-vs-side-effects rejection, idempotency/OUTCOME_UNKNOWN,
-concurrency isolation, artifact-reference safety, schema-aware budgeting,
-approval survives a simulated process restart, policy layering, ledger-based
-reproducibility, non-destructive branching, irreversible-effect surfacing,
-and per-command traceability. `tests/acceptance/test_acceptance.py` covers
-the broader baseline: ≤3k-token overhead at 1,000 registered capabilities,
-full reachability with vectors off, the validation→spec→retry self-repair
-path, and a working default-config chat agent. Scenario tests drive the
-*real* tools (files, subprocesses, manuals) with a scripted model.
+`tests/acceptance/test_acceptance.py` holds the whole-session guarantees:
+≤3k-token overhead at 1,000 registered capabilities, full reachability with
+vectors off, the validation→spec→retry self-repair path, a working
+default-config chat agent, idempotency/OUTCOME_UNKNOWN, schema-aware
+budgeting, approval surviving a simulated process restart, policy layering,
+ledger-based reproducibility, non-destructive branching, irreversible-effect
+surfacing, and per-command traceability. `tests/unit/test_spec_fixtures.py`
+reads `spec/fixtures/`, the contract shared with the Dart port — including one
+whole projected turn, byte for byte. Scenario tests drive the *real* tools
+(files, subprocesses, manuals) with a scripted model.
 
 Live integration tests (real LLM API + optional GGUF embedding download):
 

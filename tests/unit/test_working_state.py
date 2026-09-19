@@ -10,6 +10,12 @@ class TestRenderAndSerialize:
         text = ws.render()
         assert "chose X" in text and "Y was slower" in text
 
+    def test_render_keeps_a_japanese_state_inside_its_token_budget(self):
+        from state_projection_loop.tokens import estimate_tokens
+
+        ws = WorkingState(confirmed_facts=["在庫は東京倉庫にある" * 40] * 10)
+        assert estimate_tokens(ws.render(max_tokens=200)) <= 200
+
     def test_is_empty(self):
         assert WorkingState().is_empty() is True
         assert WorkingState(goal="x").is_empty() is False

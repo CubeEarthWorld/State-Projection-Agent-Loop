@@ -8,10 +8,10 @@ core projection is identical either way.
 """
 from __future__ import annotations
 
-import json
-from typing import Any, Optional
+from typing import Any
 
-from ..capability import ToolContext
+from ..context import ToolContext
+from ..serialization import dumps
 
 
 def _walk_extra(extra: dict, path: str, *, create: bool = False) -> tuple[Any, str]:
@@ -71,7 +71,7 @@ def _set_next_actions(ctx: ToolContext, actions: list[str]) -> str:
 def _extra_set(ctx: ToolContext, path: str, value: Any = None) -> str:
     node, leaf = _walk_extra(ctx.working_state.extra, path, create=True)
     node[leaf] = value
-    return f"extra.{path} = {json.dumps(value, ensure_ascii=False, default=str)}"
+    return f"extra.{path} = {dumps(value)}"
 
 
 def _extra_get(ctx: ToolContext, path: str) -> Any:

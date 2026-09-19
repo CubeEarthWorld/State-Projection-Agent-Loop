@@ -30,6 +30,17 @@ class TestDefaultAndUndeclared:
         assert decision.decision == "require_approval"
 
 
+class TestPresetFallback:
+    def test_a_grant_added_after_a_preset_is_not_shadowed_by_its_catch_all(self):
+        engine = PolicyEngine(default_decision="require_approval")
+        engine.apply_preset("auto_safe")
+        engine.add_rule("workspace", Rule(decision="allow", capability_pattern="mail.*"))
+        send = cap("mail.message.send", effects=[Effect(kind="external", resource="smtp:*")])
+        other = cap("crm.contact.update", effects=[Effect(kind="external", resource="crm:*")])
+        assert engine.evaluate(send, {}).decision == "allow"
+        assert engine.evaluate(other, {}).decision == "require_approval"
+
+
 class TestLayering:
     def test_deny_at_higher_layer_cannot_be_relaxed_by_lower(self):
         engine = PolicyEngine(default_decision="allow")

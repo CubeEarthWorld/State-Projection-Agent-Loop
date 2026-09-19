@@ -1,4 +1,4 @@
-"""Game-master scenario toolkit (§7 full-equipment usage).
+"""Game-master scenario toolkit.
 
 The GM manages narration (plain text), presentation (BGM / images /
 character expressions), dice, and — via the bundled state tools — the
@@ -11,7 +11,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from state_projection_loop import Registry
+from state_projection_loop import Registry, Session
+from state_projection_loop.policy import Rule
 
 EXPRESSIONS = ["neutral", "smile", "angry", "sad", "surprised", "fear"]
 
@@ -139,3 +140,14 @@ def initial_seed() -> dict[str, Any]:
             "scene": "dungeon_entrance",
         },
     }
+
+
+def make_session(llm, log: MediaLog, *, seed: Optional[dict[str, Any]] = None,
+                 dice_seed: Optional[int] = None, **session_args) -> Session:
+    """The game master: presentation and dice tools plus the ``state`` pack
+    for goal / flags / variables, all granted without approval."""
+    session = Session(llm, kernel=GM_KERNEL, registry=build_game_registry(log, dice_seed=dice_seed),
+                      seed=seed or initial_seed(), builtins=["meta", "checklist", "state"], **session_args)
+    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="game.*"))
+    session.policy.add_rule("workspace", Rule(decision="allow", capability_pattern="state.*"))
+    return session

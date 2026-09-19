@@ -22,14 +22,14 @@ class ProjectionConfig:
     )
     window_tokens: int = 30000
     # Reserved so the model always has room to answer; counted against the
-    # window budget alongside messages and native tool schemas (P0-5).
+    # window budget alongside messages and native tool schemas.
     reserved_output_tokens: int = 1024
     # Provider-side fixed overhead not visible in the message list itself
     # (e.g. a vendor's per-request wrapping tokens); 0 is a safe default.
     provider_overhead_tokens: int = 0
     # When native tool schemas are sent to the provider, the candidates
     # section only needs the one-line signature, not the full card
-    # description a second time (P0-5 dedup).
+    # description a second time (dedup).
     dedupe_candidate_cards_against_schemas: bool = True
 
 
@@ -126,7 +126,9 @@ class Config:
             if not hasattr(cfg, key):
                 raise ValueError(f"Unknown config key: {key!r}")
             current = getattr(cfg, key)
-            if dataclasses.is_dataclass(current) and isinstance(value, dict):
+            if dataclasses.is_dataclass(current):
+                if not isinstance(value, dict):
+                    raise ValueError(f'Config key "{key}" expects a map')
                 for sub_key, sub_value in value.items():
                     if not hasattr(current, sub_key):
                         raise ValueError(f"Unknown config key: {key}.{sub_key}")
@@ -134,6 +136,3 @@ class Config:
             else:
                 setattr(cfg, key, value)
         return cfg
-
-    def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)

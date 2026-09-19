@@ -11,7 +11,8 @@ from .builtin import BUILTIN_PACKS, DEFAULT_BUILTINS, install_builtins
 from .builtin.skills import skill_capability
 from .builtin.toolkits import install_toolkits
 from .compaction import FOLD_INSTRUCTIONS, FOLD_SCHEMA, apply_fold_delta, parse_fold_reply
-from .capability import Capability, ToolContext, capability
+from .capability import Capability, capability
+from .context import ToolContext, TurnContext
 from .compression import compress_text, summarize_text, content_hash
 from .config import Config
 from .checklists import ChecklistStore
@@ -28,15 +29,16 @@ from .projection import (
     KernelSection,
     Projection,
     Section,
-    TurnContext,
     TocSection,
+    WorkingStateSection,
     runtime_notes,
 )
 from .registry import Registry, ToolProvider
 from .run import ApprovalRequest, Command, PendingQuestion, Question, Run, RunStateError
-from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult, validate_args, validate_value
+from .json_schema import validate_args, validate_value
+from .runtime import BudgetState, ExecuteBatchResult, Runtime, ToolResult
 from .session import ConcurrencyError, Session
-from .working_state import RecordedDecision, WorkingState, WorkingStateSection
+from .working_state import RecordedDecision, WorkingState
 
 __version__ = "0.5.0"
 
