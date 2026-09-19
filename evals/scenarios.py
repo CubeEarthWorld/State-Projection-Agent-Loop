@@ -125,6 +125,7 @@ class Scenario:
     kernel: str
     registry: Registry
     steps: list[str]
+    calls: dict[str, tuple[str, dict[str, str]]]  # step text -> the tool call it asks for (offline driver)
     questions: list[dict[str, Any]]
     builtins: tuple[str, ...] = ()
 
@@ -169,7 +170,8 @@ def records(seed: int, turns: int, lang: str) -> Scenario:
 
     registry = Registry()
     _register(registry, "ops.record.lookup", "Look up a shipment record by id.", "id", lookup)
-    return Scenario(t["kernel"], registry, steps, [
+    calls = {t["lookup"].format(rid=rid): ("ops.record.lookup", {"id": rid}) for rid in recs}
+    return Scenario(t["kernel"], registry, steps, calls, [
         {"ask": t["q_invoice"].format(rid=early), "answer": recs[early]["invoice"], "kind": "early_tool_fact"},
         {"ask": t["q_status"].format(rid=late), "answer": recs[late]["status"], "kind": "late_tool_fact"},
         {"ask": t["q_amount"].format(rid=updated[0]), "answer": str(recs[updated[0]]["updated"]), "kind": "update",
@@ -204,7 +206,8 @@ def coding(seed: int, turns: int, lang: str) -> Scenario:
     registry = Registry()
     _register(registry, "dev.tests.run", "Run the tests of a module; returns the pytest output.", "module", run_tests)
     first = modules[0]
-    return Scenario(t["kernel"], registry, steps, [
+    calls = {t[key].format(module=m): ("dev.tests.run", {"module": m}) for m in modules for key in ("run_tests", "fixed")}
+    return Scenario(t["kernel"], registry, steps, calls, [
         {"ask": t["q_error"].format(module=first), "answer": errors[first].split(":")[1].split(" got")[0].strip(),
          "kind": "early_error"},
         {"ask": t["q_config"], "answer": "settings/base.toml", "kind": "user_fact"},
@@ -234,7 +237,8 @@ def support(seed: int, turns: int, lang: str) -> Scenario:
 
     registry = Registry()
     _register(registry, "crm.ticket.get", "Fetch a support ticket by id.", "id", get)
-    return Scenario(t["kernel"], registry, steps, [
+    calls = {t["open_ticket"].format(tid=tid): ("crm.ticket.get", {"id": tid}) for tid in ids}
+    return Scenario(t["kernel"], registry, steps, calls, [
         {"ask": t["q_tstatus"].format(tid=resolved[0]), "answer": t["resolved"], "kind": "update"},
         {"ask": t["q_email"].format(tid=ids[1]), "answer": tickets[ids[1]]["email"], "kind": "early_tool_fact"},
         {"ask": t["q_open"].format(tid=resolved[1]), "answer": t["no"], "kind": "update"},
@@ -262,7 +266,8 @@ def game(seed: int, turns: int, lang: str) -> Scenario:
 
     registry = Registry()
     _register(registry, "game.dice.roll", "Roll a d20 for an action.", "action", roll)
-    return Scenario(t["kernel"], registry, steps, [
+    calls = {t["roll"].format(action=a): ("game.dice.roll", {"action": a}) for a in actions}
+    return Scenario(t["kernel"], registry, steps, calls, [
         {"ask": t["q_have"].format(item=items[0]), "answer": t["no"], "kind": "update"},
         {"ask": t["q_key"], "answer": items[2], "kind": "user_fact"},
         {"ask": t["q_have"].format(item=items[3]), "answer": t["yes"], "kind": "user_fact"},
@@ -291,7 +296,8 @@ def document(seed: int, turns: int, lang: str) -> Scenario:
     registry = Registry()
     _register(registry, "docs.section.read", "Read one section of the contract.", "section", read)
     steps = [t["read"].format(sid=str(i + 1)) for i in range(turns)]
-    return Scenario(t["kernel"], registry, steps, [
+    calls = {t["read"].format(sid=sid): ("docs.section.read", {"section": sid}) for sid in sections}
+    return Scenario(t["kernel"], registry, steps, calls, [
         {"ask": t["q_clause"].format(sid="2"), "answer": sections["2"]["notice"].split()[0], "kind": "early_tool_fact"},
         {"ask": t["q_penalty"].format(sid=str(turns - 1)), "answer": sections[str(turns - 1)]["penalty"].split()[0],
          "kind": "late_tool_fact"},

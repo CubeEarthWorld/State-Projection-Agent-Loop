@@ -106,7 +106,10 @@ Japanese, against a real model. It then asks questions whose answers sit
 at known depths, graded by exact substring, and reports what compression
 is for: prompt tokens per turn and the provider's prompt-cache hit ratio.
 Numbers below are `deepseek-flash`, two seeds per cell; a snapshot, not a
-guarantee.
+guarantee. `--offline` runs the same matrix against a scripted stand-in
+for the model: no recall, but tokens per turn and a prefix-stability
+proxy for the cache ratio, free, so a change to the tiers is checked for
+size and byte-stability before the live matrix is paid for.
 
 **Tiers alone, 12k window.** Recall per cell, and the cache hit ratio,
 which is 0.85–0.88 in every cell and both languages: the prefix stays
