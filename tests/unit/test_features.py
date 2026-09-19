@@ -142,13 +142,13 @@ class TestCompaction:
             return '```json\n{"facts_add": ["user likes blue"], "next_actions": ["ship"]}\n```'
 
         session = Session(
-            ScriptedLLM(["r1", "r2", "r3", fold, "r4"]),
+            ScriptedLLM([f"r{i}" for i in range(1, 13)] + [fold, "r13"]),
             config=Config.from_dict({"compaction": {"trigger_ratio": 0.01}}), policy=allow_all(),
         )
-        for m in ("m1", "m2", "m3"):
-            session.send(m)
-        assert folds == []
-        assert session.send("m4") == "r4"
+        for i in range(1, 13):
+            session.send(f"m{i}")
+        assert folds == [], "no fold until the verbatim point steps (four times full_window)"
+        assert session.send("m13") == "r13"
         assert folds == [1]
         assert session.working_state.confirmed_facts == ["user likes blue"]
         assert session.working_state.next_actions == ["ship"]
@@ -162,21 +162,21 @@ class TestCompaction:
         # window (1500) could never be reached and the fold was unreachable.
         fold = lambda messages, tools: '{"facts_add": ["seen"]}'  # noqa: E731
         session = Session(
-            ScriptedLLM(["r1", "r2", "r3", fold, "r4"]),
+            ScriptedLLM([f"r{i}" for i in range(1, 13)] + [fold, "r13"]),
             config=Config.from_dict({"projection": {"window_tokens": 2000}, "compaction": {"trigger_ratio": 0.75}}),
             policy=allow_all(),
         )
-        for m in ("m1", "m2", "m3", "m4"):
-            session.send(m + " " + "word " * 120)
+        for i in range(1, 14):
+            session.send(f"m{i} " + "word " * 120)
         assert session.working_state.confirmed_facts == ["seen"]
 
     def test_invalid_delta_is_skipped_and_logged(self):
         session = Session(
-            ScriptedLLM(["r1", "r2", "r3", '{"facts_add": "not a list"}', "r4"]),
+            ScriptedLLM([f"r{i}" for i in range(1, 13)] + ['{"facts_add": "not a list"}', "r13"]),
             config=Config.from_dict({"compaction": {"trigger_ratio": 0.01}}), policy=allow_all(),
         )
-        for m in ("m1", "m2", "m3", "m4"):
-            session.send(m)
+        for i in range(1, 14):
+            session.send(f"m{i}")
         assert session.working_state.confirmed_facts == []
         assert len(notices(session)) == 1 and "compaction skipped" in notices(session)[0]
 

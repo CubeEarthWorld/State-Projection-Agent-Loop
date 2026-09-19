@@ -76,9 +76,15 @@ reserve counted it fires nearly every turn. Three rules keep it honest:
 
 - **Fold from the ledger, never from the projection.** What masking
   cleared from the prompt is exactly what the fold must still read. The
-  region is everything before the verbatim point (the point is stepped
-  first if nothing is older than it), so the fold changes only what the
-  tiers had already stopped rendering in full.
+  region is everything between the last fold and the verbatim point, so
+  the fold changes only what the tiers had already stopped rendering in
+  full, and it happens at most once per step of the point — the moment
+  the prefix is rebuilt anyway — with a step's worth of messages to read.
+  Between steps an over-full prompt is handled by the deterministic
+  shrink, which drops from the front what the next fold will read from
+  the ledger. (Forcing the point down to fold sooner gave a fold every
+  turn under a window the verbatim tail alone overflows: a model call and
+  a cache rebuild per turn, and recall fell rather than rose.)
 - **Shape is validated** with the same JSON Schema validator as tool
   arguments.
 - **Entries are grounded.** An entry that names an identifier, path or

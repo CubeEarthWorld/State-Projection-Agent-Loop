@@ -520,30 +520,22 @@ class Session:
                 self._inflight = None
         raise AssertionError("unreachable")
 
-    def _advance_tiers(self) -> None:
+    def _step_tiers(self) -> bool:
         """Move the history's verbatim point forward in steps: only when the
         verbatim tail has grown to four times ``full_window`` is it cut back
         to ``full_window``. Between steps the rendering of every older message
         is unchanged, so the prompt prefix stays byte-identical and a
         provider's cache keeps hitting; a step is one deliberate rebuild."""
-        self._step_tiers(force=False)
-
-    def _step_tiers(self, *, force: bool) -> bool:
-        """One step of the verbatim point: cut the tail back to
-        ``full_window`` messages. Taken when the tail has grown to four
-        times that (a turn adds several messages, so this is one rebuild
-        every few turns), or when a fold needs something older than the
-        point to work on (``force``)."""
         keep = self.config.compression.full_window
         history = renderable(self.ledger, self.run.id)
         tail = sum(1 for event, _ in history if event.sequence >= self.working_state.verbatim_sequence)
-        if keep <= 0 or tail <= keep or (tail <= 4 * keep and not force):
+        if keep <= 0 or tail <= 4 * keep:
             return False
         self.working_state.verbatim_sequence = history[-keep][0].sequence
         return True
 
     def _project(self) -> tuple[TurnContext, list[Message]]:
-        self._advance_tiers()
+        self._step_tiers()
         ctx = self._context()
         cfg = self.config.projection
         messages = self.projection.render(
@@ -572,15 +564,14 @@ class Session:
             return False
         # Fold from the ledger, never from the projection: what masking
         # cleared from the prompt is exactly what a fold must still read.
-        # The region is everything before the verbatim point, so the fold
-        # changes only what the tiers already stopped rendering in full.
-        def region() -> list:
-            return [(e, m) for e, m in renderable(self.ledger, self.run.id)
+        # The region is everything before the verbatim point and after the
+        # last fold, so a fold happens at most once per step of the point,
+        # when the prefix is being rebuilt anyway, and always has a step's
+        # worth of messages to work on. Forcing the point down to fold
+        # sooner produced a fold every turn under a window the verbatim
+        # tail alone overflows, each one a model call and a cache rebuild.
+        foldable = [(e, m) for e, m in renderable(self.ledger, self.run.id)
                     if self.working_state.folded_sequence < e.sequence < self.working_state.verbatim_sequence]
-
-        foldable = region()
-        if not foldable and self._step_tiers(force=True):
-            foldable = region()
         if not foldable:
             return False
         transcript = "\n".join(f"{m.role}: {m.content}" for _, m in foldable)

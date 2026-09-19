@@ -205,7 +205,7 @@ def coding(seed: int, turns: int, lang: str) -> Scenario:
     _register(registry, "dev.tests.run", "Run the tests of a module; returns the pytest output.", "module", run_tests)
     first = modules[0]
     return Scenario(t["kernel"], registry, steps, [
-        {"ask": t["q_error"].format(module=first), "answer": errors[first].split(":")[1].strip()[:12],
+        {"ask": t["q_error"].format(module=first), "answer": errors[first].split(":")[1].split(" got")[0].strip(),
          "kind": "early_error"},
         {"ask": t["q_config"], "answer": "settings/base.toml", "kind": "user_fact"},
         {"ask": t["q_indent"], "answer": "tab" if lang == "en" else "タブ", "kind": "user_fact"},
