@@ -156,6 +156,20 @@ class TestCompaction:
         folded = [e for e in session.ledger.iter_run(session.run.id) if e.type == "state_folded"]
         assert len(folded) == 1 and folded[0].data["before"]["confirmed_facts"] == []
 
+    def test_trigger_counts_the_reserved_output_the_render_budgets(self):
+        # window 2000, ratio 0.75: the render shrinks messages to fit under the
+        # 976 left after the 1024 reserved output, so a ratio of the whole
+        # window (1500) could never be reached and the fold was unreachable.
+        fold = lambda messages, tools: '{"facts_add": ["seen"]}'  # noqa: E731
+        session = Session(
+            ScriptedLLM(["r1", "r2", "r3", fold, "r4"]),
+            config=Config.from_dict({"projection": {"window_tokens": 2000}, "compaction": {"trigger_ratio": 0.75}}),
+            policy=allow_all(),
+        )
+        for m in ("m1", "m2", "m3", "m4"):
+            session.send(m + " " + "word " * 120)
+        assert session.working_state.confirmed_facts == ["seen"]
+
     def test_invalid_delta_is_skipped_and_logged(self):
         session = Session(
             ScriptedLLM(["r1", "r2", "r3", '{"facts_add": "not a list"}', "r4"]),

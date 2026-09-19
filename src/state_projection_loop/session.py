@@ -549,8 +549,15 @@ class Session:
         ratio = self.config.compaction.trigger_ratio
         if ratio <= 0:
             return False
+        # The ratio applies to the room the render actually has for
+        # messages and schemas: the window less the reserved output. Measured
+        # against the whole window it is unreachable once the reserve
+        # exceeds the slack, and measured with the reserve counted it fires
+        # every turn of a small window.
+        cfg = self.config.projection
+        room = cfg.window_tokens - cfg.reserved_output_tokens - cfg.provider_overhead_tokens
         used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
-        if used <= ratio * self.config.projection.window_tokens:
+        if used <= ratio * room:
             return False
         # Fold from the ledger, never from the projection: what masking
         # cleared from the prompt is exactly what a fold must still read.

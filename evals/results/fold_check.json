@@ -1,0 +1,84 @@
+{
+  "label": "fold-check-room",
+  "turns": 30,
+  "window": 4000,
+  "fold": 0.75,
+  "cells": [
+    {
+      "task": "records",
+      "lang": "en",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 2171,
+      "cache_hit_ratio": 0.6725011515430677,
+      "folds": 5,
+      "misses": []
+    }
+  ],
+  "accuracy": 1.0,
+  "runs": [
+    {
+      "task": "records",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2171,
+      "peak_prompt_tokens": 3073,
+      "cache_hit_ratio": 0.6725011515430677,
+      "model_calls": 64,
+      "seconds": 117.1618983745575,
+      "folds": 5,
+      "answers": [
+        {
+          "ask": "What was the invoice number for R01001?",
+          "answer": "INV-68915",
+          "kind": "early_tool_fact",
+          "reply": "The invoice number for R01001 was INV-68915.",
+          "ok": true
+        },
+        {
+          "ask": "What status did R01028 have?",
+          "answer": "in transit",
+          "kind": "late_tool_fact",
+          "reply": "R01028 had status in transit.",
+          "ok": true
+        },
+        {
+          "ask": "What is the current amount for R01016?",
+          "answer": "9705",
+          "kind": "update",
+          "stale": "9205",
+          "reply": "The current amount for R01016 is 9705 EUR, per your correction.",
+          "ok": true
+        },
+        {
+          "ask": "Who is our account manager?",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "Our account manager is Petra Lindqvist.",
+          "ok": true
+        },
+        {
+          "ask": "What is the site code?",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "The site code is ZX-41.",
+          "ok": true
+        },
+        {
+          "ask": "What was the delivery driver's name for R01001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "not stated",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}
