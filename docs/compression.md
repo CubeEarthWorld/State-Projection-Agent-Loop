@@ -98,20 +98,52 @@ lives in the working state, and their text stays in the ledger for
 
 ## Measured
 
-`evals/compression_eval.py` drives a 30-turn tool-using conversation
-against a real model, then asks questions whose answers sit at known
-depths, graded by exact substring. With `deepseek-flash`, a 12k window and
-two seeds:
+`evals/compression_eval.py` drives a 30-turn tool-using conversation of one
+of five shapes (`evals/scenarios.py`: records lookup with corrections, a
+coding loop with failing tests, support tickets, a dice game with an
+inventory, a long contract read section by section), in English or
+Japanese, against a real model. It then asks questions whose answers sit
+at known depths, graded by exact substring, and reports what compression
+is for: prompt tokens per turn and the provider's prompt-cache hit ratio.
+Numbers below are `deepseek-flash`, two seeds per cell; a snapshot, not a
+guarantee.
 
-| arm | accuracy | user-stated facts | prompt tokens / turn | cache hit ratio |
-|---|---|---|---|---|
-| previous design (tiers by age, every message rewritten each turn) | 33% | 0% | 2,546 | 31% |
-| this design (tiers by distance, stepped point, masked results) | 67% | 100% | 2,372 | 79% |
+**Tiers alone, 12k window.** Recall per cell, and the cache hit ratio,
+which is 0.85–0.88 in every cell and both languages: the prefix stays
+byte-identical whatever the task or script.
 
-The remaining misses are a fact buried in a tool result thirty turns back
-(masked, by design; the fold is the layer that keeps such facts) and one
-ambiguous correction. Run the eval yourself; the numbers above are a
-snapshot, not a guarantee.
+| task | en | ja |
+|---|---|---|
+| records | 0.67 | 0.75 |
+| coding | 0.80 | 0.80 |
+| support | 0.70 | 0.80 |
+| game | 0.90 | 0.70 |
+| document | 0.75 | 1.00 |
+| all | 0.76 | 0.81 |
+
+Against the previous design on the records task (tiers by age, every
+message rewritten each turn): recall 0.33 → 0.67, user-stated facts 0 →
+100%, cache hit ratio 0.31 → 0.86.
+
+**Where the misses are.** By question kind over all cells (6k window,
+tiers alone): facts the user stated 0.83, the latest tool result 0.95,
+corrections 0.69, abstaining when nothing was stated 1.00 — and a fact
+buried in a tool result older than the compressed window 0.38, the text of
+the first error 0.00. Those two are what masking discards by design; they
+are the fold's job, not the tiers'. The remaining misses are model
+behaviour on a verbatim user message (the Japanese game cell answers "the
+first roll" with the first roll whose result is still visible).
+
+**The fold.** On the records task under a 4k window (the tail alone fills
+most of it): 0 folds → 5, recall 0.75 → 1.00, prompt tokens per turn 2,628
+→ 2,171, cache hit ratio 0.86 → 0.67 — each fold is a prefix rebuild. Under
+a 6k window across all tasks, the first fold design (force the point down
+whenever nothing older was left to fold) folded every turn of the document
+task (19–28 folds in 30 turns) and recall there fell from 0.88 to 0.50 while
+the cache ratio fell from 0.90 to 0.56; that is why a fold now happens only
+at a step of the point. The fold-at-step arm across all tasks has not been
+measured yet: rerun `--window 6000 --fold 0.75 --task all --lang all` and
+compare with `evals/results/matrix_6k.json`.
 
 ## Configuration
 
