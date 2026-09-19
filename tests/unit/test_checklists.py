@@ -201,7 +201,7 @@ def test_a_spawned_child_keeps_the_parents_deny_list():
     seen: list[list[str]] = []
 
     def child_step(messages, tools):
-        seen.append([t["function"]["name"] for t in tools])
+        seen.append([t["name"] for t in tools])
         return ScriptedLLM.finish(result="done")
 
     session = Session(ScriptedLLM([]), registry=Registry(disabled=["planning.checklist.manage"]),
@@ -274,7 +274,7 @@ def test_native_schema_dedup_keeps_text_fallback():
     turn = TurnContext(config=session.config, registry=session.registry, ledger=session.ledger, run=session.run)
     kernel = session.projection.get("kernel")
     assert "Parameters (JSON Schema)" in kernel.render(turn)[0].content
-    turn.api_tools = [c.api_schema() for c in session.registry.pinned()]
+    turn.api_tools = [c.tool_spec() for c in session.registry.pinned()]
     assert "Parameters (JSON Schema)" not in kernel.render(turn)[0].content
     assert "planning.checklist.manage" in kernel.render(turn)[0].content
     turn.api_tools.pop()

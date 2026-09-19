@@ -1,0 +1,144 @@
+{
+  "label": "tiered-masked-fold",
+  "turns": 30,
+  "window": 12000,
+  "fold": 0.75,
+  "accuracy": 0.75,
+  "by_kind": {
+    "early": 0,
+    "late": 1,
+    "update": 0.5,
+    "user_fact": 1,
+    "abstain": 1
+  },
+  "prompt_tokens_per_turn": 2620.328125,
+  "peak_prompt_tokens": 4377,
+  "cache_hit_ratio": 0.8616820851238369,
+  "folds": 0,
+  "runs": [
+    {
+      "seed": 1,
+      "accuracy": 0.6666666666666666,
+      "by_kind": {
+        "early": false,
+        "late": true,
+        "update": false,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2592.125,
+      "peak_prompt_tokens": 4342,
+      "cache_hit_ratio": 0.8602678786709745,
+      "model_calls": 64,
+      "seconds": 69.53077697753906,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What was the invoice number for R01001?",
+          "answer": "INV-68915",
+          "kind": "early",
+          "reply": "not stated",
+          "ok": false
+        },
+        {
+          "ask": "What status did R01028 have?",
+          "answer": "in transit",
+          "kind": "late",
+          "reply": "R01028 had status in transit.",
+          "ok": true
+        },
+        {
+          "ask": "What is the current amount for R01016?",
+          "answer": "9705",
+          "kind": "update",
+          "stale": "9205",
+          "reply": "The record for R01016 shows 9205 EUR, which differs from the 9705 EUR correction you provided.",
+          "ok": false
+        },
+        {
+          "ask": "Who is our account manager?",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "Petra Lindqvist.",
+          "ok": true
+        },
+        {
+          "ask": "What is the site code?",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "ZX-41.",
+          "ok": true
+        },
+        {
+          "ask": "What was the delivery driver's name for R01001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "not stated",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "seed": 2,
+      "accuracy": 0.8333333333333334,
+      "by_kind": {
+        "early": false,
+        "late": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2648.53125,
+      "peak_prompt_tokens": 4377,
+      "cache_hit_ratio": 0.8630962915766993,
+      "model_calls": 64,
+      "seconds": 64.94101738929749,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What was the invoice number for R02001?",
+          "answer": "INV-97782",
+          "kind": "early",
+          "reply": "not stated",
+          "ok": false
+        },
+        {
+          "ask": "What status did R02028 have?",
+          "answer": "in transit",
+          "kind": "late",
+          "reply": "in transit.",
+          "ok": true
+        },
+        {
+          "ask": "What is the current amount for R02018?",
+          "answer": "10189",
+          "kind": "update",
+          "stale": "9689",
+          "reply": "10189 EUR per your correction, though the record itself showed 9689 EUR.",
+          "ok": true
+        },
+        {
+          "ask": "Who is our account manager?",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "Petra Lindqvist.",
+          "ok": true
+        },
+        {
+          "ask": "What is the site code?",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "ZX-41.",
+          "ok": true
+        },
+        {
+          "ask": "What was the delivery driver's name for R02001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "not stated",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

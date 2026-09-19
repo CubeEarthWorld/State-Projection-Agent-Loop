@@ -8,7 +8,6 @@ Authorize → Execute → Record → Continue/Wait/Complete.
 
 from .artifacts import ArtifactStore, ref as artifact_ref
 from .builtin import BUILTIN_PACKS, DEFAULT_BUILTINS, install_builtins
-from .builtin.mcp import McpProvider
 from .builtin.skills import load_skills, skill_capability
 from .builtin.toolkits import install_toolkits
 from .compaction import FOLD_INSTRUCTIONS, FOLD_SCHEMA, apply_fold_delta, parse_fold_reply
@@ -87,7 +86,6 @@ __all__ = [
     "validate_value",
     "skill_capability",
     "load_skills",
-    "McpProvider",
     "MemoryStore",
     "JsonlMemoryStore",
     "Note",

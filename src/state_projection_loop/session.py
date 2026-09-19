@@ -34,7 +34,7 @@ from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend
 from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, renderable
 from .ids import new_id
-from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
+from .llm import FINISH_SPEC, LLMAdapter, extract_finish
 from .memory import JsonlMemoryStore, MemoryStore
 from .messages import ASSISTANT, Decision, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
@@ -509,7 +509,30 @@ class Session:
                 self._inflight = None
         raise AssertionError("unreachable")
 
+    def _advance_tiers(self) -> None:
+        """Move the history's verbatim point forward in steps: only when the
+        verbatim tail has grown to four times ``full_window`` is it cut back
+        to ``full_window``. Between steps the rendering of every older message
+        is unchanged, so the prompt prefix stays byte-identical and a
+        provider's cache keeps hitting; a step is one deliberate rebuild."""
+        self._step_tiers(force=False)
+
+    def _step_tiers(self, *, force: bool) -> bool:
+        """One step of the verbatim point: cut the tail back to
+        ``full_window`` messages. Taken when the tail has grown to four
+        times that (a turn adds several messages, so this is one rebuild
+        every few turns), or when a fold needs something older than the
+        point to work on (``force``)."""
+        keep = self.config.compression.full_window
+        history = renderable(self.ledger, self.run.id)
+        tail = sum(1 for event, _ in history if event.sequence >= self.working_state.verbatim_sequence)
+        if keep <= 0 or tail <= keep or (tail <= 4 * keep and not force):
+            return False
+        self.working_state.verbatim_sequence = history[-keep][0].sequence
+        return True
+
     def _project(self) -> tuple[TurnContext, list[Message]]:
+        self._advance_tiers()
         ctx = self._context()
         cfg = self.config.projection
         messages = self.projection.render(
@@ -529,19 +552,27 @@ class Session:
         used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
         if used <= ratio * self.config.projection.window_tokens:
             return False
-        history = renderable(self.ledger, self.run.id)
-        keep = self.config.compression.full_window
-        foldable = [(e, m) for e, m in history[:max(0, len(history) - keep)]
-                    if e.sequence > self.working_state.folded_sequence]
+        # Fold from the ledger, never from the projection: what masking
+        # cleared from the prompt is exactly what a fold must still read.
+        # The region is everything before the verbatim point, so the fold
+        # changes only what the tiers already stopped rendering in full.
+        def region() -> list:
+            return [(e, m) for e, m in renderable(self.ledger, self.run.id)
+                    if self.working_state.folded_sequence < e.sequence < self.working_state.verbatim_sequence]
+
+        foldable = region()
+        if not foldable and self._step_tiers(force=True):
+            foldable = region()
         if not foldable:
             return False
-        lines = [f"{m.role}: {m.content}" for _, m in foldable]
-        prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content="\n".join(lines))]
+        transcript = "\n".join(f"{m.role}: {m.content}" for _, m in foldable)
+        prompt = [Message(role=SYSTEM, content=FOLD_INSTRUCTIONS), Message(role=USER, content=transcript)]
         decision = await self._complete(prompt, None)
         self.budget.note_decision(decision, prompt, [], self.config)
         delta = parse_fold_reply(decision.text)
         before = self.working_state.to_dict()
-        error = "reply was not a JSON object" if delta is None else apply_fold_delta(self.working_state, delta)
+        error = ("reply was not a JSON object" if delta is None
+                 else apply_fold_delta(self.working_state, delta, transcript=transcript))
         if error is not None:
             self._notice(f"[runtime] compaction skipped: {error}")
             return False
@@ -560,7 +591,7 @@ class Session:
             # that never ran; instead the whole decision stays out of the
             # projection until it completes — see pair_tool_calls.
             if record and result.outcome not in WAITING_OUTCOMES:
-                self._observe(result.call.id, result.call.name, result.observation)
+                self._observe(result.call.id, result.call.name, result.observation, ok=result.ok)
             if result.ok:
                 self._activate(result.call.name)
 
@@ -624,9 +655,9 @@ class Session:
             names[scored.tool.name] = None
         for name in self._active:
             names[name] = None
-        schemas = [self.registry.get(n).api_schema() for n in names if n in self.registry]
+        schemas = [self.registry.get(n).tool_spec() for n in names if n in self.registry]
         if self.config.mode == "job":
-            schemas.append(FINISH_SCHEMA)
+            schemas.append(FINISH_SPEC)
         return schemas
 
     def _activate(self, name: str) -> None:
@@ -654,8 +685,8 @@ class Session:
         )
         return _CONTINUE
 
-    def _observe(self, call_id: str, name: str, text: str) -> None:
-        self.ledger.append(self.run.id, "observation", {"call_id": call_id, "name": name, "text": text})
+    def _observe(self, call_id: str, name: str, text: str, *, ok: bool = True) -> None:
+        self.ledger.append(self.run.id, "observation", {"call_id": call_id, "name": name, "text": text, "ok": ok})
 
     def _notice(self, text: str) -> None:
         self.ledger.append(self.run.id, "notice", {"text": text})

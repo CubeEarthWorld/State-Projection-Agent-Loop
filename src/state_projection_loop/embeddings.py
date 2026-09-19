@@ -12,9 +12,10 @@ or depend on any LLM/embedding provider SDK.
 """
 from __future__ import annotations
 
-import hashlib
 import math
 from typing import Protocol, Sequence, runtime_checkable
+
+from .hashing import fnv1a_32
 
 Vector = list[float]
 
@@ -54,7 +55,7 @@ class HashingEmbedding:
         for n in (2, 3):
             for i in range(max(0, len(text) - n + 1)):
                 gram = text[i: i + n]
-                h = int.from_bytes(hashlib.md5(gram.encode("utf-8")).digest()[:4], "little")
+                h = fnv1a_32(gram.encode("utf-8"))
                 vec[h % self.dim] += 1.0
         norm = math.sqrt(sum(x * x for x in vec))
         if norm > 0:

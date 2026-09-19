@@ -114,7 +114,7 @@ class TestRenderComposition:
 
         projection = default_projection(reg)
         turn = make_turn(registry=reg, candidates=[ScoredTool(tool=cap, score=1.0)])
-        msgs = projection.render(turn, api_tools=[cap.api_schema()])
+        msgs = projection.render(turn, api_tools=[cap.tool_spec()])
         last = str(msgs[-1].content)
         assert "schemas sent natively" in last
         assert "a somewhat long description" not in last
@@ -164,29 +164,39 @@ class TestHistorySection:
         msgs = section.render(turn)
         assert msgs[0].content == long_text
 
-    def test_fidelity_compressed_for_older(self):
-        ledger = InMemoryLedger()
-        run_id = "run_test"
-        for i in range(30):
+    @staticmethod
+    def _long_conversation(turns: int):
+        ledger, run_id = InMemoryLedger(), "run_test"
+        for i in range(turns):
             ledger.append(run_id, "user_input", {"text": f"msg {i} " + "pad " * 50})
-            ledger.append(run_id, "model_response", {"text": f"reply {i} " + "pad " * 50})
-        section = HistorySection()
-        turn = make_turn(ledger=ledger, run_id=run_id)
-        msgs = section.render(turn)
-        first_msg = msgs[0]
-        assert "omitted" in str(first_msg.content) or len(str(first_msg.content)) < 500
+            ledger.append(run_id, "model_response", {"text": "\n".join(f"reply {i} line {j}" for j in range(120))})
+        return ledger, run_id
 
-    def test_fidelity_summary_for_old(self):
-        ledger = InMemoryLedger()
-        run_id = "run_test"
-        for i in range(70):
-            ledger.append(run_id, "user_input", {"text": f"message number {i} with some content " + "pad " * 30})
-            ledger.append(run_id, "model_response", {"text": f"reply {i} " + "pad " * 30})
-        section = HistorySection()
+    def test_before_the_verbatim_point_assistant_text_is_compressed_then_summarized(self):
+        ledger, run_id = self._long_conversation(70)
         turn = make_turn(ledger=ledger, run_id=run_id)
-        msgs = section.render(turn)
-        first_msg = msgs[0]
-        assert "lines" in str(first_msg.content) or len(str(first_msg.content)) < 200
+        turn.working_state.verbatim_sequence = 2 * 69 + 1  # the last turn is the tail
+        msgs = HistorySection().render(turn)
+        replies = [str(m.content) for m in msgs if m.role == "assistant"]
+        assert replies[-1].count("\n") == 119, "the tail is verbatim"
+        assert "omitted" in replies[-2], "just before the point: head and tail"
+        assert replies[0].startswith("reply ") and "  [120 lines, " in replies[0], "far before the point: one line"
+
+    def test_the_user_is_never_compressed_and_the_oldest_are_dropped(self):
+        ledger, run_id = self._long_conversation(100)
+        turn = make_turn(ledger=ledger, run_id=run_id)
+        turn.working_state.verbatim_sequence = 2 * 99 + 1
+        msgs = HistorySection().render(turn)
+        users = [str(m.content) for m in msgs if m.role == "user"]
+        assert len(users) == 100 and all(u.endswith("pad ") for u in users)
+        # windows count messages of every role: 24 compressed and 60 summarized
+        # messages hold 12 and 30 assistant replies, plus the verbatim tail
+        assert len([m for m in msgs if m.role == "assistant"]) == 12 + 30 + 1
+
+    def test_without_a_verbatim_point_everything_is_verbatim(self):
+        ledger, run_id = self._long_conversation(30)
+        msgs = HistorySection().render(make_turn(ledger=ledger, run_id=run_id))
+        assert all(str(m.content).count("\n") == 119 for m in msgs if m.role == "assistant")
 
     def test_empty_ledger_returns_empty(self):
         section = HistorySection()
@@ -276,7 +286,7 @@ class TestWindowEnforcement:
         without_schema = projection.render(make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400))
         with_schema = projection.render(
             make_turn(registry=reg, ledger=ledger, run_id=run_id, window=400),
-            api_tools=[cap.api_schema()],
+            api_tools=[cap.tool_spec()],
         )
         assert estimate_tokens(with_schema) <= estimate_tokens(without_schema)
 
@@ -328,7 +338,10 @@ class TestToolCallPairing:
     def _render(self, ledger, run_id, **cfg):
         turn = make_turn(ledger=ledger, run_id=run_id)
         for key, value in cfg.items():
-            setattr(turn.config.compression, key, value)
+            if key == "verbatim_sequence":
+                turn.working_state.verbatim_sequence = value
+            else:
+                setattr(turn.config.compression, key, value)
         return HistorySection().render(turn)
 
     def test_a_decision_still_awaiting_its_results_is_hidden(self):
@@ -355,7 +368,7 @@ class TestToolCallPairing:
         msgs = self._render(ledger, run_id)
         assert [m.role for m in msgs] == ["user", "assistant", "tool", "tool"]
 
-    def test_age_based_exclusion_never_orphans_a_result(self):
+    def test_tier_exclusion_never_orphans_a_result(self):
         """The oldest events fall out of the window one at a time; the cut
         must not land between a decision and its results."""
         ledger, run_id = InMemoryLedger(), "run_test"
@@ -363,7 +376,9 @@ class TestToolCallPairing:
         self._result(ledger, run_id, "c0")
         for i in range(4):
             ledger.append(run_id, "user_input", {"text": f"later {i}"})
-        # summary_window=4 puts the decision out of the window but not its result.
-        msgs = self._render(ledger, run_id, full_window=1, compressed_window=2, summary_window=4)
+        # With the point after everything, the decision is 6 messages before
+        # it and its result 5: compressed_window=2 + summary_window=3 keeps
+        # the result but not the decision.
+        msgs = self._render(ledger, run_id, compressed_window=2, summary_window=3, verbatim_sequence=7)
         assert not any(m.role == "assistant" and m.tool_calls for m in msgs)
         assert not any(m.role == "tool" for m in msgs)

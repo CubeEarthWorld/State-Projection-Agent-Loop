@@ -38,6 +38,18 @@ def _cached_tokens(usage: Any) -> int:
     return int(getattr(details, "cached_tokens", None) or getattr(usage, "prompt_cache_hit_tokens", None) or 0)
 
 
+
+def to_openai_tools(tools: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Neutral tool specs -> OpenAI's ``{"type": "function", ...}`` envelope.
+
+    The runtime hands every adapter the same neutral ``{name, description,
+    parameters}``; wrapping it for one provider is that provider's adapter's
+    job. This is the whole conversion for the OpenAI-compatible family -
+    Anthropic, Gemini and the rest each need their own few lines.
+    """
+    return [{"type": "function", "function": dict(tool)} for tool in tools]
+
+
 class OpenAICompatAdapter:
     """Any OpenAI-compatible chat-completion API — OpenAI itself, DeepSeek,
     Groq, a local vLLM/Ollama server, or anything else speaking the same
@@ -102,7 +114,18 @@ class OpenAICompatAdapter:
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("pip install openai") from exc
             self._client, self._client_loop = AsyncOpenAI(**self._client_args), loop
+            loop.call_soon(loop.create_task, self._close_at_shutdown(self._client, loop))
         return self._client
+
+    @staticmethod
+    async def _close_at_shutdown(client: Any, loop: Any) -> None:
+        """Close the client while its loop is still open: a client garbage
+        collected after asyncio.run() has closed the loop logs an error."""
+        try:
+            while not loop.is_closed() and loop.is_running():
+                await asyncio.sleep(3600)
+        finally:
+            await client.close()
 
     @staticmethod
     def _to_api(message: Message) -> dict[str, Any]:
@@ -142,7 +165,7 @@ class OpenAICompatAdapter:
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
         if tools:
-            kwargs["tools"] = tools
+            kwargs["tools"] = to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body

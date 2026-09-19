@@ -29,6 +29,13 @@ a one-method `LLMAdapter` Protocol (`async complete(messages, tools) -> Decision
 and a scripted test double (`ScriptedLLM`) for deterministic tests. Talking
 to a real model — OpenAI, Anthropic, DeepSeek, a local server, anything — is
 entirely your own adapter, implementing that Protocol however you like.
+Tool schemas are provider-neutral too. `Capability.tool_spec()` returns plain
+`{name, description, parameters}` (JSON Schema) and nothing else — no
+vendor envelope. Rendering that into OpenAI's `{"type": "function", ...}`
+wrapper, Anthropic's `input_schema`, or a text protocol is the adapter's
+job, so supporting a new provider costs a few lines in your adapter and
+zero changes in the runtime.
+
 Reference implementations (`OpenAICompatAdapter`, `LlamaCppEmbedding`) live in
 [`examples/llm_adapters.py`](examples/llm_adapters.py) — copy and adapt them
 freely; they are examples, not a package API with a stability contract.
@@ -283,7 +290,8 @@ the pin set you chose, never by registry size.
 | Loop guard | `limits.max_repeats` (3; `0` off) | An identical call (same name and arguments) that failed identically, or returned the same result, `max_repeats` times within the last `limits.repeat_window` (8) calls is not executed again; the model gets a "loop guard" observation. Pure reads may still be polled. |
 | Structured job output | `result_schema` | In job mode `finish(result)` is validated against the JSON Schema; a failing result is bounced back like an argument error. |
 | Observers | `Session(on_event=fn)` | `fn(event)` fires after every ledger append. Read-only by contract (the veto point stays the policy engine); an observer that raises is ignored. |
-| Compaction | `compaction.trigger_ratio` (`0` off) | When the prompt exceeds the ratio of the window, one extra model call folds history older than the full-fidelity window into `WorkingState` as a schema-validated JSON delta (`state_folded` keeps the pre-fold state); folded events then render as one-line summaries. Deterministic compression stays on regardless. |
+| Compression | `compression.*` (always on) | History renders in tiers by distance from a verbatim point that moves in steps, so the prompt prefix stays byte-identical between steps (prompt caches hit); old tool results are masked to one line unless they failed, the user's words are never touched. See [docs/compression.md](docs/compression.md). |
+| Compaction | `compaction.trigger_ratio` (`0` off) | When the prompt exceeds the ratio of the window, one extra model call folds the history before the verbatim point into `WorkingState` as a schema-validated, grounding-checked JSON delta (`state_folded` keeps the pre-fold state). |
 | Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `meta.tool.find` with no second index. |
 | Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `filesystem.file.list/read/write` and `shell.command.run` with declared effects; never installed unless you ask. |
 

@@ -2,39 +2,39 @@
   "content_hash": [
     {
       "text": "",
-      "expected": "e3b0c44298fc1c14"
+      "expected": "cbf29ce484222325"
     },
     {
       "text": "hello",
-      "expected": "2cf24dba5fb0a30e"
+      "expected": "a430d84680aabd0b"
     },
     {
       "text": "L0\nL1\n",
-      "expected": "58e80875085e9eb8"
+      "expected": "77a4642e5c602958"
     },
     {
       "text": "日本語🎌テスト",
-      "expected": "3fa5cd0120a89185"
+      "expected": "2ec7e12cceb37226"
     },
     {
       "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "expected": "9835fa6bf4e20a9b"
+      "expected": "ee7717eba7a17e21"
     },
     {
       "text": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29",
-      "expected": "715770567c13fca3"
+      "expected": "81ee99482aec2eb6"
     },
     {
       "text": "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
-      "expected": "0b9a914bcf11bf98"
+      "expected": "4fa082b4b5b7666e"
     },
     {
       "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
-      "expected": "24859bed22ffcb43"
+      "expected": "55e9c6b67f684841"
     },
     {
       "text": "\u001b[31mred\u001b[0m plain",
-      "expected": "c5ffd874b2439846"
+      "expected": "28d6a9d908eb9ebc"
     }
   ],
   "strip_noise": [

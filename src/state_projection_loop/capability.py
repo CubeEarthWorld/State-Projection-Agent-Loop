@@ -318,12 +318,20 @@ class Capability:
             lines.append(f"Example: {self.name}({call})" + (f" — {note}" if note else ""))
         return "\n".join(lines)
 
-    def api_schema(self) -> dict[str, Any]:
-        """OpenAI-style function schema for native tool calling.
+    def tool_spec(self) -> dict[str, Any]:
+        """Provider-neutral description of one callable tool.
+
+        Deliberately just ``name`` / ``description`` / ``parameters`` (JSON
+        Schema): the runtime states what the tool *is* and each adapter
+        renders that into whatever its provider wants - OpenAI's
+        ``{"type": "function", "function": {...}}`` envelope, Anthropic's
+        ``input_schema``, a text protocol, anything. Emitting one vendor's
+        envelope from the core would make every other adapter unwrap it
+        first, and would quietly make that vendor the default.
 
         Uses ``api_name`` (dots encoded as ``__``), not the dotted ``name``
-        directly — most native-function-calling providers, OpenAI included,
-        reject "." in a function name. Callers translate the name back with
+        directly - most native-function-calling providers reject "." in a
+        function name. Callers translate the name back with
         :func:`from_api_name` (see ``Registry.resolve_api_name``) before
         the call reaches the registry.
         """
@@ -331,12 +339,9 @@ class Capability:
         if self.spec.usage_notes:
             description = f"{description}\nUsage: {self.spec.usage_notes}"
         return {
-            "type": "function",
-            "function": {
-                "name": self.api_name,
-                "description": description,
-                "parameters": self.spec.parameters,
-            },
+            "name": self.api_name,
+            "description": description,
+            "parameters": self.spec.parameters,
         }
 
     def embedding_source(self) -> str:

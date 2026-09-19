@@ -131,7 +131,7 @@ class TestChartCards:
 class TestCandidateDiscovery:
     def test_support_tools_surface_as_candidates(self, backend):
         def check(messages, tools):
-            names = [t["function"]["name"] for t in tools]
+            names = [t["name"] for t in tools]
             # native schema names are provider-safe encoded (dots -> "__")
             assert "support__manual__search" in names, f"layer-2 candidates missing manual search: {names}"
             return "説明書を確認しますね。"

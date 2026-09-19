@@ -2,12 +2,18 @@
 Ledger each turn. Truth lives in the ledger; the projection is a window
 over it with fidelity-graded compression.
 
-Fidelity levels (by event age from the tail of the renderable sequence):
+Fidelity levels, by distance from the working state's ``verbatim_sequence``
+(a point that moves in steps, so the rendering of old messages — and the
+provider's cached prefix — survives between steps):
 
-* ``full``       — verbatim (most recent events)
-* ``compressed`` — noise-stripped, head+tail truncated
+* ``full``       — verbatim (the tail, from the verbatim point on)
+* ``compressed`` — tool results masked to one line unless they report an
+                   error; assistant text noise-stripped, head+tail truncated
 * ``summary``    — first meaningful line + stats
-* (older events are simply excluded from the window)
+* (older events are excluded; a folded event keeps only the user's words)
+
+The user's own messages are never compressed or dropped: what they asked for
+is the one thing every later step must still be able to read.
 
 Budget accounting: the window check counts rendered messages *plus* native
 tool schemas and a reserved output allowance. On overflow the pipeline asks
@@ -20,17 +26,17 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .context import TurnContext
-from .compression import compress_text, summarize_text
+from .compression import compress_text, mask_observation, summarize_text
 from .events import renderable
 from .llm import FINISH_NAME
-from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM
+from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM, USER
 from .registry import Registry
 from .tokens import estimate_tokens
 from .serialization import dumps
 
 
 def _schema_name(schema: dict[str, Any]) -> Any:
-    return schema.get("function", {}).get("name")
+    return schema.get("name")
 
 
 class Section:
@@ -204,31 +210,35 @@ def pair_tool_calls(messages: list[Message]) -> list[Message]:
 
 class HistorySection(Section):
     """Derives conversation messages from the Event Ledger with fidelity-graded
-    compression. Shrinks by dropping its oldest message (and the observations
-    that answer it)."""
+    compression (see the module docstring for the tiers). Shrinks by dropping
+    its oldest message (and the observations that answer it)."""
 
     name = "history"
 
     def render(self, ctx: TurnContext) -> list[Message]:
         cfg = ctx.config.compression
+        state = ctx.working_state
         history = renderable(ctx.ledger, ctx.run_id)
+        older = sum(1 for event, _ in history if event.sequence < state.verbatim_sequence)
         messages: list[Message] = []
         for i, (event, message) in enumerate(history):
-            age = len(history) - 1 - i
             content = message.content
-            if isinstance(content, str) and content:
-                if event.sequence <= ctx.working_state.folded_sequence:
-                    content = summarize_text(content)  # folded into the working state
-                elif age < cfg.full_window:
-                    pass
-                elif age < cfg.compressed_window:
-                    content = compress_text(content, max_lines=(
-                        cfg.observation_max_lines if message.role == OBSERVATION else cfg.compressed_max_lines))
-                elif age < cfg.summary_window:
+            if event.sequence >= state.verbatim_sequence or message.role == USER:
+                pass  # the tail, and the user's own words, are always verbatim
+            elif event.sequence <= state.folded_sequence:
+                continue  # its substance lives in the working state now
+            elif older - i <= cfg.compressed_window:
+                if isinstance(content, str) and content:
+                    content = (mask_observation(content, max_lines=cfg.observation_max_lines,
+                                                failed=event.data.get("ok") is False)
+                               if message.role == OBSERVATION
+                               else compress_text(content, max_lines=cfg.compressed_max_lines))
+            elif older - i <= cfg.compressed_window + cfg.summary_window:
+                if isinstance(content, str) and content:
                     content = summarize_text(content)
-                else:
-                    continue
-                message.content = content
+            else:
+                continue
+            message.content = content
             messages.append(message)
         return pair_tool_calls(messages)
 

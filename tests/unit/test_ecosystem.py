@@ -1,17 +1,13 @@
 """What connects a session to the world around it: cross-session memory,
-listing runs, SKILL.md directories, workspace instruction files, MCP servers."""
+listing runs, SKILL.md directories, workspace instruction files."""
 from __future__ import annotations
-
-import sys
-from pathlib import Path
 
 import pytest
 
 from state_projection_loop import (
-    Config, InMemoryLedger, InstructionsSection, JsonlLedger, JsonlMemoryStore, McpProvider, Registry, ScriptedLLM,
+    Config, InMemoryLedger, InstructionsSection, JsonlLedger, JsonlMemoryStore, Registry, ScriptedLLM,
     Session, load_skills,
 )
-from state_projection_loop.builtin.mcp import _contract
 
 from _util import allow_all
 
@@ -92,39 +88,3 @@ class TestInstructions:
 
     def test_no_files_means_no_message(self, tmp_path):
         assert InstructionsSection(tmp_path).render(None) == []
-
-
-class TestMcp:
-    @pytest.fixture()
-    def provider(self):
-        server = Path(__file__).resolve().parents[1] / "fake_mcp_server.py"
-        provider = McpProvider("fake", [sys.executable, str(server)])
-        yield provider
-        provider.close()
-
-    def test_listed_tools_become_capabilities_with_the_annotated_contract(self, provider):
-        registry = Registry()
-        registry.attach_provider(provider)
-        echo, delete = registry.get("mcp.fake.echo"), registry.get("mcp.fake.delete_all")
-        assert [(e.kind, e.resource) for e in echo.effects] == [("read", "mcp:*")]
-        assert echo.execution.retry_safety == "idempotent"
-        assert [(e.kind, e.resource) for e in delete.effects] == [("external", "mcp:*")]
-        assert delete.execution.retry_safety == "never_retry"
-        assert echo.category == "mcp/fake"
-
-    def test_a_session_can_call_an_mcp_tool_and_sees_its_errors(self, provider):
-        registry = Registry()
-        registry.attach_provider(provider)
-        session = Session(ScriptedLLM([ScriptedLLM.calls(("mcp.fake.echo", {"text": "hi"}),
-                                                          ("mcp.fake.echo", {"text": "boom"})), "done"]),
-                          registry=registry, policy=allow_all(), builtins=())
-        session.send("go")
-        observations = [e.data["text"] for e in session.ledger.iter_run(session.run.id) if e.type == "observation"]
-        assert observations[0] == "echo: hi"
-        assert "echo refused" in observations[1]
-
-    def test_absent_annotations_are_the_most_restrictive_contract(self):
-        assert _contract({}) == ([{"kind": "external", "resource": "mcp:*"}], "never_retry")
-        assert _contract({"readOnlyHint": True}) == ([{"kind": "read", "resource": "mcp:*"}], "check_then_retry")
-        assert _contract({"destructiveHint": False, "idempotentHint": True}) == (
-            [{"kind": "write", "resource": "mcp:*"}], "idempotent")

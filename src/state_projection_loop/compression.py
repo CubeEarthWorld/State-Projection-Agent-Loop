@@ -5,17 +5,19 @@ fidelity. Every function here is total (never raises on any string input)
 and idempotent where noted. The guarantee: compression never fabricates
 content that was not in the original; it only removes or abbreviates.
 
-Fidelity levels (applied by projection based on event age):
+Fidelity levels (the projection picks one per message; see
+:class:`~state_projection_loop.projection.HistorySection`):
 
 * ``full``       — verbatim, no compression
-* ``compressed`` — pattern noise removed, long outputs head+tail truncated
+* ``compressed`` — pattern noise removed, long outputs head+tail truncated;
+                   for tool results, :func:`mask_observation`
 * ``summary``    — first meaningful line + token/line count
-* ``handle``     — artifact reference only (projection decides externally)
 """
 from __future__ import annotations
 
-import hashlib
 import re
+
+from .hashing import fnv1a_64_hex
 
 _NOISE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^diff --git .+\n", re.M), ""),
@@ -35,7 +37,7 @@ _TAIL_RATIO = 0.25
 
 
 def content_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return fnv1a_64_hex(text)
 
 
 def strip_noise(text: str) -> str:
@@ -72,6 +74,43 @@ def compress_text(text: str, *, max_lines: int = 80) -> str:
     if not result.strip() and text.strip():
         result = text.splitlines(keepends=True)[0]
     return result
+
+
+# What an error looks like in a tool result, whatever the language it is
+# reported in: the structural traces first (exit codes, stack frames), then
+# the word for it in the languages agents commonly work in. A result whose
+# call *failed* is treated as an error without consulting this at all.
+_ERROR_MARKER = re.compile(
+    r"(?i)\b(error|traceback|exception|failed|denied|fatal|panic|fehler|erreur|errore)\b"
+    r"|(?:exit(?: code)?|returncode|status)[=: ]+[1-9]"
+    r"|\bline \d+, in \b|\bat [^\n]+:\d+"
+    r"|エラー|失敗|例外|错误|失败|异常|오류|실패|ошибка|исключение"
+)
+
+
+def mask_observation(text: str, *, max_lines: int = 40, failed: bool = False) -> str:
+    """The compressed form of an old tool result: cleared down to its first
+    line and size — the model already acted on it — unless the call failed
+    or the text reports an error, which stays readable (head and tail)
+    because errors are what a later step most often needs to look back at."""
+    if failed or _ERROR_MARKER.search(text):
+        return compress_text(text, max_lines=max_lines)
+    return summarize_text(text)
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z0-9_][\w./:-]*[\w/]")
+
+
+def ungrounded(entry: str, transcript: str) -> list[str]:
+    """Identifier-like tokens of ``entry`` (paths, ids, numbers, names with
+    digits or punctuation) that never occur in ``transcript``: the parts a
+    summary could only have invented."""
+    haystack = transcript.lower()
+    return [
+        token for token in _IDENTIFIER.findall(entry)
+        if len(token) >= 3 and (any(ch.isdigit() for ch in token) or any(ch in "./:_-" for ch in token))
+        and token.lower() not in haystack
+    ]
 
 
 def first_meaningful_line(text: str) -> str:

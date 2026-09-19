@@ -132,14 +132,18 @@ class TestProjections:
         assert "demo.read" in cap.card_text()
         assert "demo.read@1" in cap.spec_text()
 
-    def test_api_schema_shape(self):
+    def test_tool_spec_shape(self):
         cap = build_capability_from_function(lambda x: x, name="demo.op")
-        schema = cap.api_schema()
-        assert schema["type"] == "function"
+        spec = cap.tool_spec()
+        # Provider-neutral: name / description / parameters and nothing
+        # else. No vendor envelope belongs in the core - rendering the
+        # OpenAI "function" wrapper or Anthropic's "input_schema" is the
+        # adapter's job, so a new provider costs a few lines there and
+        # nothing here.
+        assert set(spec) == {"name", "description", "parameters"}
         # dots are encoded ("__") for provider-safe function names — most
         # native-function-calling providers (OpenAI included) reject "."
-        assert schema["function"]["name"] == "demo__op" == cap.api_name
-        assert "parameters" in schema["function"]
+        assert spec["name"] == "demo__op" == cap.api_name
 
     def test_api_name_round_trips_through_registry(self):
         from state_projection_loop.capability import from_api_name, to_api_name

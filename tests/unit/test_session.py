@@ -74,7 +74,7 @@ class TestChatMode:
             # Native schemas are sent, so the candidate card dedupes down to
             # just the signature instead of repeating the full card.
             assert "[Tool candidates" in joined and "demo.echo(" in joined
-            tool_names = [t["function"]["name"] for t in tools]
+            tool_names = [t["name"] for t in tools]
             # native schema names are provider-safe encoded (dots -> "__")
             assert "demo__echo" in tool_names and "meta__tool__find" in tool_names
             return "saw candidates"
@@ -86,7 +86,7 @@ class TestChatMode:
         reg = echo_registry()
 
         def step2(messages, tools):
-            names = [t["function"]["name"] for t in tools]
+            names = [t["name"] for t in tools]
             assert "demo__echo" in names  # activated by find even without candidates
             return ScriptedLLM.call("demo.echo", text="via find_tools")
 
@@ -397,7 +397,7 @@ class TestDisabledCapabilitiesAreInvisible:
     def _sent(session: Session) -> tuple[str, list[str]]:
         request = session.llm.requests[-1]
         prompt = "\n".join(m.content for m in request["messages"] if isinstance(m.content, str))
-        return prompt, [t["function"]["name"] for t in request["tools"]]
+        return prompt, [t["name"] for t in request["tools"]]
 
     def test_bundled_checklist_tool_can_be_disabled(self):
         session = self._session("planning.checklist.manage")

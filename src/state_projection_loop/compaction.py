@@ -1,11 +1,13 @@
 """Compaction: fold old history into the structured working state with one
 model call, instead of re-summarising prose.
 
-The model returns a JSON delta; only the delta's *shape* is trusted (it is
-validated with the same schema validator as tool arguments), and the
-pre-fold working state is written to the ledger so a bad fold is
-recoverable by ``rewind``. Folded events keep living in the ledger and
-render at ``summary`` fidelity afterwards.
+The model returns a JSON delta. Its *shape* is validated with the same
+schema validator as tool arguments, and each entry is checked for
+grounding: an identifier, path or number the transcript never mentions is
+the mark of an invented fact, and such an entry is dropped (the delta
+records it under ``ungrounded``). The pre-fold working state is written to
+the ledger with the delta. Folded events keep living in the ledger; the
+projection renders only the user's own words of them afterwards.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import json
 import re
 from typing import Any, Optional
 
+from .compression import ungrounded
 from .json_schema import validate_value
 from .working_state import RecordedDecision, WorkingState
 
@@ -65,11 +68,30 @@ def parse_fold_reply(text: str) -> Optional[dict[str, Any]]:
     return decoded if isinstance(decoded, dict) else None
 
 
-def apply_fold_delta(ws: WorkingState, delta: dict[str, Any]) -> Optional[str]:
-    """Validate and merge a fold delta. Returns an error message, or None."""
+def apply_fold_delta(ws: WorkingState, delta: dict[str, Any], *, transcript: str = "") -> Optional[str]:
+    """Validate and merge a fold delta. Returns an error message, or None.
+
+    With a ``transcript``, entries carrying identifiers it never mentions
+    are dropped from the delta (and listed under ``delta["ungrounded"]``)
+    before the merge."""
     error = validate_value(FOLD_SCHEMA, delta)
     if error is not None:
         return error
+    if transcript:
+        dropped: list[str] = []
+
+        def grounded(entry: Any) -> bool:
+            text = entry if isinstance(entry, str) else f"{entry.get('text', '')} {entry.get('reason', '')}"
+            missing = ungrounded(text, transcript)
+            if missing:
+                dropped.append(f"{text} (unknown: {', '.join(missing)})")
+            return not missing
+
+        for key in ("facts_add", "decisions_add", "questions_add", "next_actions"):
+            if key in delta:
+                delta[key] = [entry for entry in delta[key] if grounded(entry)]
+        if dropped:
+            delta["ungrounded"] = dropped
     resolve = list(delta.get("questions_resolve") or [])
     for q in resolve:
         if q not in ws.open_questions:

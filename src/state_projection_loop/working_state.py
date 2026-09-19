@@ -58,11 +58,17 @@ class WorkingState:
     extra: dict[str, Any] = field(default_factory=dict)
     checklists: ChecklistStore = field(default_factory=ChecklistStore)
     # Ledger sequence up to which history has been folded into this state by
-    # compaction; those events render at summary fidelity afterwards.
+    # compaction; only the user's own words of those events render afterwards.
     folded_sequence: int = 0
+    # Ledger sequence from which history renders verbatim. Everything older
+    # is tiered by its distance from this point, and the point moves only in
+    # steps (see Session._advance_tiers), so the rendered prefix stays
+    # byte-identical between steps and a provider's prompt cache keeps hitting.
+    verbatim_sequence: int = 0
 
     def is_empty(self) -> bool:
-        return not any(getattr(self, f.name) for f in fields(self) if f.name != "folded_sequence")
+        return not any(getattr(self, f.name) for f in fields(self)
+                       if f.name not in ("folded_sequence", "verbatim_sequence"))
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {f.name: getattr(self, f.name) for f in fields(self)}  # declaration order
@@ -79,6 +85,7 @@ class WorkingState:
             extra=dict(d.get("extra") or {}),
             checklists=ChecklistStore.from_dict(d["checklists"]) if "checklists" in d else ChecklistStore(),
             folded_sequence=int(d.get("folded_sequence") or 0),
+            verbatim_sequence=int(d.get("verbatim_sequence") or 0),
             **{name: list(d.get(name) or []) for name in _LIST_FIELDS},
         )
 

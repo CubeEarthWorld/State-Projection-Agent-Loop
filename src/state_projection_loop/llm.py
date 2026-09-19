@@ -29,19 +29,16 @@ from .serialization import dumps
 
 FINISH_NAME = "finish"
 
-FINISH_SCHEMA: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": FINISH_NAME,
-        "description": (
-            "Finish the job and return the final result. Call this ALONE — never combined with "
-            "other tool calls in the same decision; a decision that does both is rejected."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {"result": {"description": "The final result: string, object, or artifact reference."}},
-            "required": ["result"],
-        },
+FINISH_SPEC: dict[str, Any] = {
+    "name": FINISH_NAME,
+    "description": (
+        "Finish the job and return the final result. Call this ALONE - never combined with "
+        "other tool calls in the same decision; a decision that does both is rejected."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"result": {"description": "The final result: string, object, or artifact reference."}},
+        "required": ["result"],
     },
 }
 

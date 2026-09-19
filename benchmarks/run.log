@@ -1,0 +1,91 @@
+[1/72] N=25    preload  stock     run0 ok   turns=2 in=13157   out=104   $0.0000 3.9s
+[2/72] N=25    preload  stock     run1 ok   turns=2 in=13155   out=107   $0.0000 2.1s
+[3/72] N=25    preload  stock     run2 ok   turns=2 in=13157   out=104   $0.0000 2.0s
+[4/72] N=25    preload  two_step  run0 ok   turns=3 in=19966   out=206   $0.0000 3.6s
+[5/72] N=25    preload  two_step  run1 ok   turns=3 in=19914   out=181   $0.0000 3.6s
+[6/72] N=25    preload  two_step  run2 ok   turns=3 in=19976   out=257   $0.0000 3.4s
+[7/72] N=25    preload  arith     run0 MISS turns=2 in=13193   out=157   $0.0000 2.0s
+[8/72] N=25    preload  arith     run1 ok   turns=2 in=13194   out=155   $0.0000 2.3s
+[9/72] N=25    preload  arith     run2 ERR  turns=2 in=13195   out=133   $0.0000 2.1s  BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+[10/72] N=25    preload  obscure   run0 ok   turns=2 in=13182   out=129   $0.0000 1.9s
+[11/72] N=25    preload  obscure   run1 ok   turns=2 in=13183   out=150   $0.0000 2.4s
+[12/72] N=25    preload  obscure   run2 ok   turns=2 in=13183   out=172   $0.0000 2.2s
+[13/72] N=25    spal     stock     run0 ok   turns=2 in=6026    out=124   $0.0000 1.9s
+[14/72] N=25    spal     stock     run1 ok   turns=2 in=5965    out=124   $0.0000 1.8s
+[15/72] N=25    spal     stock     run2 ok   turns=2 in=6009    out=105   $0.0000 1.6s
+[16/72] N=25    spal     two_step  run0 ok   turns=3 in=9246    out=257   $0.0000 3.0s
+[17/72] N=25    spal     two_step  run1 ok   turns=3 in=9167    out=226   $0.0000 2.9s
+[18/72] N=25    spal     two_step  run2 ok   turns=3 in=9148    out=208   $0.0000 3.3s
+[19/72] N=25    spal     arith     run0 ok   turns=2 in=4428    out=196   $0.0000 1.9s
+[20/72] N=25    spal     arith     run1 ok   turns=2 in=4425    out=148   $0.0000 2.2s
+[21/72] N=25    spal     arith     run2 ok   turns=2 in=4533    out=247   $0.0000 2.0s
+[22/72] N=25    spal     obscure   run0 ok   turns=2 in=4267    out=162   $0.0000 2.0s
+[23/72] N=25    spal     obscure   run1 ok   turns=2 in=4278    out=159   $0.0000 2.4s
+[24/72] N=25    spal     obscure   run2 ok   turns=2 in=4275    out=146   $0.0000 1.7s
+[25/72] N=200   preload  stock     run0 ok   turns=2 in=70939   out=101   $0.0000 4.4s
+[26/72] N=200   preload  stock     run1 ok   turns=2 in=70941   out=103   $0.0000 3.4s
+[27/72] N=200   preload  stock     run2 ok   turns=2 in=70946   out=108   $0.0000 3.7s
+[28/72] N=200   preload  two_step  run0 ok   turns=3 in=106650  out=245   $0.0000 5.2s
+[29/72] N=200   preload  two_step  run1 ok   turns=3 in=106726  out=263   $0.0000 6.0s
+[30/72] N=200   preload  two_step  run2 ok   turns=3 in=106632  out=235   $0.0000 6.0s
+[31/72] N=200   preload  arith     run0 ok   turns=2 in=70973   out=193   $0.0000 3.3s
+[32/72] N=200   preload  arith     run1 ok   turns=2 in=70980   out=160   $0.0000 3.3s
+[33/72] N=200   preload  arith     run2 ok   turns=2 in=70990   out=197   $0.0000 4.1s
+[34/72] N=200   preload  obscure   run0 ERR  turns=2 in=70958   out=102   $0.0000 5.1s  BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+[35/72] N=200   preload  obscure   run1 ok   turns=2 in=70962   out=137   $0.0000 3.9s
+[36/72] N=200   preload  obscure   run2 ok   turns=2 in=70961   out=123   $0.0000 3.2s
+[37/72] N=200   spal     stock     run0 ok   turns=2 in=5974    out=125   $0.0000 1.8s
+[38/72] N=200   spal     stock     run1 ok   turns=2 in=6042    out=128   $0.0000 2.4s
+[39/72] N=200   spal     stock     run2 ok   turns=2 in=6030    out=102   $0.0000 2.0s
+[40/72] N=200   spal     two_step  run0 ok   turns=3 in=9403    out=248   $0.0000 3.3s
+[41/72] N=200   spal     two_step  run1 ok   turns=3 in=9228    out=229   $0.0000 3.2s
+[42/72] N=200   spal     two_step  run2 ok   turns=3 in=9230    out=266   $0.0000 3.3s
+[43/72] N=200   spal     arith     run0 ok   turns=2 in=4444    out=153   $0.0000 2.1s
+[44/72] N=200   spal     arith     run1 ok   turns=2 in=4443    out=193   $0.0000 2.1s
+[45/72] N=200   spal     arith     run2 MISS turns=2 in=4450    out=162   $0.0000 1.6s
+[46/72] N=200   spal     obscure   run0 ok   turns=2 in=6363    out=148   $0.0000 1.8s
+[47/72] N=200   spal     obscure   run1 ok   turns=2 in=6382    out=159   $0.0000 2.1s
+[48/72] N=200   spal     obscure   run2 ok   turns=2 in=6365    out=131   $0.0000 1.8s
+[49/72] N=1000  preload  stock     run0 ok   turns=2 in=335390  out=103   $0.0000 9.5s
+[50/72] N=1000  preload  stock     run1 ok   turns=2 in=335389  out=193   $0.0000 7.6s
+[51/72] N=1000  preload  stock     run2 ok   turns=2 in=335390  out=114   $0.0000 7.2s
+[52/72] N=1000  preload  two_step  run0 ok   turns=3 in=503333  out=254   $0.0000 11.0s
+[53/72] N=1000  preload  two_step  run1 ok   turns=3 in=503265  out=211   $0.0000 12.2s
+[54/72] N=1000  preload  two_step  run2 ok   turns=3 in=503257  out=207   $0.0000 10.9s
+[55/72] N=1000  preload  arith     run0 ok   turns=2 in=335430  out=218   $0.0000 7.2s
+[56/72] N=1000  preload  arith     run1 ok   turns=2 in=335429  out=154   $0.0000 6.9s
+[57/72] N=1000  preload  arith     run2 ok   turns=2 in=335431  out=175   $0.0000 7.3s
+[58/72] N=1000  preload  obscure   run0 ok   turns=2 in=335405  out=128   $0.0000 7.5s
+[59/72] N=1000  preload  obscure   run1 MISS turns=2 in=335411  out=136   $0.0000 7.6s
+[60/72] N=1000  preload  obscure   run2 ERR  turns=2 in=335414  out=112   $0.0000 9.3s  BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+[61/72] N=1000  spal     stock     run0 ok   turns=2 in=6119    out=121   $0.0000 1.9s
+[62/72] N=1000  spal     stock     run1 ok   turns=2 in=6121    out=114   $0.0000 1.7s
+[63/72] N=1000  spal     stock     run2 ok   turns=2 in=6122    out=126   $0.0000 1.7s
+[64/72] N=1000  spal     two_step  run0 ok   turns=3 in=9304    out=206   $0.0000 3.2s
+[65/72] N=1000  spal     two_step  run1 ok   turns=3 in=9757    out=355   $0.0000 3.4s
+[66/72] N=1000  spal     two_step  run2 ok   turns=3 in=9239    out=230   $0.0000 3.2s
+[67/72] N=1000  spal     arith     run0 ok   turns=2 in=4524    out=192   $0.0000 2.3s
+[68/72] N=1000  spal     arith     run1 ok   turns=2 in=4521    out=196   $0.0000 2.5s
+[69/72] N=1000  spal     arith     run2 ok   turns=2 in=4521    out=205   $0.0000 2.5s
+[70/72] N=1000  spal     obscure   run0 ok   turns=2 in=6448    out=164   $0.0000 2.9s
+[71/72] N=1000  spal     obscure   run1 ok   turns=2 in=6439    out=139   $0.0000 2.4s
+[72/72] N=1000  spal     obscure   run2 ok   turns=2 in=6478    out=185   $0.0000 2.4s
+
+================================================================================
+     N arm        success   recall  turns   in/turn     out    $/task    sec
+--------------------------------------------------------------------------------
+    25 preload    10/12    12/12      2.0      6594     152    0.0000    2.3
+    25 spal       12/12    12/12      2.0      2624     160    0.0000    2.0
+   200 preload    11/12    12/12      2.0     35484     148    0.0000    4.0
+   200 spal       11/12    12/12      2.0      3048     156    0.0000    2.1
+  1000 preload    10/12    12/12      2.0    167711     164    0.0000    7.6
+  1000 spal       12/12    12/12      2.0      3070     188    0.0000    2.4
+================================================================================
+total spend this run: $0.0000
+
+3 run(s) errored:
+  N=25 preload arith run2: BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+  N=200 preload obscure run0: BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+  N=1000 preload obscure run2: BadRequestError: Error code: 400 - {'error': {'message': 'The `reasoning_content` in the thinking mode must be passed back to the API.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}
+
+Raw results -> benchmarks/results-deepseek.json

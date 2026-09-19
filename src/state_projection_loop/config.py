@@ -47,6 +47,13 @@ class DiscoveryConfig:
 
 @dataclass
 class CompressionConfig:
+    # History renders in tiers measured from a verbatim point that moves in
+    # steps (Session._advance_tiers): the newest `full_window` messages are
+    # verbatim once the tail grows past four times that; before the point, the
+    # next `compressed_window` messages are compressed (tool results masked
+    # to one line unless they report an error, assistant text head+tail),
+    # the next `summary_window` are one-line summaries, older ones are
+    # dropped. The user's own messages are never compressed or dropped.
     full_window: int = 6
     compressed_window: int = 24
     summary_window: int = 60
