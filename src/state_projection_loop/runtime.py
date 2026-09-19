@@ -478,6 +478,11 @@ class Runtime:
         attempts = max(1, capability.execution.retries + 1)
         last_error = ""
         last_outcome = "failed"
+        started = time.monotonic()
+
+        def elapsed_ms() -> int:
+            return int((time.monotonic() - started) * 1000)
+
         for attempt in range(attempts):
             command.attempts += 1
             try:
@@ -493,7 +498,7 @@ class Runtime:
                         observation=f"Question pending: {value.text}", command_id=command.id,
                     )
                 observation, artifact_id = self._observation_for(capability, value, ctx.store)
-                run.record_outcome(command, "ok", result_ref=artifact_id)
+                run.record_outcome(command, "ok", result_ref=artifact_id, duration_ms=elapsed_ms())
                 return ToolResult(
                     call=call, value=value, outcome="ok", command_id=command.id,
                     observation=observation, artifact_id=artifact_id,
@@ -510,7 +515,7 @@ class Runtime:
                 last_outcome = "failed"
             if attempt < attempts - 1:
                 await asyncio.sleep(min(0.5 * (attempt + 1), 2.0))
-        run.record_outcome(command, last_outcome, error=last_error)
+        run.record_outcome(command, last_outcome, error=last_error, duration_ms=elapsed_ms())
         return ToolResult(
             call=call, error=last_error, outcome=last_outcome,
             command_id=command.id,

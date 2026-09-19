@@ -165,7 +165,7 @@ class Run:
         return cmd
 
     def record_outcome(self, command: Command, outcome: str, *, error: Optional[str] = None,
-                        result_ref: Optional[str] = None) -> None:
+                        result_ref: Optional[str] = None, duration_ms: Optional[int] = None) -> None:
         if outcome not in COMMAND_OUTCOMES:
             raise ValueError(f"Unknown command outcome {outcome!r}")
         command.outcome = outcome
@@ -173,8 +173,8 @@ class Run:
         command.result_ref = result_ref
         event_type = {"ok": "command_completed", "failed": "command_failed",
                       "unknown": "command_outcome_unknown"}[outcome]
-        self.ledger.append(self.id, event_type,
-                            {"command_id": command.id, "error": error, "result_ref": result_ref})
+        self.ledger.append(self.id, event_type, {"command_id": command.id, "error": error,
+                                                 "result_ref": result_ref, "duration_ms": duration_ms})
 
     # -- approval -------------------------------------------------------------
 

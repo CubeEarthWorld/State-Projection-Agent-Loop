@@ -32,6 +32,12 @@ Vector = list[float]
 # Completion adapters
 # ---------------------------------------------------------------------------
 
+def _cached_tokens(usage: Any) -> int:
+    """Prompt-cache hits, under the two names providers use for them."""
+    details = getattr(usage, "prompt_tokens_details", None)
+    return int(getattr(details, "cached_tokens", None) or getattr(usage, "prompt_cache_hit_tokens", None) or 0)
+
+
 class OpenAICompatAdapter:
     """Any OpenAI-compatible chat-completion API — OpenAI itself, DeepSeek,
     Groq, a local vLLM/Ollama server, or anything else speaking the same
@@ -164,7 +170,8 @@ class OpenAICompatAdapter:
             text, calls = parse_text_tool_calls(text)
         return extract_finish(Decision(
             text=text, calls=calls, thought=thought,
-            usage=Usage(prompt_tokens=usage.prompt_tokens or 0, completion_tokens=usage.completion_tokens or 0)
+            usage=Usage(prompt_tokens=usage.prompt_tokens or 0, completion_tokens=usage.completion_tokens or 0,
+                        cached_tokens=_cached_tokens(usage))
             if usage is not None else None,
             raw=response,
         ))

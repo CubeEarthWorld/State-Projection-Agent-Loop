@@ -425,6 +425,7 @@ class Session:
                 "candidates": [s.tool.name for s in ctx.candidates],
             })
 
+            started = time.monotonic()
             try:
                 decision = extract_finish(await self._complete(messages, ctx.api_tools or None))
             except asyncio.CancelledError:
@@ -437,6 +438,8 @@ class Session:
             self.ledger.append(self.run.id, "model_response", {
                 "text": decision.text, "finish": decision.finish,
                 "calls": [c.to_dict() for c in decision.calls],
+                "usage": decision.usage.to_dict() if decision.usage else None,
+                "latency_ms": int((time.monotonic() - started) * 1000),
             })
 
             if decision.finish and decision.calls:

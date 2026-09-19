@@ -73,6 +73,14 @@ class Message:
 class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Of prompt_tokens, how many the provider served from its prompt cache
+    # (0 when it does not say): the number that tells whether the
+    # projection's prefix stayed byte-stable between turns.
+    cached_tokens: int = 0
+
+    def to_dict(self) -> dict[str, int]:
+        return {"prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
+                "cached_tokens": self.cached_tokens}
 
     @property
     def total_tokens(self) -> int:
