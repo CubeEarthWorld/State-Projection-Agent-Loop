@@ -17,6 +17,7 @@ Requires the corresponding optional client library:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any, Callable, Optional, Sequence
@@ -80,16 +81,22 @@ class OpenAICompatAdapter:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.extra_body = extra_body
-        if client is not None:
-            self._client = client
-        else:
+        self._client_args = dict(api_key=api_key, base_url=base_url, timeout=timeout)
+        self._client, self._client_loop = client, None
+
+    def _async_client(self) -> Any:
+        """The async client — so that Session.interrupt() cancelling a call
+        really abandons the request instead of waiting on a thread — made
+        per event loop, because the sync API (session.send) runs each turn
+        in a fresh asyncio.run() and an httpx client cannot outlive its loop."""
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client_loop is not loop:
             try:
                 from openai import AsyncOpenAI
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("pip install openai") from exc
-            # The async client, so that Session.interrupt() cancelling the
-            # call really abandons the request instead of waiting on a thread.
-            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+            self._client, self._client_loop = AsyncOpenAI(**self._client_args), loop
+        return self._client
 
     @staticmethod
     def _to_api(message: Message) -> dict[str, Any]:
@@ -135,7 +142,7 @@ class OpenAICompatAdapter:
             kwargs["extra_body"] = self.extra_body
 
         if on_delta is None:
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await self._async_client().chat.completions.create(**kwargs)
             choice = response.choices[0].message
             text, thought = choice.content or "", getattr(choice, "reasoning_content", None) or ""
             raw_calls = [(tc.id, tc.function.name, tc.function.arguments or "{}") for tc in choice.tool_calls or []]
@@ -169,7 +176,7 @@ class OpenAICompatAdapter:
         thought: list[str] = []
         calls: dict[int, list] = {}  # index -> [id, name, arguments]
         usage = None
-        stream = await self._client.chat.completions.create(
+        stream = await self._async_client().chat.completions.create(
             **kwargs, stream=True, stream_options={"include_usage": True})
         async for chunk in stream:
             if getattr(chunk, "usage", None) is not None:

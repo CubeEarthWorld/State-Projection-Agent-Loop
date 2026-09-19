@@ -53,6 +53,8 @@ _LOCAL_STATE = (
          resource_pattern="user:*", reason="preset:ask_user"),
     dict(decision="allow", capability_pattern="state.*", effect_kind="write",
          resource_pattern="working_state:*", reason="preset:local_working_state"),
+    dict(decision="allow", capability_pattern="memory.*", resource_pattern="memory:*",
+         reason="preset:local_memory"),
 )
 
 # Each preset is the rules it installs, in order; a rule without a reason gets

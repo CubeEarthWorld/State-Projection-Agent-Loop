@@ -1,0 +1,88 @@
+[
+  {
+    "name": "memory.note.save",
+    "category": "memory",
+    "card": {
+      "summary": "Save a note that outlives this run and session.",
+      "tags": ["memory", "note", "remember"]
+    },
+    "spec": {
+      "description": "Save a short note to cross-session memory: a user preference, a project convention, a fact worth knowing next time. Notes are never injected automatically; a later run finds them with memory.note.search.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The note, one self-contained sentence or two.",
+            "maxLength": 2000
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional labels to search by later."
+          }
+        },
+        "required": ["text"]
+      },
+      "usage_notes": "Save what a future session could not rediscover on its own. Do not save transcript details."
+    },
+    "discovery": {
+      "pinned": true,
+      "kernel_note": "Facts worth keeping across sessions go to memory.note.save; look them up with memory.note.search before asking the user again.",
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 5,
+      "retry_safety": "idempotent"
+    },
+    "effects": [
+      {
+        "kind": "write",
+        "resource": "memory:notes"
+      }
+    ]
+  },
+  {
+    "name": "memory.note.search",
+    "category": "memory",
+    "card": {
+      "summary": "Search notes saved by earlier runs and sessions.",
+      "tags": ["memory", "note", "recall"]
+    },
+    "spec": {
+      "description": "Search cross-session memory. Returns the best-matching notes with their tags and when they were saved; only what you search for enters the context.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to look for, in natural language."
+          },
+          "k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 5
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": 5,
+      "retry_safety": "idempotent"
+    },
+    "effects": [
+      {
+        "kind": "read",
+        "resource": "memory:notes"
+      }
+    ]
+  }
+]

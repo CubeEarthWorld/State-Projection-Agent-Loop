@@ -12,6 +12,7 @@ from ..registry import Registry
 from .ask import ASK_HANDLERS
 from .checklist import CHECKLIST_HANDLERS
 from .defs import load
+from .memory import MEMORY_HANDLERS
 from .meta import META_HANDLERS, SPAWN_HANDLERS
 from .state import STATE_HANDLERS
 
@@ -24,6 +25,7 @@ _PACKS: dict[str, dict[str, Callable]] = {
     "state": STATE_HANDLERS,
     "spawn": SPAWN_HANDLERS,
     "ask": ASK_HANDLERS,
+    "memory": MEMORY_HANDLERS,
 }
 
 # Every pack name `install_builtins` accepts.

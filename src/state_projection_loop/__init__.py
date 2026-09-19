@@ -8,7 +8,8 @@ Authorize → Execute → Record → Continue/Wait/Complete.
 
 from .artifacts import ArtifactStore, ref as artifact_ref
 from .builtin import BUILTIN_PACKS, DEFAULT_BUILTINS, install_builtins
-from .builtin.skills import skill_capability
+from .builtin.mcp import McpProvider
+from .builtin.skills import load_skills, skill_capability
 from .builtin.toolkits import install_toolkits
 from .compaction import FOLD_INSTRUCTIONS, FOLD_SCHEMA, apply_fold_delta, parse_fold_reply
 from .capability import Capability, capability
@@ -18,14 +19,16 @@ from .config import Config
 from .checklists import ChecklistStore
 from .discovery import ScoredTool, ToolSearch
 from .embeddings import EmbeddingBackend, HashingEmbedding
-from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, event_to_message
+from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, RunSummary, Snapshot, event_to_message
 from .llm import FallbackAdapter, LLMAdapter, ScriptedLLM, extract_finish, parse_text_tool_calls
+from .memory import JsonlMemoryStore, MemoryStore, Note
 from .messages import Decision, Message, ToolCall, Usage
 from .policy import PolicyEngine, PolicyDecision, Rule
 from .projection import (
     CandidatesSection,
     ChecklistSection,
     HistorySection,
+    InstructionsSection,
     KernelSection,
     Projection,
     Section,
@@ -83,6 +86,13 @@ __all__ = [
     "ObservedLedger",
     "validate_value",
     "skill_capability",
+    "load_skills",
+    "McpProvider",
+    "MemoryStore",
+    "JsonlMemoryStore",
+    "Note",
+    "RunSummary",
+    "InstructionsSection",
     "install_toolkits",
     "FOLD_SCHEMA",
     "FOLD_INSTRUCTIONS",

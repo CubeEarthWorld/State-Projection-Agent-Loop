@@ -16,6 +16,7 @@ nothing can give back more.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from .context import TurnContext
@@ -116,6 +117,35 @@ class KernelSection(Section):
         native_names = {_schema_name(t) for t in ctx.api_tools}
         if ctx.api_tools and self._pinned_api_names <= native_names:
             return list(self._native_messages)
+        return list(self._messages)
+
+
+class InstructionsSection(Section):
+    """Standing instructions a workspace carries in ``AGENTS.md`` (or
+    ``CLAUDE.md``): every such file from the filesystem root down to
+    ``root``, outermost first, so the nearest file has the last word.
+    Fixed for the session and labelled by origin; the kernel stays the
+    host's own text."""
+
+    name = "instructions"
+    FILES = ("AGENTS.md", "CLAUDE.md")
+
+    def __init__(self, root: str | Path, *, files: tuple[str, ...] = FILES) -> None:
+        self._messages = [Message(role=SYSTEM, content=body)] if (body := self.load(root, files)) else []
+
+    @staticmethod
+    def load(root: str | Path, files: tuple[str, ...] = FILES) -> str:
+        directory = Path(root).resolve()
+        found: list[tuple[Path, str]] = []
+        for folder in [directory, *directory.parents]:
+            for name in files:
+                candidate = folder / name
+                if candidate.is_file():
+                    found.append((candidate, candidate.read_text(encoding="utf-8").strip()))
+                    break  # one file per folder: the first name listed wins
+        return "\n\n".join(f"[Instructions from {path}]\n{text}" for path, text in reversed(found) if text)
+
+    def render(self, ctx: TurnContext) -> list[Message]:
         return list(self._messages)
 
 
@@ -357,6 +387,7 @@ def build_default_sections(
 ) -> list[Section]:
     factories = {
         "kernel": lambda: KernelSection(kernel_text),
+        "instructions": lambda: InstructionsSection(Path.cwd()),
         "toc": TocSection,
         "working_state": WorkingStateSection,
         "checklists": ChecklistSection,

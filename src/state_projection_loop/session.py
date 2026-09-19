@@ -35,6 +35,7 @@ from .embeddings import EmbeddingBackend
 from .events import Event, EventLedger, InMemoryLedger, JsonlLedger, ObservedLedger, Snapshot, RENDERABLE_TYPES, renderable
 from .ids import new_id
 from .llm import FINISH_SCHEMA, LLMAdapter, extract_finish
+from .memory import JsonlMemoryStore, MemoryStore
 from .messages import ASSISTANT, Decision, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
 from .context import TurnContext
@@ -89,6 +90,7 @@ class Session:
         on_event: Optional[Callable[[Event], None]] = None,
         on_delta: Optional[Callable[[str, str], None]] = None,
         hooks: Optional[Hooks] = None,
+        memory: Optional[MemoryStore] = None,
         _restored: Optional[Snapshot] = None,
     ) -> None:
         """``_restored`` is :meth:`resume_from_ledger`'s way in: the session
@@ -109,6 +111,11 @@ class Session:
             self.session_id = self.run.session_id
 
         self.policy = policy if policy is not None else self._default_policy()
+        # Cross-session notes (the `memory` pack). Beside the ledger when the
+        # session persists, in process memory otherwise.
+        ledger_dir = self.config.persistence.ledger_directory
+        self.memory = memory if memory is not None else JsonlMemoryStore(
+            Path(ledger_dir) / "memory.jsonl" if ledger_dir else None)
 
         artifacts_dir = Path(self.config.artifacts.directory) if self.config.artifacts.directory else None
         self.store = ArtifactStore(self.run.id, directory=artifacts_dir)
@@ -116,7 +123,8 @@ class Session:
 
         # What branch() hands to the new session: code, not state, so it is
         # passed on rather than rebuilt from defaults.
-        self._branch_args = dict(kernel=kernel, sections=sections, builtins=builtins, on_event=on_event)
+        self._branch_args = dict(kernel=kernel, sections=sections, builtins=builtins, on_event=on_event,
+                                 hooks=hooks, on_delta=on_delta, memory=self.memory)
         if sections is None:
             sections = build_default_sections(
                 self.config.projection.sections, kernel_text=kernel,

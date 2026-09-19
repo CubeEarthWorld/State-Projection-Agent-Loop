@@ -58,6 +58,7 @@ _PREFIXES = {
     "artifact": "art",
     "question": "qst",
     "call": "call",
+    "note": "note",
 }
 
 

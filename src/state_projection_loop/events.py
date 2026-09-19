@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Iterable, Iterator, Optional, Protocol, runtime_checkable
 
 from .ids import new_id
 from .messages import ASSISTANT, OBSERVATION, SYSTEM, USER, Message, ToolCall
@@ -84,6 +84,17 @@ class Snapshot:
     state: dict[str, Any]
 
 
+@dataclass
+class RunSummary:
+    """What a ledger knows about a run without reading its events: enough
+    to list, pick and resume one."""
+
+    run_id: str
+    session_id: str
+    state: str
+    ts: float  # the last snapshot's time
+
+
 @runtime_checkable
 class EventLedger(Protocol):
     def append(self, run_id: str, type: str, data: dict[str, Any]) -> Event: ...
@@ -95,6 +106,10 @@ class EventLedger(Protocol):
     def save_snapshot(self, snapshot: Snapshot) -> None: ...
 
     def load_snapshot(self, run_id: str) -> Optional[Snapshot]: ...
+
+    def list_runs(self) -> list[RunSummary]:
+        """Every run with a snapshot, newest first."""
+        ...
 
 
 def _new_event(run_id: str, sequence: int, type: str, data: dict[str, Any]) -> Event:
@@ -132,6 +147,9 @@ class InMemoryLedger:
 
     def load_snapshot(self, run_id: str) -> Optional[Snapshot]:
         return self._snapshots.get(run_id)
+
+    def list_runs(self) -> list[RunSummary]:
+        return _summaries(self._snapshots.values())
 
 
 class JsonlLedger:
@@ -205,6 +223,11 @@ class JsonlLedger:
         d = json.loads(path.read_text(encoding="utf-8"))
         return Snapshot(run_id=d["run_id"], sequence=d["sequence"], ts=d["ts"], state=d["state"])
 
+    def list_runs(self) -> list[RunSummary]:
+        snapshots = (self.load_snapshot(p.name[:-len(".snapshot.json")])
+                     for p in self.directory.glob("*.snapshot.json"))
+        return _summaries(snap for snap in snapshots if snap is not None)
+
 
 class ObservedLedger:
     """A ledger that also hands every appended :class:`Event` to an observer.
@@ -237,6 +260,15 @@ class ObservedLedger:
 
     def load_snapshot(self, run_id: str) -> Optional[Snapshot]:
         return self.inner.load_snapshot(run_id)
+
+    def list_runs(self) -> list[RunSummary]:
+        return self.inner.list_runs()
+
+
+def _summaries(snapshots: Iterable[Snapshot]) -> list[RunSummary]:
+    runs = [RunSummary(run_id=s.run_id, session_id=s.state.get("session_id", ""),
+                       state=s.state.get("state", ""), ts=s.ts) for s in snapshots]
+    return sorted(runs, key=lambda r: r.ts, reverse=True)
 
 
 def event_to_message(event: Event) -> Optional[Message]:
