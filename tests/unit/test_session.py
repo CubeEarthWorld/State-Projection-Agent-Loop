@@ -171,6 +171,23 @@ class TestInterruption:
         assert llm.requests == []  # stopped before calling the model
 
 
+class TestHostNotices:
+    """A slash command the host ran itself: the model must see what happened
+    without the host faking a user turn."""
+
+    def test_notice_reaches_the_next_prompt_without_calling_the_model(self):
+        llm = ScriptedLLM(["ok"])
+        session = Session(llm)
+        session.notice("[host] /compact ran: history folded on the user's request.")
+        assert llm.requests == []  # no turn spent
+
+        session.send("continue")
+        prompt = llm.requests[0]["messages"]
+        assert any("/compact ran" in (m.content or "") for m in prompt)
+        # It is the system speaking, not the user.
+        assert [m.role for m in prompt if "/compact ran" in (m.content or "")] == ["system"]
+
+
 class TestPolicyGating:
     def test_deny_blocks_execution_without_running_handler(self):
         executed = []

@@ -214,6 +214,17 @@ class Session:
         if inflight is not None:
             inflight.get_loop().call_soon_threadsafe(inflight.cancel)
 
+    def notice(self, text: str) -> None:
+        """Put out-of-band text into the run's context.
+
+        For what the host did outside the loop and the model must still know
+        about: a command the user typed that ran locally, a skill loaded on
+        demand (``session.notice(session.invoke("skill.foo.load"))``), a file
+        that was attached. It renders as a system message, costs no turn and
+        calls no model — what the *user* said goes through :meth:`send`.
+        """
+        self._notice(text)
+
     def add_section(self, section: Section, *, before: str = "candidates") -> None:
         self.projection.insert_before(before, section)
 
