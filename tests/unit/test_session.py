@@ -475,6 +475,16 @@ class TestResumedRunArtifacts:
         assert "xxx" in resumed.store.peek(ids[0])
 
 
+class TestBranchKeepsTheSessionsWiring:
+    def test_a_branch_of_a_session_without_builtins_installs_none(self):
+        seen: list[str] = []
+        session = Session(ScriptedLLM(["one"]), builtins=(), on_event=lambda e: seen.append(e.type))
+        session.send("hi")
+        branch, _ = session.branch()
+        assert list(session.registry) == [], "branching must not install packs the parent excluded"
+        assert "branch_created" in seen, "the parent's observer follows the branch"
+
+
 class TestResumeFromLedger:
     def test_resuming_writes_no_second_run_and_keeps_the_kernel(self, tmp_path):
         from state_projection_loop import Config

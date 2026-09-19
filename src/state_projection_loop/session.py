@@ -112,7 +112,9 @@ class Session:
         self.store = ArtifactStore(self.run.id, directory=artifacts_dir)
         self.search = ToolSearch(self.registry, embedder=embedder, vector=self.config.discovery.vector)
 
-        self._kernel_text = kernel
+        # What branch() hands to the new session: code, not state, so it is
+        # passed on rather than rebuilt from defaults.
+        self._branch_args = dict(kernel=kernel, sections=sections, builtins=builtins, on_event=on_event)
         if sections is None:
             sections = build_default_sections(
                 self.config.projection.sections, kernel_text=kernel,
@@ -246,9 +248,8 @@ class Session:
 
     def branch(self, *, at_message: Optional[int] = None) -> tuple["Session", list[str]]:
         new_session = Session(
-            self.llm, kernel=self._kernel_text, config=copy.deepcopy(self.config), registry=self.registry,
-            embedder=self.search.embedder,
-            spawn_llm_factory=self.spawn_llm_factory, policy=self.policy,
+            self.llm, config=copy.deepcopy(self.config), registry=self.registry, embedder=self.search.embedder,
+            spawn_llm_factory=self.spawn_llm_factory, policy=self.policy, **self._branch_args,
         )
         new_session.working_state = copy.deepcopy(self.working_state)
         events = [event for event, _ in renderable(self.ledger, self.run.id)]

@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mosimosi/State-Projection-Agent-Loop"
+Homepage = "https://github.com/CubeEarthWorld/State-Projection-Agent-Loop"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/state_projection_loop"]
