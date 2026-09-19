@@ -9,11 +9,9 @@ from state_projection_loop import ScriptedLLM
 from examples.game_master import tools
 from examples.game_master.tools import MediaLog
 
-from _util import allow_all
-
 
 def make_session(log, steps, seed=None):
-    return tools.make_session(ScriptedLLM(steps), log, seed=seed, dice_seed=42, policy=allow_all())
+    return tools.make_session(ScriptedLLM(steps), log, seed=seed, dice_seed=42)
 
 
 class TestPresentation:

@@ -14,7 +14,6 @@ import os
 import pytest
 
 from state_projection_loop import Config, Registry, Session
-from state_projection_loop.policy import PolicyEngine
 
 from examples.coding_agent.tools import CODING_KERNEL, build_coding_registry, seed_workspace
 from examples.customer_support.tools import SUPPORT_KERNEL, SupportBackend, build_support_registry

@@ -7,7 +7,7 @@ import pytest
 
 from state_projection_loop import Config, Registry, ScriptedLLM, Session
 from state_projection_loop.messages import Decision, ToolCall, Usage
-from state_projection_loop.policy import PolicyEngine, Rule
+from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.session import ConcurrencyError
 from state_projection_loop.tokens import estimate_tokens
 

@@ -91,6 +91,13 @@ class Rule:
     arg_predicate: Optional[Callable[[dict[str, Any]], bool]] = None
     reason: str = ""
 
+    @property
+    def is_catch_all(self) -> bool:
+        """Matches every call: the layer's fallback, consulted after every
+        rule that names something (see :meth:`PolicyEngine._match_layer`)."""
+        return (self.capability_pattern == "*" and self.effect_kind is None
+                and self.resource_pattern == "*" and self.arg_predicate is None)
+
     def matches(self, capability: Capability, effect: Effect, arguments: dict[str, Any]) -> bool:
         if not glob_match(capability.name, self.capability_pattern):
             return False
@@ -166,10 +173,13 @@ class PolicyEngine:
 
     def _match_layer(self, layer: str, capability: Capability, effect: Effect,
                       arguments: dict[str, Any]) -> Optional[Rule]:
-        for rule in self.layers[layer]:
-            if rule.matches(capability, effect, arguments):
-                return rule
-        return None
+        """The first matching rule in the layer. A rule that matches
+        everything (a preset's closing ``require_approval``) is the layer's
+        fallback and is consulted last, so a grant added after
+        ``apply_preset`` on the same layer takes effect instead of being
+        shadowed by it."""
+        matched = [rule for rule in self.layers[layer] if rule.matches(capability, effect, arguments)]
+        return next((rule for rule in matched if not rule.is_catch_all), matched[0] if matched else None)
 
     def _evaluate_effect(self, capability: Capability, effect: Effect,
                           arguments: dict[str, Any]) -> tuple[str, str, str]:

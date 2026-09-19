@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from state_projection_loop import ScriptedLLM, Session
+from state_projection_loop import ScriptedLLM
 from state_projection_loop.artifacts import ref
-from state_projection_loop.policy import PolicyEngine
 
 from examples.customer_support import tools
 from examples.customer_support.tools import SupportBackend, load_manuals
 
-from _util import allow_all
 
 
 @pytest.fixture()
@@ -20,7 +18,7 @@ def backend():
 
 
 def make_session(backend, steps):
-    return tools.make_session(ScriptedLLM(steps), backend, policy=allow_all())
+    return tools.make_session(ScriptedLLM(steps), backend)
 
 
 class TestManualData:

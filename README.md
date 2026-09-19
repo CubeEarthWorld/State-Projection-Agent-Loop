@@ -158,7 +158,10 @@ if session.run.state == "WAITING_FOR_APPROVAL":
 
 Evaluation order is fixed: `absolute > admin > developer > workspace > session > llm`.
 The most restrictive matching rule wins across layers — a `deny` at any
-layer can never be relaxed by one below it. An LLM-proposed safety
+layer can never be relaxed by one below it. Within a layer the first
+matching rule wins, except that a rule matching everything (a preset's
+closing `require_approval`) is that layer's fallback, so a grant added after
+`apply_preset` takes effect instead of being shadowed by it. An LLM-proposed safety
 assessment (`policy.set_llm_safety_mode("advisory" | "approval_routing")`)
 can escalate toward approval but can never grant a bare `allow` or issue the
 final `deny` by itself.

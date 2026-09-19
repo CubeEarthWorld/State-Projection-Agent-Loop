@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
 
 from state_projection_loop import Config, Registry, ToolCall
 from state_projection_loop.artifacts import ArtifactStore, ref
