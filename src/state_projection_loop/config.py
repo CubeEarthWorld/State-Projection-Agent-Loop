@@ -108,7 +108,10 @@ class CompactionConfig:
     # When the rendered prompt exceeds this fraction of the window, one extra
     # model call folds old history into the working state (see compaction.py).
     # 0 disables compaction; deterministic compression always stays on.
-    trigger_ratio: float = 0.0
+    # Fold when the prompt exceeds this share of the room the render has
+    # (window less reserved output), at the next step of the verbatim
+    # point. 0 turns the fold off; see docs/compression.md for the cost.
+    trigger_ratio: float = 0.75
 
 
 @dataclass

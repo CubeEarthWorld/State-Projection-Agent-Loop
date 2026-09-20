@@ -64,7 +64,7 @@ The point is part of the working state, so it survives a restart and
 
 ## The fold
 
-With `compaction.trigger_ratio > 0`, a prompt that exceeds that fraction of
+With `compaction.trigger_ratio > 0` (the default is 0.75), a prompt that exceeds that fraction of
 the *room* — the window less `reserved_output_tokens` and provider
 overhead, which is what the render actually budgets messages and schemas
 against — triggers one model call that folds history into the working
@@ -162,7 +162,7 @@ keeps that arm).
 ```python
 "compression": {"full_window": 6, "compressed_window": 24, "summary_window": 60,
                 "compressed_max_lines": 80, "observation_max_lines": 40},
-"compaction":  {"trigger_ratio": 0.0},   # 0 = no fold
+"compaction":  {"trigger_ratio": 0.75},  # 0 = no fold
 ```
 
 Windows count messages of every role. `full_window` is the smallest

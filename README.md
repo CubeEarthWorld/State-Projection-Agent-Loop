@@ -292,7 +292,7 @@ the pin set you chose, never by registry size.
 | Host-side commands | `session.notice(text)` | Text the host puts into the run's context without spending a turn or calling the model — the outcome of a slash command it ran itself, or a skill it loaded on demand (`session.notice(session.invoke("skill.foo.load"))`). It renders as a system message; what the *user* typed still goes through `send()`. Recognising `/name args` is the host's job: the runtime never sees an input channel, so it never reserves a prefix. |
 | Observers | `Session(on_event=fn)` | `fn(event)` fires after every ledger append. Read-only by contract (the veto point stays the policy engine); an observer that raises is ignored. [`examples/otel_tracing.py`](examples/otel_tracing.py) turns the stream into OpenTelemetry spans (run, model call, tool command). |
 | Compression | `compression.*` (always on) | History renders in tiers by distance from a verbatim point that moves in steps, so the prompt prefix stays byte-identical between steps (prompt caches hit); old tool results are masked to one line unless they failed, the user's words are never touched. See [docs/compression.md](docs/compression.md). |
-| Compaction | `compaction.trigger_ratio` (`0` off) | When the prompt exceeds the ratio of the window, one extra model call folds the history before the verbatim point into `WorkingState` as a schema-validated, grounding-checked JSON delta (`state_folded` keeps the pre-fold state). |
+| Compaction | `compaction.trigger_ratio` (default `0.75`, `0` off) | When the prompt exceeds the ratio of the window, one extra model call folds the history before the verbatim point into `WorkingState` as a schema-validated, grounding-checked JSON delta (`state_folded` keeps the pre-fold state). |
 | Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `meta.tool.find` with no second index. |
 | Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `filesystem.file.list/read/write` and `shell.command.run` with declared effects; never installed unless you ask. |
 
@@ -343,7 +343,7 @@ artifacts must be explicitly moved into the parent's namespace.
 Config.from_dict({
   "mode": "chat",                          # or "job" (finish(result) ends the run)
   "result_schema": None,                   # job mode: JSON Schema finish(result) must satisfy
-  "compaction": {"trigger_ratio": 0.0},    # 0 = off; e.g. 0.8 folds history into WorkingState
+  "compaction": {"trigger_ratio": 0.75},   # 0 = off: no fold of history into WorkingState
   "projection": {
       "sections": ["kernel", "toc", "history", "working_state", "checklists", "candidates"],
       "window_tokens": 30000, "reserved_output_tokens": 1024, "provider_overhead_tokens": 0,
