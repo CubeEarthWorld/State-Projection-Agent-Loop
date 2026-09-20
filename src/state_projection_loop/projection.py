@@ -234,12 +234,19 @@ class HistorySection(Section):
         return pair_tool_calls(messages)
 
     def shrink(self, ctx: TurnContext, current: list[Message]) -> Optional[list[Message]]:
+        # Drop the oldest message that is not the user's, plus whatever
+        # observations answer it. The user's turns go last, not never: the
+        # window is a hard limit the provider enforces, so when they are all
+        # that is left one still has to go. Before this, the oldest message
+        # went whatever its role, and a long session evicted the original
+        # instruction while assistant chatter around it stayed.
         if not current:
             return None
-        i = 1
-        while i < len(current) and current[i].role == OBSERVATION:
-            i += 1
-        return pair_tool_calls(current[i:])
+        start = next((i for i, m in enumerate(current) if m.role != USER), 0)
+        end = start + 1
+        while end < len(current) and current[end].role == OBSERVATION:
+            end += 1
+        return pair_tool_calls(current[:start] + current[end:])
 
 
 class WorkingStateSection(Section):

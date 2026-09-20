@@ -212,3 +212,91 @@ class TestSpecaFindings:
         # result-keyed loop guard could never see them repeat.
         assert run(lambda i: {"x": "same"}) == config.limits.max_repeats
         assert run(lambda i: {"x": f"v{i}"}) == 8
+
+
+class TestSpecaReviewFindings:
+    """The second round, from speca's review phase. Same rule: reproduced
+    before fixed, and mirrored in the Dart port."""
+
+    def test_an_undeclared_effect_still_counts_as_irreversible(self):
+        from state_projection_loop import Registry
+        registry = Registry()
+        # No effects= at all. Policy and the runtime already treat that as
+        # external; the rewind/branch notice used to read the raw list and
+        # report it as safe.
+        registry.register({"name": "demo.send.thing", "category": "demo",
+                           "spec": {"description": "Send a thing."}}, handler=lambda: "sent")
+        capability = registry.get("demo.send.thing")
+        assert capability.effects == []
+        assert any(e.kind == "external" for e in capability.planned_effects)
+
+    def test_an_oversized_items_array_is_rejected_on_length(self):
+        import time
+        from state_projection_loop.json_schema import validate_args
+        from state_projection_loop.registry import Registry
+        from state_projection_loop.builtin import install_builtins
+        registry = Registry()
+        install_builtins(registry, ["checklist"])
+        parameters = registry.get("planning.checklist.manage").spec.parameters
+        started = time.time()
+        error = validate_args(parameters, {
+            "action": "create", "name": "x",
+            "items": [{"text": f"i{i}"} for i in range(200_000)],
+        })
+        # Without maxItems the validator walked every entry before the
+        # handler's own 200 cap could reject it, on the shared event loop.
+        assert error is not None and "maxItems" in error
+        assert time.time() - started < 1.0
+        assert validate_args(parameters, {
+            "action": "create", "name": "x",
+            "items": [{"text": f"i{i}"} for i in range(200)],
+        }) is None
+
+    def test_shrinking_history_never_drops_a_user_message(self):
+        from state_projection_loop.messages import Message, ASSISTANT, OBSERVATION, USER
+        from state_projection_loop.projection import HistorySection
+        section = HistorySection()
+        current = [
+            Message(role=USER, content="the original instruction"),
+            Message(role=ASSISTANT, content="working on it"),
+            Message(role=OBSERVATION, content="tool said so", tool_call_id="c1"),
+            Message(role=USER, content="a later turn"),
+        ]
+        shrunk = section.shrink(None, current)
+        # The assistant turn and the observation answering it go first; both
+        # user turns survive, including the original instruction.
+        assert [m.role for m in shrunk] == [USER, USER]
+        # Only user turns left: the window is a hard limit, so the oldest
+        # one does finally go rather than the render overflowing.
+        assert [m.role for m in section.shrink(None, shrunk)] == [USER]
+
+    def test_a_fold_snapshots_what_it_merged(self, tmp_path):
+        import asyncio
+
+        from state_projection_loop import Config, Registry, ScriptedLLM, Session
+        from state_projection_loop.messages import Decision
+        from state_projection_loop.policy import PolicyEngine
+
+        config = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
+        # The fold's own model call: a delta the grounding check accepts.
+        llm = ScriptedLLM([Decision(text='{"facts_add": ["tokyo holds 42 units"]}')],
+                          strict=False)
+        session = Session(llm, kernel="k", registry=Registry(), config=config,
+                          policy=PolicyEngine(default_decision="allow"))
+        session.notice("tokyo holds 42 units")
+        # Put the loop in the state a fold needs: a prompt over the trigger
+        # ratio, and history behind the verbatim point to fold.
+        session.projection.last_message_tokens = 10 ** 6
+        session.projection.last_schema_tokens = 0
+        session.working_state.verbatim_sequence = session.ledger.last_sequence(session.run.id) + 1
+
+        assert asyncio.run(session._fold()) is True
+        folded = [e for e in session.ledger.iter_run(session.run.id) if e.type == "state_folded"]
+        assert folded, "the fold did not record its event"
+        snapshot = session.ledger.load_snapshot(session.run.id)
+        # A fold is the one state change with no tool call behind it, and the
+        # event stores `before` + `delta`, not the result — so without a
+        # snapshot here a restart loses everything the fold merged.
+        assert snapshot is not None and snapshot.sequence >= folded[-1].sequence
+        assert (snapshot.state["working_state"]["confirmed_facts"]
+                == session.working_state.confirmed_facts)

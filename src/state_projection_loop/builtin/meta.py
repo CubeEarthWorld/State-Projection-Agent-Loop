@@ -1,5 +1,6 @@
 """Handlers of the ``meta`` pack (``meta.tool.find``, ``meta.artifact.peek``,
-``meta.history.search``) and the opt-in ``spawn`` pack (``meta.agent.spawn``).
+``meta.history.search``) and the opt-in ``spawn`` pack (``meta.agent.spawn``,
+``meta.agent.join``).
 
 There is no ``done`` capability: completion is ``Decision.finish``, a
 property of the model's response handled directly by the session loop, not
@@ -53,6 +54,7 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
 
 
 SPAWN_NAME = "meta.agent.spawn"
+JOIN_NAME = "meta.agent.join"
 ASK_NAME = "meta.user.ask"
 # Wide enough for any real fan-out; narrow enough that a confused model
 # cannot open fifty model streams in one call.
@@ -66,7 +68,7 @@ def _share(limit: Any, used: float, n: int) -> Any:
     return None if limit is None else type(limit)(max(0, limit - used) / n)
 
 
-def _child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = None) -> Any:
+def child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = None) -> Any:
     """One sub-agent: an ordinary Run in the parent's ledger, so it is
     auditable, resumable and recoverable by the machinery that already
     exists. ``restored`` reattaches a child spawned by an earlier invocation
@@ -75,7 +77,8 @@ def _child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = No
 
     # No scope means everything but spawn itself (no recursive swarm by
     # default). Always a subset(), so the parent's deny-list carries over.
-    scope = spec.get("tool_scope") or [c.name for c in parent.registry if c.name != SPAWN_NAME]
+    scope = (spec.get("tool_scope")
+             or [c.name for c in parent.registry if c.name not in (SPAWN_NAME, JOIN_NAME)])
     registry = parent.registry.subset(scope)
     registry.disable(ASK_NAME)  # a sub-agent has no user to ask
 
@@ -84,8 +87,13 @@ def _child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = No
     cfg.result_schema = None  # the parent's finish schema is not the child's contract
     cfg.budget.max_steps = spec.get("max_steps") or 15
     used = parent.budget
-    cfg.budget.max_tokens = _share(cfg.budget.max_tokens, used.prompt_tokens + used.completion_tokens, n)
-    cfg.budget.max_cost = _share(cfg.budget.max_cost, used.cost, n)
+    # Sub-agents still outstanding have spent from the same allowance but
+    # have not been charged back yet; a new child must not be handed it twice.
+    live = [c.budget for c in parent.children]
+    spent = used.prompt_tokens + used.completion_tokens + sum(
+        b.prompt_tokens + b.completion_tokens for b in live)
+    cfg.budget.max_tokens = _share(cfg.budget.max_tokens, spent, n)
+    cfg.budget.max_cost = _share(cfg.budget.max_cost, used.cost + sum(b.cost for b in live), n)
     cfg.budget.max_seconds = _share(cfg.budget.max_seconds, time.time() - used.started, 1)
 
     documents = [parent.checklists.execute("export", id=i)["checklists"][0]
@@ -108,21 +116,6 @@ def _child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = No
     )
 
 
-async def _drive(child: Any, spec: dict[str, Any], resolution: Optional[str], fresh: bool) -> None:
-    """Run one child to a terminal state or to its next pause."""
-    from ..run import TERMINAL_STATES
-
-    try:
-        if resolution is not None and child.run.state == "WAITING_FOR_APPROVAL":
-            child.resolve_approval(resolution)
-        if child.run.state in TERMINAL_STATES or child.run.state.startswith("WAITING"):
-            return
-        await (child.arun_job(spec["task"]) if fresh else child.aresume())
-    except Exception as exc:  # noqa: BLE001 — a child's failure is the parent's observation
-        if child.run.state not in TERMINAL_STATES:
-            child.cancel(f"{type(exc).__name__}: {exc}")
-
-
 def _entry(child: Any, spec: dict[str, Any]) -> dict[str, Any]:
     reason = next((e.data.get("reason") for e in reversed(list(child.ledger.iter_run(child.run.id)))
                    if e.type == "run_state_changed"), "")
@@ -135,9 +128,85 @@ def _entry(child: Any, spec: dict[str, Any]) -> dict[str, Any]:
     return entry
 
 
-async def _spawn(ctx: ToolContext, tasks: list[dict[str, Any]]) -> Any:
+def _spawned(ctx: ToolContext, command_id: Optional[str] = None) -> Any:
+    """This run's ``run_spawned`` events, newest last."""
+    return [e for e in ctx.ledger.iter_run(ctx.run.id)
+            if e.type == "run_spawned" and (command_id is None or e.data["command_id"] == command_id)]
+
+
+def _lookup(ctx: ToolContext, parent: Any, run_ids: Optional[list[str]]) -> list[tuple[Any, dict]]:
+    """The (child, spec) pairs a join should act on. Outstanding children are
+    the live sessions; anything already collected is rebuilt from its
+    snapshot, so a join can still read a result the nudge announced."""
+    outstanding = {c.run.id: c for c in parent.children}
+    specs: dict[str, dict[str, Any]] = {}
+    for event in _spawned(ctx):
+        command = ctx.run.commands.get(event.data["command_id"])
+        for spec, run_id in zip((command.arguments.get("tasks") or []) if command else [],
+                                event.data["child_run_ids"]):
+            specs[run_id] = spec
+    if run_ids is None:
+        return [(child, specs.get(rid, {})) for rid, child in outstanding.items()]
+    pairs = []
+    for run_id in run_ids:
+        if run_id not in specs:
+            raise ValueError(f"{run_id} is not a sub-agent of this run")
+        spec = specs[run_id]
+        child = outstanding.get(run_id)
+        if child is None:
+            child = child_session(parent, spec, 1, restored=ctx.ledger.load_snapshot(run_id))
+        pairs.append((child, spec))
+    return pairs
+
+
+async def _join_children(parent: Any, pairs: list[tuple[Any, dict]], resolution: Optional[str],
+                         *, cancel: bool) -> Any:
+    """Drive every child to a terminal state (or stop it), then report.
+
+    Returns an ``ApprovalRequest`` instead when a child is waiting on one:
+    the runtime parks this command and re-invokes it with the decision.
+    """
     from ..run import TERMINAL_STATES
 
+    children = [child for child, _ in pairs]
+    # The forwarded approval belongs to the first child still waiting: the
+    # ones before it are terminal, or they would have been forwarded first.
+    if resolution is not None:
+        waiting = next((c for c in children if c.run.state == "WAITING_FOR_APPROVAL"), None)
+        if waiting is not None:
+            waiting.resolve_approval(resolution)
+    spent = [(c.budget.prompt_tokens, c.budget.completion_tokens) for c in children]
+
+    for child in children:
+        if cancel:
+            child.interrupt()
+        else:
+            child._drive()
+    await asyncio.gather(*(c._driver for c in children if c._driver is not None),
+                         return_exceptions=True)
+
+    for child in children:
+        if child.run.state == "WAITING_FOR_USER":
+            child.cancel("a sub-agent has no user to ask")
+        elif cancel and child.run.state not in TERMINAL_STATES:
+            child.cancel("cancelled by the parent")
+    for child, (prompt, completion) in zip(children, spent):
+        parent.budget.note_usage(child.budget.prompt_tokens - prompt,
+                                 child.budget.completion_tokens - completion, parent.config)
+
+    waiting = next((c for c in children if c.run.state == "WAITING_FOR_APPROVAL"), None)
+    if waiting is not None:
+        # Park this command on the child's approval; the host resolves it on
+        # the root session and the runtime re-invokes us with the decision.
+        request = waiting.run.pending_approval
+        return replace(request, reason=f"sub-agent {waiting.run.id}: {request.reason}")
+    for child in children:
+        if child.run.state in TERMINAL_STATES and child in parent.children:
+            parent.children.remove(child)
+    return [_entry(child, spec) for child, spec in pairs]
+
+
+async def _spawn(ctx: ToolContext, tasks: list[dict[str, Any]], background: bool = False) -> Any:
     parent = ctx.session
     if parent is None:
         raise RuntimeError("spawn requires a session context")
@@ -154,47 +223,36 @@ async def _spawn(ctx: ToolContext, tasks: list[dict[str, Any]]) -> Any:
 
     # Re-invoked after forwarding a child's approval? Pick the same children
     # back up out of the ledger instead of starting the work again.
-    known = next((e.data["child_run_ids"] for e in ctx.ledger.iter_run(ctx.run.id)
-                  if e.type == "run_spawned" and e.data["command_id"] == ctx.command_id), None)
-    fresh = known is None
-    if fresh:
-        children = [_child_session(parent, spec, len(tasks)) for spec in tasks]
+    known = next((e.data["child_run_ids"] for e in _spawned(ctx, ctx.command_id)), None)
+    if known is None:
+        children = [child_session(parent, spec, len(tasks)) for spec in tasks]
+        parent.children.extend(children)
         ctx.ledger.append(ctx.run.id, "run_spawned", {
-            "command_id": ctx.command_id, "child_run_ids": [c.run.id for c in children]})
+            "command_id": ctx.command_id, "background": background,
+            "child_run_ids": [c.run.id for c in children]})
+        for child, spec in zip(children, tasks):
+            child._drive(spec["task"])
     else:
-        children = [_child_session(parent, spec, len(tasks), restored=ctx.ledger.load_snapshot(rid))
+        outstanding = {c.run.id: c for c in parent.children}
+        children = [outstanding.get(rid) or child_session(parent, spec, len(tasks),
+                                                          restored=ctx.ledger.load_snapshot(rid))
                     for spec, rid in zip(tasks, known)]
 
-    # The forwarded approval belongs to the first child still waiting: the
-    # ones before it are terminal, or they would have been forwarded first.
-    forwarded = (next((c for c in children if c.run.state == "WAITING_FOR_APPROVAL"), None)
-                 if ctx.resolution else None)
-    spent = [(c.budget.prompt_tokens, c.budget.completion_tokens) for c in children]
+    if background:
+        # The loop head tends them from here: it nudges the parent when one
+        # finishes, and meta.agent.join collects the results.
+        return [{"run_id": c.run.id, "state": c.run.state} for c in children]
+    return await _join_children(parent, list(zip(children, tasks)), ctx.resolution, cancel=False)
 
-    parent._children.extend(children)
-    try:
-        await asyncio.gather(*(
-            _drive(child, spec, ctx.resolution if child is forwarded else None, fresh)
-            for child, spec in zip(children, tasks)))
-    finally:
-        for child in children:
-            parent._children.remove(child)
-    for child, (prompt, completion) in zip(children, spent):
-        parent.budget.note_usage(child.budget.prompt_tokens - prompt,
-                                 child.budget.completion_tokens - completion, parent.config)
 
-    for child in children:
-        if child.run.state == "WAITING_FOR_USER":
-            child.cancel("a sub-agent has no user to ask")
-        elif child.run.state not in TERMINAL_STATES and child.run.state != "WAITING_FOR_APPROVAL":
-            child.cancel("interrupted")
-    waiting = next((c for c in children if c.run.state == "WAITING_FOR_APPROVAL"), None)
-    if waiting is not None:
-        # Park this command on the child's approval; the host resolves it on
-        # the root session and the runtime re-invokes us with the decision.
-        request = waiting.run.pending_approval
-        return replace(request, reason=f"sub-agent {waiting.run.id}: {request.reason}")
-    return [_entry(child, spec) for child, spec in zip(children, tasks)]
+async def _join(ctx: ToolContext, run_ids: Optional[list[str]] = None, cancel: bool = False) -> Any:
+    parent = ctx.session
+    if parent is None:
+        raise RuntimeError("join requires a session context")
+    pairs = _lookup(ctx, parent, run_ids)
+    if not pairs:
+        return "No sub-agents are outstanding."
+    return await _join_children(parent, pairs, ctx.resolution, cancel=cancel)
 
 
 META_HANDLERS = {
@@ -203,4 +261,4 @@ META_HANDLERS = {
     "meta.history.search": _search_history,
 }
 
-SPAWN_HANDLERS = {"meta.agent.spawn": _spawn}
+SPAWN_HANDLERS = {"meta.agent.spawn": _spawn, "meta.agent.join": _join}

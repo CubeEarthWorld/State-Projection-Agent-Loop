@@ -11,7 +11,7 @@
       ]
     },
     "spec": {
-      "description": "Run sub-agents, each with its own independent context, on the given tasks. Several tasks in one call run concurrently. Parent and child share the task string and the result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved. Returns one entry per task, in order: {run_id, state, result, error?, checklists?}.",
+      "description": "Run sub-agents, each with its own independent context, on the given tasks. Several tasks in one call run concurrently. Parent and child share the task string and the result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved. Returns one entry per task, in order: {run_id, state, result, error?, checklists?} — or, with background=true, {run_id, state} at once.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -67,13 +67,68 @@
                 "task"
               ]
             }
+          },
+          "background": {
+            "type": "boolean",
+            "default": false,
+            "description": "true なら即座に {run_id, state:\"RUNNING\"} を返して作業を続行。各サブエージェントの終了時に [runtime] 通知が届き、結果は meta.agent.join で受け取る。未終了の子がいる間 finish(result) は拒否される"
           }
         },
         "required": [
           "tasks"
         ]
       },
-      "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。独立したタスクは1回の呼び出しにまとめて並列化する。サブエージェントはユーザーに質問できない。"
+      "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。独立したタスクは1回の呼び出しにまとめて並列化する。他の作業を続けられるなら background=true。サブエージェントはユーザーに質問できない。"
+    },
+    "discovery": {
+      "pinned": true,
+      "no_embed": true
+    },
+    "execution": {
+      "timeout_s": null,
+      "retry_safety": "never_retry"
+    },
+    "effects": [
+      {
+        "kind": "external",
+        "resource": "subagent:*"
+      }
+    ]
+  },
+  {
+    "name": "meta.agent.join",
+    "category": "meta",
+    "card": {
+      "summary": "バックグラウンドのサブエージェントを待ち、結果を回収する",
+      "tags": [
+        "meta",
+        "swarm",
+        "サブエージェント"
+      ]
+    },
+    "spec": {
+      "description": "Wait for sub-agents started with meta.agent.spawn(background=true) and return one entry per run_id: {run_id, state, result, error?, checklists?}. With run_ids omitted, every sub-agent of this run that is still outstanding. cancel=true stops them instead of waiting and returns their final entries.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "run_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "対象の run_id。省略時は未回収のサブエージェントすべて"
+          },
+          "cancel": {
+            "type": "boolean",
+            "default": false,
+            "description": "待たずに停止させて最終状態を返す"
+          }
+        }
+      },
+      "usage_notes": "[runtime] 通知で終了を知ったとき、または他にやることがないときに呼ぶ。"
     },
     "discovery": {
       "pinned": true,

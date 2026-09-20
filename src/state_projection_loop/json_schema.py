@@ -77,11 +77,19 @@ def validate_value(schema: dict[str, Any], value: Any, path: str = "") -> Option
             extra = set(value) - set(props)
             if extra:
                 return f"{where}: unexpected properties {dumps(sorted(extra))}"
-    if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        for i, item in enumerate(value):
-            err = validate_value(schema["items"], item, f"{where}[{i}]")
-            if err:
-                return err
+    if isinstance(value, list):
+        # Length before contents: the arguments are model-controlled, and
+        # walking a million items to then reject the array on a handler's
+        # own cap blocks the loop every other session shares.
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            return f"{where}: more than maxItems {schema['maxItems']} entries"
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            return f"{where}: fewer than minItems {schema['minItems']} entries"
+        if isinstance(schema.get("items"), dict):
+            for i, item in enumerate(value):
+                err = validate_value(schema["items"], item, f"{where}[{i}]")
+                if err:
+                    return err
     if "anyOf" in schema:
         errs = []
         for sub in schema["anyOf"]:

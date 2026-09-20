@@ -64,6 +64,15 @@ def _ensure_no_running_loop() -> None:
     )
 
 
+def _last_reason(session: "Session") -> str:
+    """Why a run ended, from the last transition it recorded."""
+    reason = ""
+    for event in session.ledger.iter_run(session.run.id):
+        if event.type == "run_state_changed":
+            reason = event.data.get("reason") or ""
+    return reason
+
+
 def _make_ledger(config: Config) -> EventLedger:
     if config.persistence.ledger_directory:
         return JsonlLedger(config.persistence.ledger_directory)
@@ -159,15 +168,21 @@ class Session:
         # tracked here and can never be evicted.
         self._active: "OrderedDict[str, None]" = OrderedDict()
         self._interrupted = False
-        # Sub-agent sessions a spawn handler is currently driving, so
-        # interrupt() reaches them. Registered and removed by the handler.
-        self._children: list["Session"] = []
+        # This run's sub-agents, until they are collected. A blocking spawn
+        # adds and removes them around its own command; a background one
+        # leaves them here for the loop head to tend.
+        self.children: list["Session"] = []
+        # The task driving this session unattended (a background sub-agent).
+        # None means nobody is running its loop right now.
+        self._driver: Optional["asyncio.Future[None]"] = None
         self._idle_turns = 0
         self._budget_grace_used = False
         self._lock = asyncio.Lock()
         if _restored is None:
             self.ledger.append(self.run.id, "run_state_changed", {"from": "RUNNING", "to": "RUNNING", "reason": "created"})
             self._snapshot()
+        else:
+            self._reattach_background()
 
     @staticmethod
     def _default_policy() -> PolicyEngine:
@@ -192,7 +207,7 @@ class Session:
         "text", ...}``, ``{"type": "image_url", ...}``) passed through to the
         adapter as the user message."""
         _ensure_no_running_loop()
-        return asyncio.run(self.asend(content))
+        return asyncio.run(self._parked(self.asend(content)))
 
     async def asend(self, content: Any) -> Any:
         async with self._guarded():
@@ -208,22 +223,123 @@ class Session:
     def interrupt(self) -> None:
         """Stop after the current step. A model call still waiting for the
         provider is cancelled outright; a tool that is already running
-        finishes, so its outcome is recorded. Running sub-agents are
-        interrupted too, and end up ``CANCELLED`` in the ledger."""
+        finishes, so its outcome is recorded. Running sub-agents stop at
+        their own next step boundary, still ``RUNNING`` and resumable."""
         self._interrupted = True
         inflight = self._inflight
         if inflight is not None:
             inflight.get_loop().call_soon_threadsafe(inflight.cancel)
-        for child in list(self._children):
+        for child in list(self.children):
             child.interrupt()
 
     def cancel(self, reason: str = "cancelled") -> None:
-        """End this run for good. For abandoning a run parked on an approval
-        or a question — :meth:`interrupt` only stops a loop that is moving."""
+        """End this run for good, sub-agents and all. For abandoning a run
+        parked on an approval or a question - :meth:`interrupt` only stops a
+        loop that is moving."""
+        self._cancel_children(reason)
         self.run.cancel(reason)
         self._snapshot()
 
-    def notice(self, text: str) -> None:
+    async def park(self) -> None:
+        """Stop every sub-agent at its next step boundary and wait for it.
+
+        A parked child is ``RUNNING`` in the ledger with a snapshot at the
+        boundary it stopped at, so the next turn - or the next process -
+        picks it up. The synchronous API parks before the event loop it made
+        is torn down; an async host calls this before it exits."""
+        for child in list(self.children):
+            child.interrupt()
+        for child in list(self.children):
+            driver = child._driver
+            if driver is not None:
+                await asyncio.gather(driver, return_exceptions=True)
+            await child.park()
+            # The interrupt was ours and it has done its job. Leaving the
+            # flag set would eat the child's first step when it resumes.
+            child._interrupted = False
+
+    async def _parked(self, coro: Any) -> Any:
+        """Nothing outlives the loop ``asyncio.run`` made for one call."""
+        try:
+            return await coro
+        finally:
+            await self.park()
+
+    def _drive(self, task: Optional[Any] = None) -> None:
+        """Run this session's loop unattended: the one way a sub-agent moves
+        without its parent awaiting it. Fresh with ``task``, otherwise a
+        resume. A no-op unless the run is RUNNING and nobody drives it."""
+        if self._driver is not None or self.run.state != "RUNNING":
+            return
+
+        async def go() -> None:
+            try:
+                await (self.arun_job(task) if task is not None else self.aresume())
+            except asyncio.CancelledError:
+                raise  # the loop is going away; the run stays RUNNING, resumable
+            except Exception as exc:  # noqa: BLE001 - a driver must not lose its error
+                if self.run.state not in TERMINAL_STATES:
+                    self.cancel(f"{type(exc).__name__}: {exc}")
+            finally:
+                self._driver = None
+
+        self._driver = asyncio.ensure_future(go())
+
+    def _cancel_children(self, reason: str) -> None:
+        for child in list(self.children):
+            child.interrupt()
+            if child.run.state not in TERMINAL_STATES:
+                child.cancel(reason)
+        self.children.clear()
+
+    def _fail(self, reason: str) -> None:
+        """Fail this run. Never leaves a sub-agent running behind it."""
+        self._cancel_children(reason)
+        self.run.fail(reason)
+
+    def _tend_children(self) -> None:
+        """Collect and re-drive sub-agents, once per step.
+
+        The loop head is the only safe place: it is always after a batch has
+        been applied and snapshotted and before the next projection, so a
+        notice can never land between an assistant's tool calls and their
+        results - a message sequence no provider accepts."""
+        for child in list(self.children):
+            if child.run.state == "WAITING_FOR_USER":
+                child.cancel("a sub-agent has no user to ask")
+            if child.run.state in TERMINAL_STATES:
+                self.budget.note_usage(child.budget.prompt_tokens,
+                                       child.budget.completion_tokens, self.config)
+                detail = "" if child.run.state == "COMPLETED" else f" ({_last_reason(child)})"
+                self.notice(
+                    f"[runtime] sub-agent {child.run.id} finished: {child.run.state}{detail}. "
+                    f'Call meta.agent.join(run_ids=["{child.run.id}"]) for its result.',
+                    child_run_id=child.run.id,
+                )
+                self.children.remove(child)
+            else:
+                child._drive()
+
+    def _reattach_background(self) -> None:
+        """After a restart, pick background sub-agents back up out of the
+        ledger. One already announced by a notice was collected; the rest are
+        this run's again, and the next loop head drives or reports them."""
+        from .builtin.meta import child_session
+
+        announced = {e.data["child_run_id"] for e in self.ledger.iter_run(self.run.id)
+                     if e.type == "notice" and e.data.get("child_run_id")}
+        for event in self.ledger.iter_run(self.run.id):
+            if event.type != "run_spawned" or not event.data.get("background"):
+                continue
+            command = self.run.commands.get(event.data["command_id"])
+            specs = (command.arguments.get("tasks") or []) if command else []
+            for spec, run_id in zip(specs, event.data["child_run_ids"]):
+                snapshot = self.ledger.load_snapshot(run_id)
+                if run_id in announced or snapshot is None:
+                    continue
+                self.children.append(child_session(self, spec, 1, restored=snapshot))
+
+    def notice(self, text: str, **data: Any) -> None:
         """Put out-of-band text into the run's context.
 
         For what the host did outside the loop and the model must still know
@@ -232,7 +348,7 @@ class Session:
         that was attached. It renders as a system message, costs no turn and
         calls no model — what the *user* said goes through :meth:`send`.
         """
-        self.ledger.append(self.run.id, "notice", {"text": text})
+        self.ledger.append(self.run.id, "notice", {"text": text, **data})
 
     def add_section(self, section: Section, *, before: str = "candidates") -> None:
         self.projection.insert_before(before, section)
@@ -256,7 +372,7 @@ class Session:
 
     def resume(self) -> Any:
         _ensure_no_running_loop()
-        return asyncio.run(self.aresume())
+        return asyncio.run(self._parked(self.aresume()))
 
     async def aresume(self) -> Any:
         async with self._guarded():
@@ -273,7 +389,7 @@ class Session:
 
     def invoke(self, capability_name: str, **arguments: Any) -> Any:
         _ensure_no_running_loop()
-        return asyncio.run(self.ainvoke(capability_name, **arguments))
+        return asyncio.run(self._parked(self.ainvoke(capability_name, **arguments)))
 
     async def ainvoke(self, capability_name: str, **arguments: Any) -> Any:
         async with self._guarded():
@@ -352,7 +468,7 @@ class Session:
         old_run_id = self.run.id
         self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
         if self.run.state not in TERMINAL_STATES:
-            self.run.cancel(f"rewound to turn {to_turn}")
+            self.cancel(f"rewound to turn {to_turn}")
 
         self.run = Run(new_id("run"), self.session_id, self.ledger)
         for event in kept_renderable:
@@ -386,7 +502,12 @@ class Session:
         if command is None:
             return None
         capability = self.registry.get(command.capability_name.rsplit("@", 1)[0])
-        if capability is None or not any(e.kind == "external" for e in capability.effects):
+        # planned_effects, not effects: a capability that declared none is
+        # treated as external everywhere else (policy, runtime), and it is
+        # exactly the one whose handler might have done something real
+        # without anyone noticing. Reading the raw list here reported it as
+        # safe to rewind past.
+        if capability is None or not any(e.kind == "external" for e in capability.planned_effects):
             return None
         return f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone"
 
@@ -437,8 +558,12 @@ class Session:
                 self._interrupted = False
                 self.ledger.append(self.run.id, "run_state_changed",
                                     {"from": self.run.state, "to": self.run.state, "reason": "interrupted"})
+                # Snapshot at the boundary we stopped at, so a parked
+                # sub-agent resumes here and not from an older step.
+                self._snapshot()
                 return self._last_text(ASSISTANT) or "[interrupted]"
 
+            self._tend_children()
             stop = self._enforce_budget()
             if stop is not None:
                 self._snapshot()
@@ -484,6 +609,23 @@ class Session:
                 continue
 
             if decision.finish:
+                # A run must never reach a terminal state with sub-agent work
+                # outstanding: that is how results go missing and how
+                # "stopped" sessions leave agents running. Collect whatever
+                # finished during the call first, so the only thing that
+                # bounces a finish is work that is genuinely unfinished.
+                self._tend_children()
+                running = [c.run.id for c in self.children]
+                if running:
+                    self.ledger.append(self.run.id, "decision_validated", {
+                        "ok": False, "reason": f"background sub-agents still running: {', '.join(running)}",
+                    })
+                    self.notice(
+                        f"[runtime] finish(result) rejected: sub-agents {', '.join(running)} are still "
+                        "running. Call meta.agent.join to wait for them (cancel=true to stop them), "
+                        "then finish."
+                    )
+                    continue
                 schema = self.config.result_schema
                 error = validate_value(schema, decision.result) if schema else None
                 if error is not None:
@@ -530,7 +672,7 @@ class Session:
                 self.ledger.append(self.run.id, "model_call_failed", {"attempt": attempt, "error": error})
                 if attempt > cfg.retries:
                     if self.config.mode == "job" and self.run.state not in TERMINAL_STATES:
-                        self.run.fail(f"model_error: {error}")
+                        self._fail(f"model_error: {error}")
                     self._snapshot()
                     raise
                 await asyncio.sleep(cfg.backoff_s * attempt)
@@ -604,6 +746,12 @@ class Session:
         self.ledger.append(self.run.id, "state_folded", {
             "through_sequence": self.working_state.folded_sequence, "before": before, "delta": delta,
         })
+        # A fold is the one place the working state changes without a tool
+        # call behind it, and the event records `before` + `delta` rather
+        # than the result — replaying it would need the transcript the
+        # grounding check ran against. Snapshot instead, or a restart before
+        # the next one silently loses everything the fold merged.
+        self._snapshot()
         return True
 
     def _apply_batch(self, batch, *, record: bool = True) -> None:
@@ -631,7 +779,7 @@ class Session:
             return None
         if self.config.mode == "job":
             if self.run.state not in TERMINAL_STATES:
-                self.run.fail(f"budget_stop: {reason}")
+                self._fail(f"budget_stop: {reason}")
             return self.run.result if self.run.result is not None else self._last_text(ASSISTANT)
         return self._last_text(ASSISTANT) or "[budget exhausted]"
 

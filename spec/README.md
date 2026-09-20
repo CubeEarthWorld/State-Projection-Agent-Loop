@@ -26,7 +26,8 @@ one fixture here that is authored by hand rather than generated.
 ## Bundled tool definitions
 
 The definitions of the capabilities this package bundles (`meta.*`,
-`state.*`, `planning.checklist.manage`, `meta.agent.spawn`) live as JSON
+`state.*`, `planning.checklist.manage`, `meta.agent.spawn`,
+`meta.agent.join`) live as JSON
 package data under `src/state_projection_loop/builtin/defs/`. Handlers stay
 in code — they are the part that genuinely differs per language.
 
@@ -35,3 +36,9 @@ This is their canonical home. The Dart port keeps a copy under
 read its own package's data files at runtime. After changing a definition
 here, copy the directory across, run `dart run tool/generate_defs.dart`
 there, and run both test suites.
+
+Two ledger keys are part of the cross-language contract as much as the
+schemas are: `run_spawned.background` says whether a sub-agent run was
+started in the background, and `notice.child_run_id` marks the one that
+announced its completion — together they are how a restarted parent tells
+which children it still owes a result.

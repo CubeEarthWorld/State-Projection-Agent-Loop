@@ -236,7 +236,7 @@ Bundled tools come in **packs** and there is one switch for them:
 | `meta` | `meta.tool.find`, `meta.artifact.peek`, `meta.history.search` | on |
 | `checklist` | `planning.checklist.manage` | on |
 | `state` | `state.goal.set`, `state.fact.add`, … (9 tools) | off |
-| `spawn` | `meta.agent.spawn` | off |
+| `spawn` | `meta.agent.spawn`, `meta.agent.join` | off |
 
 ```python
 Session(llm)                                     # meta + checklist
@@ -333,7 +333,45 @@ budget. Sub-agents cannot ask the user (`meta.user.ask` is off in every
 child), but they *can* stop for approval: the child's request surfaces on
 the root session as an ordinary `WAITING_FOR_APPROVAL`, and
 `resolve_approval(...)` + `resume()` drives the child on — across a process
-restart too. `session.interrupt()` reaches running children.
+restart too. `session.interrupt()` reaches running children, parking them at
+their next step boundary — still `RUNNING` and resumable, not killed.
+
+### Background sub-agents
+
+```python
+# spawn(tasks=[...], background=True) → [{"run_id": "run_…", "state": "RUNNING"}]
+#   …the parent keeps working…
+# [runtime] sub-agent run_… finished: COMPLETED. Call meta.agent.join(...) for its result.
+# join(run_ids=["run_…"]) → [{"run_id": ..., "state": "COMPLETED", "result": ...}]
+```
+
+With `background=True` the call returns at once and the parent's own loop
+continues — its next model call runs **while** the sub-agent works. A
+finished child is announced to the parent as a `[runtime]` notice at the
+**loop head**, never mid-batch: a system message wedged between an
+assistant's tool calls and their results is a sequence no provider accepts.
+`meta.agent.join(run_ids=None, cancel=False)` collects the results, waits
+for stragglers, or stops them.
+
+Two failure modes that background agents classically have are structurally
+impossible here rather than documented against:
+
+- **A run cannot reach a terminal state with work outstanding.** `finish` is
+  refused while any sub-agent is uncollected (the model is told to `join`
+  first), and `cancel()` / a budget stop / a fatal model error cancel the
+  whole subtree. No "completed" run ever leaves an agent running, and no
+  result is silently dropped.
+- **Nothing lives only in memory.** A background child is a `Run` with
+  snapshots, so a process that dies leaves a child that
+  `resume_from_ledger` can still finish. On restart the parent rebuilds its
+  outstanding children from `run_spawned` minus the ones a notice already
+  announced, and picks up exactly where it was.
+
+The synchronous API (`send`/`resume`/`invoke`) parks its children before the
+event loop it created is torn down, so a background child progresses while
+the parent is inside a call and is *frozen, not orphaned*, between calls. A
+host that wants children to progress while the user types uses `asend` on
+its own loop, or calls `await session.park()` itself before exiting.
 
 ## Swappable everything
 
