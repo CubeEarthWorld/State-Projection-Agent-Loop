@@ -1,7 +1,8 @@
 """Token estimation utilities.
 
 Budgets are enforced against a conservative estimate, never an exact
-tokenizer count.
+tokenizer count. The estimator is pluggable via ``set_estimator`` so a real
+tokenizer can be swapped in when precision matters.
 
 Heuristic: CJK characters count as ~1 token each, everything else as ~1
 token per 4 characters. This overestimates slightly for English and is close
@@ -44,6 +45,16 @@ def estimate_text_tokens(text: str) -> int:
 
 
 _estimator: Callable[[str], int] = estimate_text_tokens
+
+
+def set_estimator(fn: Callable[[str], int]) -> None:
+    """Replace the global token estimator (e.g. with a real tokenizer).
+
+    The counterpart of the Dart port's ``setEstimator``. Without it the
+    ``_estimator`` indirection below would be flexibility nothing can reach.
+    """
+    global _estimator
+    _estimator = fn
 
 # What one image part costs: a provider's typical per-image charge. Counting
 # the base64 text instead would overshoot by two orders of magnitude.
