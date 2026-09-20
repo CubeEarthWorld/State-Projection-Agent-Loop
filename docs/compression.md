@@ -137,16 +137,25 @@ are the fold's job, not the tiers'. The remaining misses are model
 behaviour on a verbatim user message (the Japanese game cell answers "the
 first roll" with the first roll whose result is still visible).
 
-**The fold.** On the records task under a 4k window (the tail alone fills
-most of it): 0 folds → 5, recall 0.75 → 1.00, prompt tokens per turn 2,628
-→ 2,171, cache hit ratio 0.86 → 0.67 — each fold is a prefix rebuild. Under
-a 6k window across all tasks, the first fold design (force the point down
-whenever nothing older was left to fold) folded every turn of the document
-task (19–28 folds in 30 turns) and recall there fell from 0.88 to 0.50 while
-the cache ratio fell from 0.90 to 0.56; that is why a fold now happens only
-at a step of the point. The fold-at-step arm across all tasks has not been
-measured yet: rerun `--window 6000 --fold 0.75 --task all --lang all` and
-compare with `evals/results/matrix_6k.json`.
+**The fold.** Under a 6k window across all ten cells, `--fold 0.75`
+against the same cells with tiers alone (`evals/results/matrix_6k.json`
+vs `matrix_6k_fold.json`):
+
+| runs | recall | cache hit ratio | prompt tokens / turn |
+|---|---|---|---|
+| where a fold fired (all Japanese cells, both document cells) | 0.75 → 0.98 | 0.81 → 0.66 | 3,573 → 3,613 |
+| where none fired (English cells under the estimator's threshold) | unchanged projection | 0.86 | 2,676 |
+
+By question kind, folds move exactly what masking discards: a fact in a
+tool result older than the compressed window 0.38 → 0.75, the first
+error's text 0.00 → 0.50, and nothing else got worse (latest tool result
+0.95 → 1.00, user-stated facts 0.83 → 1.00). The cost is the cache: every
+fold is a prefix rebuild. The first fold design (force the point down
+whenever nothing older was left to fold) folded every turn of the
+document task (19–28 folds in 30 turns) and recall there fell from 0.88 to
+0.50 while the cache ratio fell from 0.90 to 0.56 — that is why a fold
+now happens only at a step of the point (`matrix_6k_fold_forced.json`
+keeps that arm).
 
 ## Configuration
 

@@ -1,0 +1,1220 @@
+{
+  "label": "matrix-6k-fold-at-step",
+  "turns": 30,
+  "window": 6000,
+  "fold": 0.75,
+  "offline": false,
+  "cells": [
+    {
+      "task": "records",
+      "lang": "en",
+      "accuracy": 0.75,
+      "prompt_tokens_per_turn": 2582.75,
+      "cache_hit_ratio": 0.8583387273373245,
+      "folds": 0,
+      "misses": [
+        "early_tool_fact: expected 'INV-68915', got 'Not stated.'",
+        "abstain: expected 'not stated', got ''",
+        "early_tool_fact: expected 'INV-97782', got 'Not stated.'"
+      ]
+    },
+    {
+      "task": "records",
+      "lang": "ja",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 3063.328125,
+      "cache_hit_ratio": 0.6659681709150269,
+      "folds": 8,
+      "misses": []
+    },
+    {
+      "task": "coding",
+      "lang": "en",
+      "accuracy": 0.8,
+      "prompt_tokens_per_turn": 3881.0819672131147,
+      "cache_hit_ratio": 0.871009783067861,
+      "folds": 0,
+      "misses": [
+        "early_error: expected 'expected 3', got 'not stated'",
+        "early_error: expected 'expected 1', got 'No error was reported — the first pkg_2_0 run in this conver'"
+      ]
+    },
+    {
+      "task": "coding",
+      "lang": "ja",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 3871.2950819672133,
+      "cache_hit_ratio": 0.7520783423400516,
+      "folds": 4,
+      "misses": []
+    },
+    {
+      "task": "support",
+      "lang": "en",
+      "accuracy": 0.5,
+      "prompt_tokens_per_turn": 2543.3053724053725,
+      "cache_hit_ratio": 0.8602678532082024,
+      "folds": 0,
+      "misses": [
+        "early_tool_fact: expected 'user682@example.com', got 'Not stated.'",
+        "update: expected 'no', got 'Yes.'",
+        "update: expected 'resolved', got 'Ticket T-2014 reads as open in the record — its resolution w'",
+        "early_tool_fact: expected 'user969@example.com', got \"Not stated — T-2001's customer email never appeared in this \"",
+        "update: expected 'no', got 'Yes.'"
+      ]
+    },
+    {
+      "task": "support",
+      "lang": "ja",
+      "accuracy": 0.9,
+      "prompt_tokens_per_turn": 3023.626984126984,
+      "cache_hit_ratio": 0.7180347763970267,
+      "folds": 5,
+      "misses": [
+        "update: expected 'いいえ', got 'はい、チケット T-2007 のステータスは open のままで未解決です。'"
+      ]
+    },
+    {
+      "task": "game",
+      "lang": "en",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 2007.9360576923077,
+      "cache_hit_ratio": 0.8516643624957411,
+      "folds": 0,
+      "misses": []
+    },
+    {
+      "task": "game",
+      "lang": "ja",
+      "accuracy": 0.8,
+      "prompt_tokens_per_turn": 2364.4261893656717,
+      "cache_hit_ratio": 0.8605759524337042,
+      "folds": 0,
+      "misses": [
+        "early_user_fact: expected '鍵開け', got 'この会話で最初に結果が示されたダイスは隠密のためのものでした。'",
+        "early_user_fact: expected '鍵開け', got '最初のダイスは説得のために振りました。'"
+      ]
+    },
+    {
+      "task": "document",
+      "lang": "en",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 4072.870567375887,
+      "cache_hit_ratio": 0.6354355560254161,
+      "folds": 16,
+      "misses": []
+    },
+    {
+      "task": "document",
+      "lang": "ja",
+      "accuracy": 1.0,
+      "prompt_tokens_per_turn": 4033.734024278516,
+      "cache_hit_ratio": 0.5279523142620031,
+      "folds": 31,
+      "misses": []
+    }
+  ],
+  "accuracy": 0.875,
+  "runs": [
+    {
+      "task": "records",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 0.6666666666666666,
+      "by_kind": {
+        "early_tool_fact": false,
+        "late_tool_fact": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": false
+      },
+      "prompt_tokens_per_turn": 2665.5625,
+      "peak_prompt_tokens": 4483,
+      "cache_hit_ratio": 0.8598560341391357,
+      "model_calls": 64,
+      "seconds": 66.23823404312134,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What was the invoice number for R01001?",
+          "answer": "INV-68915",
+          "kind": "early_tool_fact",
+          "reply": "Not stated.",
+          "ok": false
+        },
+        {
+          "ask": "What status did R01028 have?",
+          "answer": "in transit",
+          "kind": "late_tool_fact",
+          "reply": "R01028 had status in transit.",
+          "ok": true
+        },
+        {
+          "ask": "What is the current amount for R01016?",
+          "answer": "9705",
+          "kind": "update",
+          "stale": "9205",
+          "reply": "The current amount for R01016 is 9705 EUR (your correction; the record lookup still shows 9205 EUR).",
+          "ok": true
+        },
+        {
+          "ask": "Who is our account manager?",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "Petra Lindqvist.",
+          "ok": true
+        },
+        {
+          "ask": "What is the site code?",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "ZX-41.",
+          "ok": true
+        },
+        {
+          "ask": "What was the delivery driver's name for R01001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "",
+          "ok": false
+        }
+      ]
+    },
+    {
+      "task": "records",
+      "lang": "en",
+      "seed": 2,
+      "accuracy": 0.8333333333333334,
+      "by_kind": {
+        "early_tool_fact": false,
+        "late_tool_fact": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2499.9375,
+      "peak_prompt_tokens": 4153,
+      "cache_hit_ratio": 0.8568214205355134,
+      "model_calls": 64,
+      "seconds": 65.45382714271545,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What was the invoice number for R02001?",
+          "answer": "INV-97782",
+          "kind": "early_tool_fact",
+          "reply": "Not stated.",
+          "ok": false
+        },
+        {
+          "ask": "What status did R02028 have?",
+          "answer": "in transit",
+          "kind": "late_tool_fact",
+          "reply": "R02028 had status \"in transit.\"",
+          "ok": true
+        },
+        {
+          "ask": "What is the current amount for R02018?",
+          "answer": "10189",
+          "kind": "update",
+          "stale": "9689",
+          "reply": "10189 EUR, per the correction you noted.",
+          "ok": true
+        },
+        {
+          "ask": "Who is our account manager?",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "Petra Lindqvist.",
+          "ok": true
+        },
+        {
+          "ask": "What is the site code?",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "ZX-41.",
+          "ok": true
+        },
+        {
+          "ask": "What was the delivery driver's name for R02001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "Not stated.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "records",
+      "lang": "ja",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3051.25,
+      "peak_prompt_tokens": 4330,
+      "cache_hit_ratio": 0.6725112658746415,
+      "model_calls": 64,
+      "seconds": 129.4182095527649,
+      "folds": 4,
+      "answers": [
+        {
+          "ask": "R01001 の請求書番号は何でしたか？",
+          "answer": "INV-68915",
+          "kind": "early_tool_fact",
+          "reply": "記録 R01001 の請求書番号は INV-68915 です。",
+          "ok": true
+        },
+        {
+          "ask": "R01028 の状態は何でしたか？",
+          "answer": "in transit",
+          "kind": "late_tool_fact",
+          "reply": "記録 R01028 の状態は in transit です。",
+          "ok": true
+        },
+        {
+          "ask": "R01016 の現在の金額はいくらですか？",
+          "answer": "9705",
+          "kind": "update",
+          "stale": "9205",
+          "reply": "記録 R01016 の現在の金額は、訂正により 9705 EUR です。",
+          "ok": true
+        },
+        {
+          "ask": "担当マネージャーは誰ですか？",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "あなたが述べた担当マネージャーは Petra Lindqvist で、拠点コードは ZX-41 です（記録には含まれていません）。",
+          "ok": true
+        },
+        {
+          "ask": "拠点コードは何ですか？",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "拠点コードは、あなたが述べたとおり ZX-41 です（記録には含まれていません）。",
+          "ok": true
+        },
+        {
+          "ask": "R01001 の配達ドライバーの名前は？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "不明",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "records",
+      "lang": "ja",
+      "seed": 2,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true,
+        "update": true,
+        "user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3075.40625,
+      "peak_prompt_tokens": 4461,
+      "cache_hit_ratio": 0.6594250759554124,
+      "model_calls": 64,
+      "seconds": 106.65823674201965,
+      "folds": 4,
+      "answers": [
+        {
+          "ask": "R02001 の請求書番号は何でしたか？",
+          "answer": "INV-97782",
+          "kind": "early_tool_fact",
+          "reply": "R02001 の請求書番号は INV-97782 です。",
+          "ok": true
+        },
+        {
+          "ask": "R02028 の状態は何でしたか？",
+          "answer": "in transit",
+          "kind": "late_tool_fact",
+          "reply": "R02028 の状態は in transit（輸送中）でした。",
+          "ok": true
+        },
+        {
+          "ask": "R02018 の現在の金額はいくらですか？",
+          "answer": "10189",
+          "kind": "update",
+          "stale": "9689",
+          "reply": "R02018 の現在の金額は 10189 EUR です（訂正後の値）。",
+          "ok": true
+        },
+        {
+          "ask": "担当マネージャーは誰ですか？",
+          "answer": "Lindqvist",
+          "kind": "user_fact",
+          "reply": "担当マネージャーは Petra Lindqvist です（拠点コードは ZX-41）。",
+          "ok": true
+        },
+        {
+          "ask": "拠点コードは何ですか？",
+          "answer": "ZX-41",
+          "kind": "user_fact",
+          "reply": "拠点コードは ZX-41 です。",
+          "ok": true
+        },
+        {
+          "ask": "R02001 の配達ドライバーの名前は？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "R02001 の配達ドライバーの名前は不明です。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "coding",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 0.8,
+      "by_kind": {
+        "early_error": false,
+        "user_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3879.55737704918,
+      "peak_prompt_tokens": 5944,
+      "cache_hit_ratio": 0.8718926022488622,
+      "model_calls": 61,
+      "seconds": 59.74209189414978,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What error did the first test run of pkg_1_0 report?",
+          "answer": "expected 3",
+          "kind": "early_error",
+          "reply": "not stated",
+          "ok": false
+        },
+        {
+          "ask": "Where does the config live?",
+          "answer": "settings/base.toml",
+          "kind": "user_fact",
+          "reply": "The config lives in settings/base.toml.",
+          "ok": true
+        },
+        {
+          "ask": "Tabs or spaces in this repo?",
+          "answer": "tab",
+          "kind": "user_fact",
+          "reply": "Tabs.",
+          "ok": true
+        },
+        {
+          "ask": "Did the last run of pkg_1_9 pass?",
+          "answer": "pass",
+          "kind": "late_tool_fact",
+          "reply": "Yes — the last run of pkg_1_9 passed: 25 passed, exit=0.",
+          "ok": true
+        },
+        {
+          "ask": "Who reviewed the fix to pkg_1_0?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "not stated",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "coding",
+      "lang": "en",
+      "seed": 2,
+      "accuracy": 0.8,
+      "by_kind": {
+        "early_error": false,
+        "user_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3882.6065573770493,
+      "peak_prompt_tokens": 5952,
+      "cache_hit_ratio": 0.8701269638868598,
+      "model_calls": 61,
+      "seconds": 60.78121471405029,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What error did the first test run of pkg_2_0 report?",
+          "answer": "expected 1",
+          "kind": "early_error",
+          "reply": "No error was reported — the first pkg_2_0 run in this conversation passed all 25 tests.",
+          "ok": false
+        },
+        {
+          "ask": "Where does the config live?",
+          "answer": "settings/base.toml",
+          "kind": "user_fact",
+          "reply": "settings/base.toml.",
+          "ok": true
+        },
+        {
+          "ask": "Tabs or spaces in this repo?",
+          "answer": "tab",
+          "kind": "user_fact",
+          "reply": "Tabs.",
+          "ok": true
+        },
+        {
+          "ask": "Did the last run of pkg_2_9 pass?",
+          "answer": "pass",
+          "kind": "late_tool_fact",
+          "reply": "Yes — the last pkg_2_9 run reported 25 passed with exit=0.",
+          "ok": true
+        },
+        {
+          "ask": "Who reviewed the fix to pkg_2_0?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "not stated",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "coding",
+      "lang": "ja",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_error": true,
+        "user_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3893.5245901639346,
+      "peak_prompt_tokens": 6103,
+      "cache_hit_ratio": 0.7501989431801436,
+      "model_calls": 61,
+      "seconds": 80.05688047409058,
+      "folds": 2,
+      "answers": [
+        {
+          "ask": "pkg_1_0 の最初のテスト実行はどんなエラーを報告しましたか？",
+          "answer": "expected 3",
+          "kind": "early_error",
+          "reply": "pkg_1_0 の最初のテスト実行では collected 33 items のうち test_pkg_1_0_2 が AssertionError: expected 3 got 82 で FAILED となり、集計は 1 failed, 24 passed、exit=1 でした。",
+          "ok": true
+        },
+        {
+          "ask": "設定はどこにありますか？",
+          "answer": "settings/base.toml",
+          "kind": "user_fact",
+          "reply": "設定は settings/base.toml にあります。",
+          "ok": true
+        },
+        {
+          "ask": "このリポジトリはタブとスペースのどちらですか？",
+          "answer": "タブ",
+          "kind": "user_fact",
+          "reply": "このリポジトリはタブを使用しています。",
+          "ok": true
+        },
+        {
+          "ask": "pkg_1_9 の最後の実行は成功しましたか？",
+          "answer": "成功",
+          "kind": "late_tool_fact",
+          "reply": "はい、pkg_1_9 の最後の実行は test_pkg_1_9_1 から test_pkg_1_9_24 が PASSED の 25 passed・exit=0 で成功しました。",
+          "ok": true
+        },
+        {
+          "ask": "pkg_1_0 の修正をレビューしたのは誰ですか？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "不明。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "coding",
+      "lang": "ja",
+      "seed": 2,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_error": true,
+        "user_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3849.065573770492,
+      "peak_prompt_tokens": 6224,
+      "cache_hit_ratio": 0.7539577414999595,
+      "model_calls": 61,
+      "seconds": 96.25904655456543,
+      "folds": 2,
+      "answers": [
+        {
+          "ask": "pkg_2_0 の最初のテスト実行はどんなエラーを報告しましたか？",
+          "answer": "expected 1",
+          "kind": "early_error",
+          "reply": "pkg_2_0 の最初のテスト実行は collected 37 items・1 failed 24 passed（exit=1）で、失敗は test_pkg_2_0_2 の AssertionError: expected 1 got 21 でした。",
+          "ok": true
+        },
+        {
+          "ask": "設定はどこにありますか？",
+          "answer": "settings/base.toml",
+          "kind": "user_fact",
+          "reply": "設定は settings/base.toml にあります（この会話で述べられた情報で、私による検証はしていません）。",
+          "ok": true
+        },
+        {
+          "ask": "このリポジトリはタブとスペースのどちらですか？",
+          "answer": "タブ",
+          "kind": "user_fact",
+          "reply": "この会話では「このリポジトリはタブを使う」とのユーザー発言があるのみで、私による検証はしていません。",
+          "ok": true
+        },
+        {
+          "ask": "pkg_2_9 の最後の実行は成功しましたか？",
+          "answer": "成功",
+          "kind": "late_tool_fact",
+          "reply": "はい、pkg_2_9 の最後の実行は成功しました（collected 35 items・25 passed・exit=0、失敗なし）。",
+          "ok": true
+        },
+        {
+          "ask": "pkg_2_0 の修正をレビューしたのは誰ですか？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "pkg_2_0 の修正をレビューした人についてこの会話には述べられていないため、不明です。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "support",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 0.6,
+      "by_kind": {
+        "update": false,
+        "early_tool_fact": false,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2478.3492063492063,
+      "peak_prompt_tokens": 4173,
+      "cache_hit_ratio": 0.8583286365732439,
+      "model_calls": 63,
+      "seconds": 57.310669898986816,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What is the current status of ticket T-1012?",
+          "answer": "resolved",
+          "kind": "update",
+          "reply": "The system still shows T-1012 as open; the note that it is resolved was never reflected in the ticket.",
+          "ok": true
+        },
+        {
+          "ask": "What was the customer email on ticket T-1001?",
+          "answer": "user682@example.com",
+          "kind": "early_tool_fact",
+          "reply": "Not stated.",
+          "ok": false
+        },
+        {
+          "ask": "Is ticket T-1003 still open? Answer yes or no.",
+          "answer": "no",
+          "kind": "update",
+          "reply": "Yes.",
+          "ok": false
+        },
+        {
+          "ask": "What was the customer email on ticket T-1028?",
+          "answer": "user372@example.com",
+          "kind": "late_tool_fact",
+          "reply": "user372@example.com.",
+          "ok": true
+        },
+        {
+          "ask": "What was the phone number on ticket T-1001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "Not stated.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "support",
+      "lang": "en",
+      "seed": 2,
+      "accuracy": 0.4,
+      "by_kind": {
+        "update": false,
+        "early_tool_fact": false,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2608.2615384615383,
+      "peak_prompt_tokens": 4399,
+      "cache_hit_ratio": 0.8622070698431611,
+      "model_calls": 65,
+      "seconds": 61.37788414955139,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "What is the current status of ticket T-2014?",
+          "answer": "resolved",
+          "kind": "update",
+          "reply": "Ticket T-2014 reads as open in the record — its resolution was never recorded, only mentioned here.",
+          "ok": false
+        },
+        {
+          "ask": "What was the customer email on ticket T-2001?",
+          "answer": "user969@example.com",
+          "kind": "early_tool_fact",
+          "reply": "Not stated — T-2001's customer email never appeared in this conversation.",
+          "ok": false
+        },
+        {
+          "ask": "Is ticket T-2007 still open? Answer yes or no.",
+          "answer": "no",
+          "kind": "update",
+          "reply": "Yes.",
+          "ok": false
+        },
+        {
+          "ask": "What was the customer email on ticket T-2028?",
+          "answer": "user480@example.com",
+          "kind": "late_tool_fact",
+          "reply": "user480@example.com.",
+          "ok": true
+        },
+        {
+          "ask": "What was the phone number on ticket T-2001?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "Not stated.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "support",
+      "lang": "ja",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "update": true,
+        "early_tool_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 3083.5873015873017,
+      "peak_prompt_tokens": 4626,
+      "cache_hit_ratio": 0.7155549607239559,
+      "model_calls": 63,
+      "seconds": 111.38806414604187,
+      "folds": 3,
+      "answers": [
+        {
+          "ask": "チケット T-1012 の現在の状態は？",
+          "answer": "解決",
+          "kind": "update",
+          "reply": "チケット T-1012 は、この会話で「解決済みになりました」と控えたとおり、現在の状態は解決済みです。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-1001 の顧客メールアドレスは？",
+          "answer": "user682@example.com",
+          "kind": "early_tool_fact",
+          "reply": "チケット T-1001 の顧客メールアドレスは user682@example.com です。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-1003 はまだ未解決ですか？「はい」か「いいえ」で答えて。",
+          "answer": "いいえ",
+          "kind": "update",
+          "reply": "いいえ。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-1028 の顧客メールアドレスは？",
+          "answer": "user372@example.com",
+          "kind": "late_tool_fact",
+          "reply": "チケット T-1028 の顧客メールアドレスは user372@example.com です。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-1001 の電話番号は？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "不明。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "support",
+      "lang": "ja",
+      "seed": 2,
+      "accuracy": 0.8,
+      "by_kind": {
+        "update": false,
+        "early_tool_fact": true,
+        "late_tool_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2963.6666666666665,
+      "peak_prompt_tokens": 4526,
+      "cache_hit_ratio": 0.7205145920700976,
+      "model_calls": 63,
+      "seconds": 100.89227056503296,
+      "folds": 2,
+      "answers": [
+        {
+          "ask": "チケット T-2014 の現在の状態は？",
+          "answer": "解決",
+          "kind": "update",
+          "reply": "チケット T-2014 の現在のステータスは open で、解決済みではありません（以前の「解決済み」という申告はチケット記録に反映されていません）。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-2001 の顧客メールアドレスは？",
+          "answer": "user969@example.com",
+          "kind": "early_tool_fact",
+          "reply": "チケット T-2001 の顧客メールアドレスは user969@example.com です。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-2007 はまだ未解決ですか？「はい」か「いいえ」で答えて。",
+          "answer": "いいえ",
+          "kind": "update",
+          "reply": "はい、チケット T-2007 のステータスは open のままで未解決です。",
+          "ok": false
+        },
+        {
+          "ask": "チケット T-2028 の顧客メールアドレスは？",
+          "answer": "user480@example.com",
+          "kind": "late_tool_fact",
+          "reply": "チケット T-2028 の顧客メールアドレスは user480@example.com です。",
+          "ok": true
+        },
+        {
+          "ask": "チケット T-2001 の電話番号は？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "チケット T-2001 の電話番号は不明です（記録に電話番号の記載はありません）。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "game",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "update": true,
+        "user_fact": true,
+        "early_user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 1963.6875,
+      "peak_prompt_tokens": 3232,
+      "cache_hit_ratio": 0.8473853400808428,
+      "model_calls": 64,
+      "seconds": 58.42765402793884,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "Do I still have the torch? Answer yes or no.",
+          "answer": "no",
+          "kind": "update",
+          "reply": "No.",
+          "ok": true
+        },
+        {
+          "ask": "Which key do I carry?",
+          "answer": "silver key",
+          "kind": "user_fact",
+          "reply": "The silver key.",
+          "ok": true
+        },
+        {
+          "ask": "Do I still have the map? Answer yes or no.",
+          "answer": "yes",
+          "kind": "user_fact",
+          "reply": "Yes.",
+          "ok": true
+        },
+        {
+          "ask": "What was my very first roll for?",
+          "answer": "lockpicking",
+          "kind": "early_user_fact",
+          "reply": "Lockpicking.",
+          "ok": true
+        },
+        {
+          "ask": "How much gold do I have?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "Not stated.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "game",
+      "lang": "en",
+      "seed": 2,
+      "accuracy": 1.0,
+      "by_kind": {
+        "update": true,
+        "user_fact": true,
+        "early_user_fact": true,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2052.1846153846154,
+      "peak_prompt_tokens": 3580,
+      "cache_hit_ratio": 0.8559433849106394,
+      "model_calls": 65,
+      "seconds": 63.74616098403931,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "Do I still have the torch? Answer yes or no.",
+          "answer": "no",
+          "kind": "update",
+          "reply": "No.",
+          "ok": true
+        },
+        {
+          "ask": "Which key do I carry?",
+          "answer": "silver key",
+          "kind": "user_fact",
+          "reply": "You carry the silver key.",
+          "ok": true
+        },
+        {
+          "ask": "Do I still have the map? Answer yes or no.",
+          "answer": "yes",
+          "kind": "user_fact",
+          "reply": "Yes.",
+          "ok": true
+        },
+        {
+          "ask": "What was my very first roll for?",
+          "answer": "lockpicking",
+          "kind": "early_user_fact",
+          "reply": "The very first roll was for lockpicking.",
+          "ok": true
+        },
+        {
+          "ask": "How much gold do I have?",
+          "answer": "not stated",
+          "kind": "abstain",
+          "reply": "Not stated.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "game",
+      "lang": "ja",
+      "seed": 1,
+      "accuracy": 0.8,
+      "by_kind": {
+        "update": true,
+        "user_fact": true,
+        "early_user_fact": false,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2353.703125,
+      "peak_prompt_tokens": 4002,
+      "cache_hit_ratio": 0.8556729090462503,
+      "model_calls": 64,
+      "seconds": 68.64341187477112,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "松明はまだ持っていますか？「はい」か「いいえ」で答えて。",
+          "answer": "いいえ",
+          "kind": "update",
+          "reply": "いいえ、この会話では松明を拾った後に捨てると述べられているため、持っていないことになります。",
+          "ok": true
+        },
+        {
+          "ask": "どの鍵を持っていますか？",
+          "answer": "銀の鍵",
+          "kind": "user_fact",
+          "reply": "この会話では銀の鍵を拾ったと述べられているため、持っているのは銀の鍵です。",
+          "ok": true
+        },
+        {
+          "ask": "地図はまだ持っていますか？「はい」か「いいえ」で答えて。",
+          "answer": "はい",
+          "kind": "user_fact",
+          "reply": "はい、地図は拾った後に捨てられていないため、まだ持っています。",
+          "ok": true
+        },
+        {
+          "ask": "最初のダイスは何のために振りましたか？",
+          "answer": "鍵開け",
+          "kind": "early_user_fact",
+          "reply": "この会話で最初に結果が示されたダイスは隠密のためのものでした。",
+          "ok": false
+        },
+        {
+          "ask": "所持金はいくらですか？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "不明。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "game",
+      "lang": "ja",
+      "seed": 2,
+      "accuracy": 0.8,
+      "by_kind": {
+        "update": true,
+        "user_fact": true,
+        "early_user_fact": false,
+        "abstain": true
+      },
+      "prompt_tokens_per_turn": 2375.1492537313434,
+      "peak_prompt_tokens": 3714,
+      "cache_hit_ratio": 0.8654789958211582,
+      "model_calls": 67,
+      "seconds": 73.75355124473572,
+      "folds": 0,
+      "answers": [
+        {
+          "ask": "松明はまだ持っていますか？「はい」か「いいえ」で答えて。",
+          "answer": "いいえ",
+          "kind": "update",
+          "reply": "いいえ、松明を捨てたため、もう持っていません。",
+          "ok": true
+        },
+        {
+          "ask": "どの鍵を持っていますか？",
+          "answer": "銀の鍵",
+          "kind": "user_fact",
+          "reply": "銀の鍵を持っています。",
+          "ok": true
+        },
+        {
+          "ask": "地図はまだ持っていますか？「はい」か「いいえ」で答えて。",
+          "answer": "はい",
+          "kind": "user_fact",
+          "reply": "はい、地図を拾ったため、まだ持っています。",
+          "ok": true
+        },
+        {
+          "ask": "最初のダイスは何のために振りましたか？",
+          "answer": "鍵開け",
+          "kind": "early_user_fact",
+          "reply": "最初のダイスは説得のために振りました。",
+          "ok": false
+        },
+        {
+          "ask": "所持金はいくらですか？",
+          "answer": "不明",
+          "kind": "abstain",
+          "reply": "不明です。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "document",
+      "lang": "en",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true
+      },
+      "prompt_tokens_per_turn": 4102.074468085107,
+      "peak_prompt_tokens": 6170,
+      "cache_hit_ratio": 0.6522906158015535,
+      "model_calls": 94,
+      "seconds": 165.88476276397705,
+      "folds": 7,
+      "answers": [
+        {
+          "ask": "What is the notice period in section 2?",
+          "answer": "14",
+          "kind": "early_tool_fact",
+          "reply": "14 days.",
+          "ok": true
+        },
+        {
+          "ask": "What is the penalty amount in section 29?",
+          "answer": "7000",
+          "kind": "late_tool_fact",
+          "reply": "7000 EUR.",
+          "ok": true
+        },
+        {
+          "ask": "Which court is named in section 2?",
+          "answer": "Lyon",
+          "kind": "early_tool_fact",
+          "reply": "The courts of Lyon.",
+          "ok": true
+        },
+        {
+          "ask": "Which court is named in section 30?",
+          "answer": "Rotterdam",
+          "kind": "late_tool_fact",
+          "reply": "The courts of Rotterdam.",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "document",
+      "lang": "en",
+      "seed": 2,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true
+      },
+      "prompt_tokens_per_turn": 4043.6666666666665,
+      "peak_prompt_tokens": 5782,
+      "cache_hit_ratio": 0.6185804962492787,
+      "model_calls": 96,
+      "seconds": 177.9692895412445,
+      "folds": 9,
+      "answers": [
+        {
+          "ask": "What is the notice period in section 2?",
+          "answer": "45",
+          "kind": "early_tool_fact",
+          "reply": "45 days — section 2's line 9 reads \"Notice period: 45 days.\"",
+          "ok": true
+        },
+        {
+          "ask": "What is the penalty amount in section 29?",
+          "answer": "5000",
+          "kind": "late_tool_fact",
+          "reply": "5000 EUR — section 29's line 17 reads \"Penalty: 5000 EUR.\"",
+          "ok": true
+        },
+        {
+          "ask": "Which court is named in section 2?",
+          "answer": "Vienna",
+          "kind": "early_tool_fact",
+          "reply": "The courts of Vienna — section 2's line 25 reads \"Venue: the courts of Vienna.\"",
+          "ok": true
+        },
+        {
+          "ask": "Which court is named in section 30?",
+          "answer": "Rotterdam",
+          "kind": "late_tool_fact",
+          "reply": "The courts of Rotterdam — section 30's line 25 reads \"Venue: the courts of Rotterdam.\"",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "document",
+      "lang": "ja",
+      "seed": 1,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true
+      },
+      "prompt_tokens_per_turn": 3929.5423728813557,
+      "peak_prompt_tokens": 4957,
+      "cache_hit_ratio": 0.5860517677911345,
+      "model_calls": 118,
+      "seconds": 222.1788101196289,
+      "folds": 13,
+      "answers": [
+        {
+          "ask": "第 2 条の通知期間は？",
+          "answer": "14",
+          "kind": "early_tool_fact",
+          "reply": "第 2 条の通知期間は 14 days です。",
+          "ok": true
+        },
+        {
+          "ask": "第 29 条の違約金の額は？",
+          "answer": "7000",
+          "kind": "late_tool_fact",
+          "reply": "第 29 条の違約金の額は 7000 EUR です。",
+          "ok": true
+        },
+        {
+          "ask": "第 2 条で指定されている裁判所は？",
+          "answer": "Lyon",
+          "kind": "early_tool_fact",
+          "reply": "第 2 条で指定されている裁判所は the courts of Lyon です。",
+          "ok": true
+        },
+        {
+          "ask": "第 30 条で指定されている裁判所は？",
+          "answer": "Rotterdam",
+          "kind": "late_tool_fact",
+          "reply": "第30条で指定されている裁判所は the courts of Rotterdam です。",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "task": "document",
+      "lang": "ja",
+      "seed": 2,
+      "accuracy": 1.0,
+      "by_kind": {
+        "early_tool_fact": true,
+        "late_tool_fact": true
+      },
+      "prompt_tokens_per_turn": 4137.925675675676,
+      "peak_prompt_tokens": 5374,
+      "cache_hit_ratio": 0.46985286073287147,
+      "model_calls": 148,
+      "seconds": 352.459276676178,
+      "folds": 18,
+      "answers": [
+        {
+          "ask": "第 2 条の通知期間は？",
+          "answer": "45",
+          "kind": "early_tool_fact",
+          "reply": "第2条（Section 2、全69行、artifact art_01M2YFJFPSREW6B9YG43Y1CH46）の通知期間は行9の「Notice period: 45 days.」で、45日です。",
+          "ok": true
+        },
+        {
+          "ask": "第 29 条の違約金の額は？",
+          "answer": "5000",
+          "kind": "late_tool_fact",
+          "reply": "第29条（Section 29、artifact art_01M2YFW3SC69FFWX57R1TCPA2W、全69行）の違約金は行17の「Penalty: 5000 EUR.」で、5000ユーロです。",
+          "ok": true
+        },
+        {
+          "ask": "第 2 条で指定されている裁判所は？",
+          "answer": "Vienna",
+          "kind": "early_tool_fact",
+          "reply": "第2条（Section 2、artifact art_01M2YFJFPSREW6B9YG43Y1CH46）の行25「Venue: the courts of Vienna.」で指定されている裁判所はウィーンの裁判所です。",
+          "ok": true
+        },
+        {
+          "ask": "第 30 条で指定されている裁判所は？",
+          "answer": "Rotterdam",
+          "kind": "late_tool_fact",
+          "reply": "第30条（Section 30、artifact art_01M2YFWB4BPXW6SX53NHY1GKBA）の行25「Venue: the courts of Rotterdam.」で指定されている裁判所はロッテルダムの裁判所です。",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}
