@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from typing import Any, Callable, Optional, Protocol, Union, runtime_checkable
 
 from .messages import Decision, Message, ToolCall
@@ -82,18 +83,21 @@ class FallbackAdapter:
                 return await adapter.complete(messages, tools, on_delta=on_delta)
             except Exception as exc:  # noqa: BLE001 — the next adapter gets its turn
                 error = exc
-        assert error is not None
-        raise error
+        raise error  # the constructor rejects an empty adapter list
 
 
 def extract_finish(decision: Decision) -> Decision:
-    """Pull a ``finish(result)`` call (if present) out of ``decision.calls``
-    and into ``decision.finish``/``decision.result``.
+    """A copy of ``decision`` with a ``finish(result)`` call (if present)
+    pulled out of ``calls`` and into ``finish``/``result``.
+
+    A copy, not an in-place rewrite: an adapter — or a ``ScriptedLLM`` step
+    replayed by a second run — still holds the Decision it passed in, and
+    must not find it rewritten underneath.
 
     Any *other* calls made in the same decision are deliberately left in
-    ``decision.calls`` rather than dropped, so the session's validator can
-    reject the mixed decision explicitly and tell the model why, instead of
-    silently discarding side effects it asked for.
+    ``calls`` rather than dropped, so the session's validator can reject the
+    mixed decision explicitly and tell the model why, instead of silently
+    discarding side effects it asked for.
     """
     remaining: list[ToolCall] = []
     finished = False
@@ -104,11 +108,9 @@ def extract_finish(decision: Decision) -> Decision:
             result = call.arguments.get("result") if isinstance(call.arguments, dict) else None
         else:
             remaining.append(call)
-    if finished:
-        decision.finish = True
-        decision.result = result
-        decision.calls = remaining
-    return decision
+    if not finished:
+        return decision
+    return replace(decision, finish=True, result=result, calls=remaining)
 
 
 _FENCE = re.compile(r"```tool_call\s*\n(.*?)```", re.DOTALL)
@@ -127,6 +129,8 @@ def parse_text_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
             if m:
                 calls.append(ToolCall(name=m.group(1), arguments={}, raw_arguments=body))
             return ""
+        if not isinstance(data, dict):
+            return ""  # a fenced ``[1, 2]`` or ``7`` is model-controlled input
         name = data.get("name") or data.get("tool")
         if not name:
             return ""

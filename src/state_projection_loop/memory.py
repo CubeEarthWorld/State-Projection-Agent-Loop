@@ -26,6 +26,13 @@ class Note:
     tags: list[str] = field(default_factory=list)
     ts: float = 0.0
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Note":
+        """Unknown fields are ignored, so a file written by a later version
+        still loads."""
+        return cls(id=d["id"], text=d["text"], tags=list(d.get("tags") or []),
+                   ts=float(d.get("ts") or 0.0))
+
 
 @runtime_checkable
 class MemoryStore(Protocol):
@@ -44,7 +51,16 @@ class JsonlMemoryStore:
         self._notes: list[Note] = []
         if self.path is not None and self.path.exists():
             with self.path.open("r", encoding="utf-8") as f:
-                self._notes = [Note(**json.loads(line)) for line in f if line.strip()]
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        self._notes.append(Note.from_dict(json.loads(line)))
+                    except (ValueError, KeyError, TypeError):
+                        # Appends are unbuffered: a crash mid-append leaves a
+                        # torn last line. Skipping it beats failing every
+                        # later Session() construction.
+                        continue
 
     def save(self, text: str, tags: list[str]) -> Note:
         note = Note(id=new_id("note"), text=text, tags=list(tags), ts=time.time())

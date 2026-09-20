@@ -8,13 +8,22 @@ tool-argument schema actually uses.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .serialization import dumps
 
-_TYPE_MAP = {
-    "string": str, "integer": int, "number": (int, float), "boolean": bool,
-    "array": list, "object": dict, "null": type(None),
+#: One name -> predicate table serving both directions: "does this value
+#: have this JSON type" and "what is this value's JSON type name". Order
+#: matters for the second: the first match wins, so ``True`` names itself
+#: "boolean" and ``1`` "integer".
+_TYPES: dict[str, Callable[[Any], bool]] = {
+    "null": lambda v: v is None,
+    "boolean": lambda v: isinstance(v, bool),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "string": lambda v: isinstance(v, str),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
 }
 
 
@@ -25,30 +34,12 @@ def _json_type_name(value: Any) -> str:
     names types the way the schema beside it does — and identically in the
     Dart port, which has no Python type names to fall back on.
     """
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, int):
-        return "integer"
-    if isinstance(value, float):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return type(value).__name__
+    return next((name for name, ok in _TYPES.items() if ok(value)), type(value).__name__)
 
 
-def _type_ok(expected: str, value: Any) -> bool:
-    py = _TYPE_MAP.get(expected)
-    if py is None:
-        return True
-    if expected in ("integer", "number") and isinstance(value, bool):
-        return False
-    return isinstance(value, py)
+def _type_ok(expected: Any, value: Any) -> bool:
+    ok = _TYPES.get(expected) if isinstance(expected, str) else None
+    return ok is None or ok(value)
 
 
 def validate_value(schema: dict[str, Any], value: Any, path: str = "") -> Optional[str]:

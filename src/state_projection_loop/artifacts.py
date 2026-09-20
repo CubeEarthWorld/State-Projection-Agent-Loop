@@ -27,6 +27,13 @@ from .serialization import dumps
 
 REF_KEY = "$artifact"
 
+#: An artifact id, as ``new_id("artifact")`` builds one. Ids arrive from the
+#: model (``meta.artifact.peek``, every ``$artifact`` reference in tool
+#: arguments), so anything carrying a separator, a ``..`` or a drive letter
+#: must never reach the filesystem: it would address another run's data, or
+#: any file on disk.
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+
 
 def serialize_value(value: Any) -> str:
     if isinstance(value, str):
@@ -114,24 +121,39 @@ class ArtifactStore:
         self._persist(record)
         return record
 
-    def _path(self, aid: str) -> Path:
+    def _path(self, aid: str) -> Optional[Path]:
+        """The file this id maps to, or None when it is not a plain artifact
+        id. The single choke point every disk access routes through, which
+        is what keeps the run namespace a real boundary rather than a naming
+        convention."""
+        if self.directory is None or not isinstance(aid, str) or not _SAFE_ID.fullmatch(aid):
+            return None
         return self.directory / self.run_id / f"{aid}.json"
 
     def _persist(self, record: ArtifactRecord) -> None:
-        if self.directory is None:
-            return
         path = self._path(record.id)
+        if path is None:
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(dumps(record.to_payload()), encoding="utf-8")
 
     def _find(self, aid: str) -> Optional[ArtifactRecord]:
         """The record, recovered from disk when an earlier process wrote it:
         a resumed run can still read a payload that was too large to keep
-        in the ledger body."""
+        in the ledger body. Total: an unreadable or foreign file at that
+        path is "no such artifact", never an exception out of
+        :meth:`exists`."""
         record = self._records.get(aid)
-        if record is None and self.directory is not None and self._path(aid).exists():
-            record = ArtifactRecord.from_payload(json.loads(self._path(aid).read_text(encoding="utf-8")))
-            self._records[aid] = record
+        if record is not None:
+            return record
+        path = self._path(aid)
+        if path is None or not path.exists():
+            return None
+        try:
+            record = ArtifactRecord.from_payload(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        self._records[aid] = record
         return record
 
     def get_record(self, aid: str) -> ArtifactRecord:
@@ -172,7 +194,7 @@ class ArtifactStore:
         *,
         max_tokens: int = 600,
     ) -> str:
-        if not isinstance(aid, str) or not self.exists(aid):
+        if not self.exists(aid):
             known = ", ".join(sorted(self._records)) or "(none)"
             shown = repr(aid)[:80]
             return f"Error: unknown artifact {shown}. Known artifacts: {known}"

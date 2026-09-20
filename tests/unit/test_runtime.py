@@ -12,7 +12,7 @@ from state_projection_loop.artifacts import ArtifactStore, ref
 from state_projection_loop.context import ToolContext
 from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
-from state_projection_loop.run import Run
+from state_projection_loop.run import Question, Run
 from state_projection_loop.builtin import install_builtins
 from state_projection_loop.runtime import BudgetState, Runtime
 
@@ -283,6 +283,53 @@ class TestPolicyGating:
         assert batch.halted is True
         assert run.state == "WAITING_FOR_APPROVAL"
         assert [c.name for c in run.pending_calls] == ["demo.risky", "demo.after"]
+
+    def test_a_resolved_approval_is_never_applied_to_a_later_pause(self):
+        """The host approves but starts a new turn instead of resuming. The
+        stale approval used to re-run its already-approved external command
+        under the next pause's first call."""
+        ran: list[str] = []
+        reg = Registry()
+        reg.register(capability_dict("demo.send", effects=[("external", "*")]),
+                     handler=lambda: ran.append("send") or "sent")
+        reg.register(capability_dict("demo.ask", effects=[("write", "*")]),
+                     handler=lambda: Question(text="which one?"))
+        reg.register(capability_dict("demo.after"), handler=lambda: "after")
+        runtime, turn, ctx, run, policy = make_runtime(reg, allow_all=False)
+
+        run_batch(runtime, [ToolCall(name="demo.send", arguments={})], turn, ctx, run, policy)
+        run.resolve_approval("approved", current_policy_revision=policy.revision)
+        assert ran == []
+
+        policy.default_decision = "allow"
+        run_batch(runtime, [ToolCall(name="demo.ask", arguments={}), ToolCall(name="demo.after", arguments={})],
+                  turn, ctx, run, policy)
+        assert run.state == "WAITING_FOR_USER"
+        run.answer("this one")
+
+        batch = asyncio.run(runtime.resume_pending(run, ctx, policy))
+        assert ran == []  # the approved external command must not fire here
+        assert [r.call.name for r in batch.results] == ["demo.after"]
+
+
+class TestQuestions:
+    def test_a_read_only_question_halts_the_batch_like_a_sequential_one(self):
+        """A parked run must not keep executing: the concurrent read-only
+        branch skipped the waiting_user check the sequential branch has."""
+        ran: list[str] = []
+        reg = Registry()
+        reg.register(capability_dict("demo.ask"), handler=lambda: Question(text="which one?"))
+        reg.register(capability_dict("demo.write", effects=[("write", "*")]),
+                     handler=lambda: ran.append("write") or "written")
+        runtime, turn, ctx, run, policy = make_runtime(reg)
+
+        calls = [ToolCall(name="demo.ask", arguments={}), ToolCall(name="demo.write", arguments={})]
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
+
+        assert run.state == "WAITING_FOR_USER"
+        assert batch.halted is True
+        assert ran == []
+        assert [c.name for c in run.pending_calls] == ["demo.write"]
 
 
 class TestOutputPolicy:

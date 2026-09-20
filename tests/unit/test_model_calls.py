@@ -8,6 +8,7 @@ import asyncio
 import pytest
 
 from state_projection_loop import Config, FallbackAdapter, Hooks, Registry, ScriptedLLM, Session
+from state_projection_loop.compaction import FOLD_INSTRUCTIONS
 from state_projection_loop.messages import Decision
 from state_projection_loop.tokens import IMAGE_TOKENS, estimate_tokens
 
@@ -91,6 +92,38 @@ class TestModelCallEnvelope:
         assert asyncio.run(scenario()) == "[interrupted]"
         assert [e["reason"] for e in events(session, "run_state_changed")][-1] == "interrupted"
 
+    def test_interrupt_during_a_compaction_fold_returns_like_any_other_interrupt(self):
+        """The fold's model call is a model call like any other: interrupting
+        it returns the last answer instead of raising CancelledError at the
+        host, and nothing after the fold runs."""
+        started = asyncio.Event()
+
+        class FoldHangs:
+            def __init__(self) -> None:
+                self.replies = 0
+
+            async def complete(self, messages, tools=None, *, on_delta=None):
+                if messages[0].content == FOLD_INSTRUCTIONS:
+                    started.set()
+                    await asyncio.sleep(10)
+                self.replies += 1
+                return Decision(text=f"r{self.replies}")
+
+        llm = FoldHangs()
+        session = Session(llm, config=Config.from_dict({"compaction": {"trigger_ratio": 0.01}}))
+
+        async def scenario():
+            for i in range(12):  # the verbatim point steps on the 13th turn
+                await session.asend(f"m{i}")
+            turn = asyncio.create_task(session.asend("m12"))
+            await started.wait()
+            session.interrupt()
+            return await asyncio.wait_for(turn, timeout=2)
+
+        assert asyncio.run(scenario()) == "r12"
+        assert llm.replies == 12  # the interrupted turn asked for no decision
+        assert events(session, "state_folded") == []
+
 
 class TestHooks:
     @staticmethod
@@ -132,6 +165,38 @@ class TestHooks:
         session.send("go")
         assert [e["text"] for e in events(session, "observation")] == ["wrote [redacted]"]
         assert events(session, "hook_intervened")[0]["stage"] == "after"
+
+    def test_a_throwing_hook_rejects_its_own_call_without_losing_the_batch(self):
+        """A host hook that raises must not take the whole batch with it: the
+        calls that already ran are recorded, and the broken one is rejected
+        exactly like a hook that returned a rejection string."""
+        seen: list[str] = []
+
+        def boom(cap, args, ctx):
+            if args["path"] == "b.txt":
+                raise RuntimeError("hook exploded")
+            return None
+
+        calls = ScriptedLLM.calls(("demo.write", {"path": "a.txt"}), ("demo.write", {"path": "b.txt"}),
+                                  ("demo.write", {"path": "c.txt"}))
+        session = Session(ScriptedLLM([calls, "ok"]), registry=self.registry(seen), policy=allow_all(),
+                          hooks=Hooks(before_call=boom))
+        assert session.send("go") == "ok"
+        assert seen == ["a.txt", "c.txt"]
+        observations = [e["text"] for e in events(session, "observation")]
+        assert observations == ["wrote a.txt", "Rejected by hook: RuntimeError: hook exploded", "wrote c.txt"]
+
+    def test_a_throwing_after_hook_keeps_the_real_observation(self):
+        seen: list[str] = []
+
+        def boom(cap, args, result, ctx):
+            raise RuntimeError("redactor exploded")
+
+        session = Session(ScriptedLLM([ScriptedLLM.call("demo.write", path="a.txt"), "ok"]),
+                          registry=self.registry(seen), policy=allow_all(), hooks=Hooks(after_call=boom))
+        assert session.send("go") == "ok"
+        assert [e["text"] for e in events(session, "observation")] == ["wrote a.txt"]
+        assert events(session, "hook_intervened")[0]["error"] == "RuntimeError: redactor exploded"
 
 
 class TestContentParts:

@@ -85,6 +85,7 @@ class ToolSearch:
         self._df: dict[str, int] = {}
         self._avgdl = 1.0
         self._vectors: dict[str, list[float]] = {}
+        self._sources: dict[str, str] = {}  # the text each vector was made from
 
     # -- index --------------------------------------------------------------
 
@@ -110,13 +111,17 @@ class ToolSearch:
                 self._df[tok] = self._df.get(tok, 0) + 1
         lengths = [len(t) for t in self._doc_tokens.values()]
         self._avgdl = (sum(lengths) / len(lengths)) if lengths else 1.0
-        if self.embedder is not None:
-            to_embed = [t for t in self.registry if not t.discovery.no_embed]
-            texts = [t.embedding_source() for t in to_embed]
-            vecs = self.embedder.embed_documents(texts) if texts else []
-            self._vectors = {t.name: v for t, v in zip(to_embed, vecs)}
-        else:
-            self._vectors = {}
+        # Embed only what changed: every registry mutation bumps the epoch (a
+        # lone disable() included), and re-embedding all N tools for one is a
+        # whole round-trip to the backend. strict=: a backend returning fewer
+        # vectors than asked for must fail loudly, not silently drop the tail.
+        sources = ({t.name: t.embedding_source() for t in self.registry if not t.discovery.no_embed}
+                   if self.embedder is not None else {})
+        stale = [n for n, s in sources.items() if self._sources.get(n) != s]
+        fresh = dict(zip(stale, self.embedder.embed_documents([sources[n] for n in stale]) if stale else [],
+                         strict=True))
+        self._vectors = {n: fresh[n] if n in fresh else self._vectors[n] for n in sources}
+        self._sources = sources
         self._epoch = self.registry.epoch
 
     # -- scoring ------------------------------------------------------------
@@ -143,7 +148,7 @@ class ToolSearch:
     def _tag_score(self, query: str, query_tokens: list[str], tool: Capability) -> float:
         q = query.lower()
         score = 0.0
-        if tool.name.lower() in q or q.strip() == tool.name.lower():
+        if tool.name.lower() in q:
             score += 1.0
         qset = set(query_tokens)
         tags = {t.lower() for t in tool.card.tags}

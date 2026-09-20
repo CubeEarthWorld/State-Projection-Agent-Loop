@@ -65,6 +65,9 @@ class ToolResult:
     artifact_id: Optional[str] = None
     outcome: str = "ok"  # ok | failed | unknown | denied | waiting_approval | waiting_user
     command_id: Optional[str] = None
+    # ``value`` serialized once, for the observation and the loop guard's
+    # result tag. Internal bookkeeping, not part of the result's identity.
+    serialized: Optional[str] = field(default=None, repr=False, compare=False)
 
     @property
     def ok(self) -> bool:
@@ -200,7 +203,7 @@ class Runtime:
     def _args_hash(args: dict[str, Any]) -> str:
         return content_hash(dumps(args))
 
-    def _loop_guard(self, call: ToolCall, capability: Capability, args: dict[str, Any]) -> Optional[ToolResult]:
+    def _loop_guard(self, call: ToolCall, capability: Capability, args_hash: str) -> Optional[ToolResult]:
         """Refuse a call the model keeps repeating with identical arguments
         when every repeat failed, or (for anything but a pure read) every
         repeat returned the same result. Polling a pure read for a change is
@@ -208,7 +211,6 @@ class Runtime:
         limit = self.config.limits.max_repeats
         if limit <= 0:
             return None
-        args_hash = self._args_hash(args)
         tags = [tag for name, ahash, tag in self._recent if name == capability.name and ahash == args_hash]
         if len(tags) < limit:
             return None
@@ -228,20 +230,20 @@ class Runtime:
             ),
         )
 
-    def _remember(self, capability: Capability, args: dict[str, Any], result: ToolResult) -> None:
+    def _remember(self, capability: Capability, args_hash: str, result: ToolResult) -> None:
         if result.outcome in WAITING_OUTCOMES:
             return
-        tag = (content_hash(serialize_value(result.value)) if result.ok
+        tag = (content_hash(result.serialized or "") if result.ok
                else "err:" + content_hash(_DIGITS.sub("", result.error or "")))
-        self._recent.append((capability.name, self._args_hash(args), tag))
-        del self._recent[:-self.config.limits.repeat_window or None]
+        self._recent.append((capability.name, args_hash, tag))
+        del self._recent[:max(0, len(self._recent) - self.config.limits.repeat_window)]
 
     async def _run(
         self, capability: Capability, args: dict[str, Any], ctx: ToolContext, run: Run, call: ToolCall,
-        command: Optional[Command] = None,
+        command: Optional[Command] = None, args_hash: Optional[str] = None,
     ) -> ToolResult:
         result = await self._execute_one(capability, args, ctx, run, call, command=command)
-        self._remember(capability, args, result)
+        self._remember(capability, args_hash if args_hash is not None else self._args_hash(args), result)
         return result
 
     # -- public ---------------------------------------------------------------
@@ -256,36 +258,54 @@ class Runtime:
         at a time, strictly in the order the model asked for it.
         """
         results: list[ToolResult] = []
-        buffer: list[tuple[ToolCall, Capability, dict[str, Any]]] = []
+        buffer: list[tuple[ToolCall, Capability, dict[str, Any], str]] = []
+        # A batch supersedes any approval resolved before it: pending_calls is
+        # about to belong to this batch, and a leftover request would send
+        # resume_pending looking for the wrong call's command.
+        run.last_resolved_approval = None
 
-        async def flush() -> None:
+        async def flush(idx: int) -> bool:
+            """Run the buffered read-only calls concurrently. True when one of
+            them parked the run on a question: like the sequential path, the
+            rest of the batch (from ``idx``) waits for the answer."""
             if not buffer:
-                return
-            results.extend(await asyncio.gather(*(self._run(cap, args, ctx, run, call) for call, cap, args in buffer)))
+                return False
+            flushed = await asyncio.gather(
+                *(self._run(cap, args, ctx, run, call, args_hash=h) for call, cap, args, h in buffer))
+            results.extend(flushed)
             buffer.clear()
+            if not any(r.outcome == "waiting_user" for r in flushed):
+                return False
+            run.pending_calls = list(calls[idx:])
+            return True
 
         for idx, call in enumerate(calls):
             pre = self._pre_check(call)
             if isinstance(pre, ToolResult):
-                await flush()
+                if await flush(idx):
+                    return ExecuteBatchResult(results=results, halted=True)
                 results.append(pre)
                 continue
             capability, args = pre
-            tripped = self._loop_guard(call, capability, args)
+            args_hash = self._args_hash(args)
+            tripped = self._loop_guard(call, capability, args_hash)
             if tripped is not None:
-                await flush()
+                if await flush(idx):
+                    return ExecuteBatchResult(results=results, halted=True)
                 results.append(tripped)
                 continue
             decision = policy.evaluate(capability, args)
             if decision.decision == "deny":
-                await flush()
+                if await flush(idx):
+                    return ExecuteBatchResult(results=results, halted=True)
                 results.append(ToolResult(
                     call=call, outcome="denied", error=decision.reason,
                     observation=f"Denied by policy ({decision.layer}): {decision.reason}",
                 ))
                 continue
             if decision.decision == "require_approval":
-                await flush()
+                if await flush(idx):
+                    return ExecuteBatchResult(results=results, halted=True)
                 command = run.new_command(capability.qualified_name, args, capability.execution.retry_safety)
                 run.pending_calls = list(calls[idx:])
                 run.request_approval(command, capability.effects, decision.reason,
@@ -297,15 +317,16 @@ class Runtime:
                 ))
                 return ExecuteBatchResult(results=results, halted=True)
             if self.is_read_only(capability):
-                buffer.append((call, capability, args))
+                buffer.append((call, capability, args, args_hash))
             else:
-                await flush()
-                results.append(await self._run(capability, args, ctx, run, call))
+                if await flush(idx):
+                    return ExecuteBatchResult(results=results, halted=True)
+                results.append(await self._run(capability, args, ctx, run, call, args_hash=args_hash))
                 if results[-1].outcome == "waiting_user":
                     run.pending_calls = list(calls[idx + 1:])
                     return ExecuteBatchResult(results=results, halted=True)
-        await flush()
-        return ExecuteBatchResult(results=results, halted=False)
+        halted = await flush(len(calls))
+        return ExecuteBatchResult(results=results, halted=halted)
 
     async def resume_pending(
         self, run: Run, ctx: ToolContext, policy: PolicyEngine,
@@ -446,27 +467,34 @@ class Runtime:
                 call=call, outcome="failed", error="no_handler", command_id=command.id,
                 observation=f"Error: capability \"{capability.name}\" has no executable handler registered.",
             )
+        def note_hook(stage: str, key: str, value: Any) -> None:
+            run.ledger.append(run.id, "hook_intervened", {"command_id": command.id, "stage": stage, key: value})
+
         if self.hooks.before_call is not None:
-            verdict = self.hooks.before_call(capability, args, call_ctx)
+            try:
+                verdict = self.hooks.before_call(capability, args, call_ctx)
+            except Exception as exc:  # noqa: BLE001 — a broken hook rejects its own call, not the batch
+                verdict = f"{type(exc).__name__}: {exc}"
             if isinstance(verdict, dict):
                 error = validate_args(capability.spec.parameters, verdict)
                 verdict = f"hook returned invalid arguments: {error}" if error else verdict
             if isinstance(verdict, dict):
-                run.ledger.append(run.id, "hook_intervened",
-                                  {"command_id": command.id, "stage": "before", "arguments": verdict})
+                note_hook("before", "arguments", verdict)
                 args = verdict
             elif verdict is not None:
-                run.ledger.append(run.id, "hook_intervened",
-                                  {"command_id": command.id, "stage": "before", "rejected": str(verdict)})
+                note_hook("before", "rejected", str(verdict))
                 run.record_outcome(command, "failed", error="hook_rejected")
                 return ToolResult(call=call, outcome="failed", error="hook_rejected", command_id=command.id,
                                   observation=f"Rejected by hook: {verdict}")
         result = await self._attempts(capability, args, ctx, run, call, command, handler, call_ctx)
         if self.hooks.after_call is not None and result.outcome not in WAITING_OUTCOMES:
-            replacement = self.hooks.after_call(capability, args, result, call_ctx)
+            try:
+                replacement = self.hooks.after_call(capability, args, result, call_ctx)
+            except Exception as exc:  # noqa: BLE001 — the call already ran; keep its real observation
+                note_hook("after", "error", f"{type(exc).__name__}: {exc}")
+                replacement = None
             if isinstance(replacement, str):
-                run.ledger.append(run.id, "hook_intervened",
-                                  {"command_id": command.id, "stage": "after", "observation": replacement})
+                note_hook("after", "observation", replacement)
                 result.observation = replacement
         return result
 
@@ -497,11 +525,12 @@ class Runtime:
                         call=call, outcome="waiting_user", error="question_pending",
                         observation=f"Question pending: {value.text}", command_id=command.id,
                     )
-                observation, artifact_id = self._observation_for(capability, value, ctx.store)
+                serialized = serialize_value(value)
+                observation, artifact_id = self._observation_for(capability, serialized, value, ctx.store)
                 run.record_outcome(command, "ok", result_ref=artifact_id, duration_ms=elapsed_ms())
                 return ToolResult(
                     call=call, value=value, outcome="ok", command_id=command.id,
-                    observation=observation, artifact_id=artifact_id,
+                    observation=observation, artifact_id=artifact_id, serialized=serialized,
                 )
             except asyncio.TimeoutError:
                 # We cannot confirm whether the underlying effect completed
@@ -539,9 +568,9 @@ class Runtime:
     # -- output policy --------------------------------------------------------
 
     def _observation_for(
-        self, capability: Capability, value: Any, store: ArtifactStore,
+        self, capability: Capability, text: str, value: Any, store: ArtifactStore,
     ) -> tuple[str, Optional[str]]:
-        text = serialize_value(value)
+        """``text`` is ``value`` already serialized by the caller."""
         policy = capability.execution.output_policy
         threshold = policy.max_inline_tokens or self.config.artifacts.inline_threshold_tokens
         tokens = estimate_tokens(text)

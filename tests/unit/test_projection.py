@@ -119,6 +119,16 @@ class TestRenderComposition:
         assert "schemas sent natively" in last
         assert "a somewhat long description" not in last
 
+    def test_render_does_not_mutate_the_caller_s_tool_list(self):
+        # `render` drops native schemas to fit the window; it must do that to
+        # its own copy, not to the list the caller still holds.
+        reg = Registry()
+        cap = reg.register(capability_dict("demo.cand", summary="a somewhat long description of the tool"))
+        projection = default_projection(reg, window=1)
+        api_tools = [cap.tool_spec()]
+        projection.render(make_turn(registry=reg), api_tools=api_tools)
+        assert api_tools == [cap.tool_spec()]
+
     def test_working_state_rendered_when_present(self):
         projection = default_projection(Registry())
         ws = WorkingState(goal="ship the feature")

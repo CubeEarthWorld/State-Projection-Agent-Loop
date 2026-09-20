@@ -106,5 +106,5 @@ def apply_fold_delta(ws: WorkingState, delta: dict[str, Any], *, transcript: str
             ws.open_questions.append(q)
     ws.open_questions = [q for q in ws.open_questions if q not in resolve]
     if "next_actions" in delta:
-        ws.next_actions = list(delta.get("next_actions") or [])
+        ws.next_actions = list(delta["next_actions"])
     return None

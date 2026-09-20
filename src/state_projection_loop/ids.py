@@ -68,6 +68,3 @@ def new_id(kind: str) -> str:
     if prefix is None:
         raise ValueError(f"Unknown id kind {kind!r}; expected one of {sorted(_PREFIXES)}")
     return f"{prefix}_{new_ulid()}"
-
-
-

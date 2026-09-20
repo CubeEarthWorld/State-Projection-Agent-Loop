@@ -119,3 +119,21 @@ class TestReindexing:
                                       embedding_text="翻訳して 英語に 日本語に translate"))
         results = search.search("翻訳して translate", k=8)
         assert results[0].tool.name == "text.translate"
+
+
+class TestEmbeddingBackendMismatch:
+    def test_too_few_vectors_fails_loudly(self):
+        """zip() silently dropped the tail: the tools past the last vector
+        vanished from semantic search with nothing said."""
+        class ShortEmbedder:
+            dimensions = 4
+
+            def embed_documents(self, texts):
+                return [[0.0] * 4 for _ in texts[:-1]]
+
+            def embed_query(self, text):
+                return [0.0] * 4
+
+        search = ToolSearch(make_registry(), embedder=ShortEmbedder(), vector="on")
+        with pytest.raises(ValueError):
+            search.search("検索", k=3)

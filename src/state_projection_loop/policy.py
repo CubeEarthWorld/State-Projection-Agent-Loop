@@ -51,7 +51,10 @@ _LOCAL_STATE = (
          resource_pattern="working_state:checklists", reason="preset:local_checklists"),
     dict(decision="allow", capability_pattern="meta.user.ask", effect_kind="external",
          resource_pattern="user:*", reason="preset:ask_user"),
-    dict(decision="allow", capability_pattern="state.*", effect_kind="write",
+    # No effect_kind: reads of the working state are covered too (a read is
+    # strictly less dangerous than the writes right beside it), exactly like
+    # the memory.* rule below.
+    dict(decision="allow", capability_pattern="state.*",
          resource_pattern="working_state:*", reason="preset:local_working_state"),
     dict(decision="allow", capability_pattern="memory.*", resource_pattern="memory:*",
          reason="preset:local_memory"),
@@ -213,13 +216,14 @@ class PolicyEngine:
         return best[1], best[2], best[3]
 
     def evaluate(self, capability: Capability, arguments: dict[str, Any]) -> PolicyDecision:
-        worst_decision, worst_layer, worst_reason = "allow", "default", "no effects"
-        worst_severity = 0
-        for effect in capability.planned_effects:
-            decision, layer, reason = self._evaluate_effect(capability, effect, arguments)
-            severity = _SEVERITY[decision]
-            if severity > worst_severity:
-                worst_decision, worst_layer, worst_reason, worst_severity = decision, layer, reason, severity
-        return PolicyDecision(decision=worst_decision, reason=worst_reason, layer=worst_layer)
+        # planned_effects always yields at least one effect (an undeclared
+        # capability gets a synthesized "external" one), so there is no
+        # empty case to seed. `max` keeps the first of equal severities,
+        # which is the first-listed effect.
+        decision, layer, reason = max(
+            (self._evaluate_effect(capability, e, arguments) for e in capability.planned_effects),
+            key=lambda r: _SEVERITY[r[0]],
+        )
+        return PolicyDecision(decision=decision, reason=reason, layer=layer)
 
 

@@ -22,7 +22,7 @@ import inspect
 import re
 import types
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Callable, Optional
 
 from .context import ToolContext
@@ -118,6 +118,18 @@ class CapabilityExecution:
                 f"retries={self.retries} is unsafe for retry_safety={self.retry_safety!r}; "
                 "only 'pure' or 'idempotent' capabilities may set retries > 0"
             )
+
+
+def _sub(cls: Any, d: dict[str, Any], **coerce: Callable[[Any], Any]) -> Any:
+    """One of the small config dataclasses above, built from a dict.
+
+    Every field is read by its own name, coerced where a coercion is given,
+    and left at the dataclass default when the key is absent. Values are
+    taken as they are — ``spec.parameters`` is therefore shared with the
+    definition, not copied, which callers rely on.
+    """
+    return cls(**{f.name: coerce[f.name](d[f.name]) if f.name in coerce else d[f.name]
+                  for f in fields(cls) if f.name in d})
 
 
 def _type_str(schema: dict[str, Any]) -> str:
@@ -239,50 +251,26 @@ class Capability:
     def from_dict(cls, data: dict[str, Any], handler: Optional[Callable[..., Any]] = None) -> "Capability":
         if not data.get("name"):
             raise ValueError("Capability definition requires a 'name'")
-        spec_d = dict(data.get("spec") or {})
-        spec = CapabilitySpec(
-            description=spec_d.get("description", ""),
-            parameters=spec_d.get("parameters") or {"type": "object", "properties": {}},
-            returns=spec_d.get("returns"),
-            usage_notes=spec_d.get("usage_notes", ""),
-            examples=list(spec_d.get("examples") or []),
-        )
         card_d = dict(data.get("card") or {})
         if "signature" in card_d:
             raise ValueError(
                 f"Capability {data['name']!r}: card.signature is derived from the name and "
                 "parameters, not authored — remove it from the definition"
             )
-        card = CapabilityCard(summary=card_d.get("summary", ""), tags=list(card_d.get("tags") or []))
-        disc_d = dict(data.get("discovery") or {})
-        discovery = CapabilityDiscovery(
-            pinned=bool(disc_d.get("pinned", False)),
-            require_spec=bool(disc_d.get("require_spec", False)),
-            embedding_text=disc_d.get("embedding_text", ""),
-            no_embed=bool(disc_d.get("no_embed", False)),
-            kernel_note=disc_d.get("kernel_note", ""),
-        )
-        exe_d = dict(data.get("execution") or {})
-        op_d = dict(exe_d.get("output_policy") or {})
-        execution = CapabilityExecution(
-            handler=handler,
-            timeout_s=float(exe_d.get("timeout_s", 30.0)),
-            retries=int(exe_d.get("retries", 0)),
-            retry_safety=exe_d.get("retry_safety", "never_retry"),
-            resolve_handles=bool(exe_d.get("resolve_handles", True)),
-            output_policy=OutputPolicy(
-                max_inline_tokens=op_d.get("max_inline_tokens"),
-                overflow=op_d.get("overflow", "artifact"),
-                preview=op_d.get("preview", "head"),
-            ),
-        )
+        execution = _sub(CapabilityExecution, dict(data.get("execution") or {}),
+                         timeout_s=float, retries=int, resolve_handles=bool,
+                         output_policy=lambda v: _sub(OutputPolicy, dict(v or {})))
+        execution.handler = handler
         return cls(
             name=data["name"],
             version=int(data.get("version", 1)),
             category=data.get("category", ""),
-            card=card,
-            spec=spec,
-            discovery=discovery,
+            card=_sub(CapabilityCard, card_d, tags=lambda v: list(v or [])),
+            spec=_sub(CapabilitySpec, dict(data.get("spec") or {}),
+                      parameters=lambda v: v or {"type": "object", "properties": {}},
+                      examples=lambda v: list(v or [])),
+            discovery=_sub(CapabilityDiscovery, dict(data.get("discovery") or {}),
+                           pinned=bool, require_spec=bool, no_embed=bool),
             execution=execution,
             effects=[Effect.from_dict(e) for e in (data.get("effects") or [])],
         )
@@ -405,8 +393,11 @@ def _hint_to_schema(hint: Any) -> dict[str, Any]:
             t = base.get("type")
             if isinstance(t, str):
                 base["type"] = [t, "null"]
-            elif t is None and "enum" not in base:
-                base = {"type": ["string", "null"], **base} if not base else base
+            elif not base:
+                # Only an unrecognised hint returns {}; an {"enum": ...} or
+                # nested {"anyOf": ...} base is left as it is (typing has
+                # already flattened nested Unions away).
+                base = {"type": ["string", "null"]}
             return base
         return {"anyOf": [_hint_to_schema(a) for a in args]}
     return {}
@@ -414,7 +405,7 @@ def _hint_to_schema(hint: Any) -> dict[str, Any]:
 
 _ARGS_SECTION = re.compile(r"^\s*(Args|Arguments|Parameters|引数)\s*:\s*$", re.IGNORECASE)
 _SECTION_END = re.compile(r"^\s*(Returns|Raises|Yields|Examples?|Notes?|戻り値)\s*:\s*$", re.IGNORECASE)
-_PARAM_LINE = re.compile(r"^\s+(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)$")
+_PARAM_LINE = re.compile(r"^(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)$")
 
 
 def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
@@ -432,7 +423,7 @@ def _parse_docstring(doc: str) -> tuple[str, dict[str, str]]:
             in_args = False
             continue
         if in_args:
-            m = _PARAM_LINE.match("  " + line.strip()) if line.strip() else None
+            m = _PARAM_LINE.match(line.strip())
             if m:
                 param_docs[m.group(1)] = m.group(2).strip()
             continue

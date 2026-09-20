@@ -171,6 +171,113 @@
       },
       "arguments": {},
       "expected": null
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              {
+                "k": 1
+              },
+              {
+                "k": 2
+              }
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": {
+          "k": 1
+        }
+      },
+      "expected": null
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              {
+                "k": 1
+              }
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": {
+          "k": 9
+        }
+      },
+      "expected": "arguments.a: {\"k\":9} is not one of [{\"k\":1}]"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              [
+                1,
+                2
+              ],
+              [
+                3
+              ]
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          1,
+          2
+        ]
+      },
+      "expected": null
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              [
+                1,
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          2,
+          1
+        ]
+      },
+      "expected": "arguments.a: [2,1] is not one of [[1,2]]"
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              null,
+              "x"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": null
+      },
+      "expected": null
     }
   ],
   "apply_defaults": [
@@ -369,6 +476,133 @@
       "arguments": {},
       "expected": {
         "a": "d"
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              {
+                "k": 1
+              },
+              {
+                "k": 2
+              }
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": {
+          "k": 1
+        }
+      },
+      "expected": {
+        "a": {
+          "k": 1
+        }
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              {
+                "k": 1
+              }
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": {
+          "k": 9
+        }
+      },
+      "expected": {
+        "a": {
+          "k": 9
+        }
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              [
+                1,
+                2
+              ],
+              [
+                3
+              ]
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          1,
+          2
+        ]
+      },
+      "expected": {
+        "a": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              [
+                1,
+                2
+              ]
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": [
+          2,
+          1
+        ]
+      },
+      "expected": {
+        "a": [
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "enum": [
+              null,
+              "x"
+            ]
+          }
+        }
+      },
+      "arguments": {
+        "a": null
+      },
+      "expected": {
+        "a": null
       }
     }
   ]

@@ -60,9 +60,11 @@ async def _spawn(
         raise RuntimeError("spawn requires a session context")
     if model is not None and parent.spawn_llm_factory is None:
         raise RuntimeError("spawn(model=...) requires Session(spawn_llm_factory=...)")
-    documents = [parent.checklists.execute("export", id=i)["checklists"][0] for i in (checklist_ids or [])]
+    # Check before exporting: a duplicated id made the export raise
+    # IndexError on the second lookup instead of saying what was wrong.
     if len(set(checklist_ids or [])) != len(checklist_ids or []):
         raise ValueError("Duplicate checklist_ids")
+    documents = [parent.checklists.execute("export", id=i)["checklists"][0] for i in (checklist_ids or [])]
     llm = parent.spawn_llm_factory(model) if parent.spawn_llm_factory else parent.llm
 
     # No scope means everything but spawn itself (no recursive swarm by

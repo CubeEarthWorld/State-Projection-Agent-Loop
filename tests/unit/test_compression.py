@@ -15,6 +15,7 @@ from state_projection_loop.compression import (
     content_hash,
     first_meaningful_line,
     head_tail_truncate,
+    mask_observation,
     strip_noise,
     summarize_text,
 )
@@ -201,3 +202,46 @@ class TestContentHash:
     def test_empty_string(self):
         h = content_hash("")
         assert len(h) == 16
+
+
+_NOISE = "\n".join(f"line {i}" for i in range(30))
+
+
+class TestRegressions:
+    """One case per fixed bug; the Dart port carries the same set."""
+
+    def test_an_http_status_is_not_an_error(self):
+        # "status: 2" of "status: 200" used to match the exit-code pattern,
+        # so a tool reporting an HTTP status was never compressed again.
+        assert mask_observation("HTTP status: 200 OK\n" + _NOISE) == "HTTP status: 200 OK  [31 lines, 249 chars]"
+
+    def test_a_clock_time_is_not_a_stack_frame(self):
+        assert mask_observation("Meeting at 14:30 with Bob\n" + _NOISE).startswith("Meeting at 14:30 with Bob  [")
+
+    def test_a_real_failure_still_takes_the_error_path(self):
+        for report in ("exit code 1", "exit status: 2", "returncode=127", "  at foo.js:12"):
+            assert "line 29" in mask_observation(report + "\n" + _NOISE, max_lines=10), report
+        assert mask_observation("exit code 0\n" + _NOISE).startswith("exit code 0  ["), "a clean exit is not an error"
+
+    def test_truncation_never_lengthens_the_text(self):
+        text = "\n".join("a" for _ in range(41)) + "\n"  # 41 one-char lines
+        assert head_tail_truncate(text, max_lines=40) == text
+
+    def test_output_never_has_more_lines_than_the_limit(self):
+        text = "".join("y" * 40 + "\n" for _ in range(20))
+        assert len(head_tail_truncate(text, max_lines=2).splitlines()) <= 2
+
+    def test_noise_stripping_handles_crlf(self):
+        assert strip_noise("diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n") == "rest\r\n"
+
+    def test_the_fallback_first_line_keeps_its_terminator(self):
+        assert compress_text("diff --git a/x b/x\n") == "diff --git a/x b/x\n"
+
+    def test_a_lone_carriage_return_separates_lines(self):
+        assert first_meaningful_line("#x\ry") == "y"
+
+    def test_every_python_line_break_splits(self):
+        text = "\v".join("x" * 20 for _ in range(20))
+        assert head_tail_truncate(text, max_lines=4) == (
+            "x" * 20 + "\v" + "x" * 20 + "\v  [... 17 lines omitted ...]\n" + "x" * 20
+        )

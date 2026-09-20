@@ -57,6 +57,8 @@ class ToolContext:
 
     def for_command(self, command_id: str) -> "ToolContext":
         """The handler-facing view of this context for one command."""
+        # Not dataclasses.replace: ``self`` is usually a TurnContext, and
+        # replace would hand the handler one back, projection state and all.
         shared = {f.name: getattr(self, f.name) for f in fields(ToolContext)}
         return ToolContext(**{**shared, "command_id": command_id})
 

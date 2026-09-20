@@ -42,7 +42,7 @@ from .runtime import BudgetState, ExecuteBatchResult, Hooks, Runtime, ToolResult
 from .session import ConcurrencyError, Session
 from .working_state import RecordedDecision, WorkingState
 
-__version__ = "0.5.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "Config",

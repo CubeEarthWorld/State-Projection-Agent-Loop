@@ -217,3 +217,134 @@ class TestDisabling:
         assert [c.name for c in sub] == ["file.read"]
         sub.register(capability_dict("web.search.query", category="web/search"), replace=True)
         assert sub.get("web.search.query") is None
+
+
+class TestSharedCapabilityObjects:
+    """One Capability object must never be live in two registries: the
+    ``@capability`` decorator caches one on the function and ``subset()``
+    hands the parent's objects to the child, so mutating on register let a
+    registry rewire another registry's tools."""
+
+    def test_two_registries_get_independent_objects(self):
+        @capability(name="shared.thing.do")
+        def demo_thing() -> str:
+            """Do."""
+            return "x"
+
+        a, b = Registry(), Registry()
+        ca, cb = a.register(demo_thing), b.register(demo_thing)
+        assert ca is not cb
+        assert ca.execution.handler is cb.execution.handler is demo_thing
+
+    def test_registering_with_a_handler_does_not_rewire_another_registry(self):
+        @capability(name="shared.thing.do")
+        def demo_thing() -> str:
+            """Do."""
+            return "x"
+
+        def other() -> str:
+            return "y"
+
+        first = Registry()
+        first.register(demo_thing)
+        Registry().register(demo_thing, handler=other)
+        assert first.get("shared.thing.do").execution.handler is demo_thing
+
+    def test_a_child_registry_cannot_rewire_its_parent(self):
+        reg = Registry()
+        reg.register(capability_dict("file.read", category="file"), handler=ok_handler_factory("read"))
+        parent_handler = reg.get("file.read").execution.handler
+        child = reg.subset(["file.read"])
+        child.register(child.get("file.read"), handler=ok_handler_factory("hijacked"), replace=True)
+        assert reg.get("file.read").execution.handler is parent_handler
+
+
+class TestRegisterHandlerOverride:
+    def test_handler_given_with_a_built_capability_is_honoured(self):
+        """It used to be dropped on the floor: the call looked like it had
+        swapped the implementation, and it had not."""
+        @capability(name="demo.swap.me")
+        def original() -> str:
+            """Original."""
+            return "original"
+
+        def other() -> str:
+            return "other"
+
+        reg = Registry()
+        cap = reg.register(original, handler=other)
+        assert cap.execution.handler is other
+        assert reg.get("demo.swap.me").execution.handler is other
+
+
+class TestProviderRemoval:
+    class Provider:
+        def __init__(self, defs):
+            self.defs = defs
+
+        def provide(self):
+            return list(self.defs)
+
+    def _shared(self):
+        return capability_dict("shared.tool.x", category="shared")
+
+    def test_a_name_another_provider_still_offers_survives(self):
+        """The removal set is per-provider but the registry is shared, so
+        deleting on it alone made the result depend on attach order."""
+        for order in ("ab", "ba"):
+            a = self.Provider([self._shared()])
+            b = self.Provider([self._shared()])
+            reg = Registry()
+            for p in (a, b) if order == "ab" else (b, a):
+                reg.attach_provider(p)
+            a.defs = []
+            reg.refresh_providers()
+            assert reg.get("shared.tool.x") is not None, order
+
+    def test_a_hand_registered_name_is_never_deleted_by_a_provider(self):
+        reg = Registry()
+        provider = self.Provider([self._shared()])
+        reg.attach_provider(provider)
+        reg.register(self._shared(), handler=ok_handler_factory("mine"), replace=True)
+        provider.defs = []
+        reg.refresh_providers()
+        assert reg.get("shared.tool.x") is not None
+
+    def test_a_name_no_provider_offers_any_more_still_goes(self):
+        reg = Registry()
+        provider = self.Provider([self._shared()])
+        reg.attach_provider(provider)
+        provider.defs = []
+        reg.refresh_providers()
+        assert reg.get("shared.tool.x") is None
+
+
+class TestWildcardScope:
+    def _registry(self):
+        reg = Registry()
+        reg.register(capability_dict("meta.tool.find", category="meta"))
+        reg.register(capability_dict("meta.agent.spawn", category="meta"))
+        reg.register(capability_dict("web.search.query", category="web/search"))
+        reg.register(capability_dict("file.read", category="file"))
+        return reg
+
+    def test_star_matches_everything(self):
+        """``spawn``'s own tool_scope description advertises wildcards, so
+        a model passing one used to get a child agent with zero tools."""
+        reg = self._registry()
+        assert len(reg.subset(["*"])) == len(reg)
+
+    def test_bare_category_wildcard_matches_that_category(self):
+        reg = self._registry()
+        assert sorted(c.name for c in reg.subset(["meta/*"])) == ["meta.agent.spawn", "meta.tool.find"]
+
+    def test_category_wildcard_still_matches_sub_categories(self):
+        reg = self._registry()
+        assert [c.name for c in reg.subset(["web/*"])] == ["web.search.query"]
+
+    def test_the_deny_list_understands_the_same_wildcards(self):
+        reg = self._registry()
+        reg.disable("meta/*")
+        assert sorted(c.name for c in reg) == ["file.read", "web.search.query"]
+        reg.disable("*")
+        assert list(reg) == []

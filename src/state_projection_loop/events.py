@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional, Protocol, runtime_checkable
@@ -50,8 +51,6 @@ EVENT_TYPES = (
     "model_call_failed",
     "hook_intervened",
 )
-
-RENDERABLE_TYPES = ("user_input", "model_response", "observation", "notice")
 
 
 @dataclass
@@ -173,13 +172,11 @@ class JsonlLedger:
     def _seq(self, run_id: str) -> int:
         if run_id in self._last_seq:
             return self._last_seq[run_id]
-        n = 0
         path = self._path(run_id)
+        n = 0
         if path.exists():
             with path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        n += 1
+                n = sum(1 for line in f if line.strip())
         self._last_seq[run_id] = n
         return n
 
@@ -200,7 +197,13 @@ class JsonlLedger:
                 line = line.strip()
                 if not line:
                     continue
-                event = Event.from_line(line)
+                try:
+                    event = Event.from_line(line)
+                except (ValueError, KeyError, TypeError):
+                    # Appends are unbuffered, so a crash mid-append leaves a
+                    # torn last line. One bad line must not make the run
+                    # unresumable; every good line before it still replays.
+                    continue
                 if event.sequence > after:
                     yield event
 
@@ -249,20 +252,10 @@ class ObservedLedger:
             pass
         return event
 
-    def iter_run(self, run_id: str, *, after: int = 0) -> Iterator[Event]:
-        return self.inner.iter_run(run_id, after=after)
-
-    def last_sequence(self, run_id: str) -> int:
-        return self.inner.last_sequence(run_id)
-
-    def save_snapshot(self, snapshot: Snapshot) -> None:
-        self.inner.save_snapshot(snapshot)
-
-    def load_snapshot(self, run_id: str) -> Optional[Snapshot]:
-        return self.inner.load_snapshot(run_id)
-
-    def list_runs(self) -> list[RunSummary]:
-        return self.inner.list_runs()
+    def __getattr__(self, name: str) -> Any:
+        # Everything but append is pass-through, so the protocol can grow
+        # without another hand-written forwarder here.
+        return getattr(self.inner, name)
 
 
 def _summaries(snapshots: Iterable[Snapshot]) -> list[RunSummary]:
@@ -271,23 +264,37 @@ def _summaries(snapshots: Iterable[Snapshot]) -> list[RunSummary]:
     return sorted(runs, key=lambda r: r.ts, reverse=True)
 
 
+_MESSAGE_BUILDERS: dict[str, Callable[[dict[str, Any]], Message]] = {
+    "user_input": lambda d: Message(role=USER, content=d.get("text", "")),
+    "model_response": lambda d: Message(
+        role=ASSISTANT, content=d.get("text", ""),
+        tool_calls=[ToolCall.from_dict(c) for c in (d.get("calls") or [])]),
+    "observation": lambda d: Message(role=OBSERVATION, content=d.get("text", ""),
+                                     tool_call_id=d.get("call_id"), name=d.get("name")),
+    "notice": lambda d: Message(role=SYSTEM, content=d.get("text", "")),
+}
+
+# Derived, so a new renderable type is one entry above and not a second list.
+RENDERABLE_TYPES = tuple(_MESSAGE_BUILDERS)
+
+
 def event_to_message(event: Event) -> Optional[Message]:
     """The message a renderable event projects to; None for any other type."""
-    data = event.data
-    if event.type == "user_input":
-        return Message(role=USER, content=data.get("text", ""))
-    if event.type == "model_response":
-        return Message(role=ASSISTANT, content=data.get("text", ""),
-                       tool_calls=[ToolCall.from_dict(c) for c in (data.get("calls") or [])])
-    if event.type == "observation":
-        return Message(role=OBSERVATION, content=data.get("text", ""), tool_call_id=data.get("call_id"),
-                       name=data.get("name"))
-    if event.type == "notice":
-        return Message(role=SYSTEM, content=data.get("text", ""))
-    return None
+    build = _MESSAGE_BUILDERS.get(event.type)
+    return build(event.data) if build is not None else None
+
+
+_RENDERED: Any = weakref.WeakKeyDictionary()  # ledger -> (run_id, last sequence, rendering)
 
 
 def renderable(ledger: EventLedger, run_id: str) -> list[tuple[Event, Message]]:
     """The run's conversation, oldest first: each renderable event with the
-    message it projects to. The one scan every reader of the history shares."""
-    return [(e, m) for e in ledger.iter_run(run_id) if (m := event_to_message(e)) is not None]
+    message it projects to. The one scan every reader of the history shares —
+    memoised until the next append. The messages are shared with every other
+    reader: render from them, never mutate them."""
+    key = (run_id, ledger.last_sequence(run_id))
+    hit = _RENDERED.get(ledger)
+    if hit is None or hit[:2] != key:
+        hit = (*key, [(e, m) for e in ledger.iter_run(run_id) if (m := event_to_message(e)) is not None])
+        _RENDERED[ledger] = hit
+    return hit[2]

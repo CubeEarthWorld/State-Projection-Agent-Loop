@@ -33,16 +33,18 @@ def _set_goal(ctx: ToolContext, text: str) -> str:
     return f"goal set: {text}"
 
 
+def _append_unique(items: list[str], text: str, label: str) -> str:
+    if text not in items:
+        items.append(text)
+    return f"{label}: {text}"
+
+
 def _add_fact(ctx: ToolContext, text: str) -> str:
-    if text not in ctx.working_state.confirmed_facts:
-        ctx.working_state.confirmed_facts.append(text)
-    return f"fact recorded: {text}"
+    return _append_unique(ctx.working_state.confirmed_facts, text, "fact recorded")
 
 
 def _add_constraint(ctx: ToolContext, text: str) -> str:
-    if text not in ctx.working_state.constraints:
-        ctx.working_state.constraints.append(text)
-    return f"constraint recorded: {text}"
+    return _append_unique(ctx.working_state.constraints, text, "constraint recorded")
 
 
 def _record_decision(ctx: ToolContext, text: str, reason: str = "") -> str:
@@ -53,9 +55,7 @@ def _record_decision(ctx: ToolContext, text: str, reason: str = "") -> str:
 
 
 def _add_open_question(ctx: ToolContext, text: str) -> str:
-    if text not in ctx.working_state.open_questions:
-        ctx.working_state.open_questions.append(text)
-    return f"open question added: {text}"
+    return _append_unique(ctx.working_state.open_questions, text, "open question added")
 
 
 def _resolve_open_question(ctx: ToolContext, text: str) -> str:

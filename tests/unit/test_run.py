@@ -7,7 +7,7 @@ import pytest
 
 from state_projection_loop.capability import Effect
 from state_projection_loop.events import InMemoryLedger
-from state_projection_loop.run import Run, RunStateError
+from state_projection_loop.run import Question, Run, RunStateError
 
 
 def make_run() -> Run:
@@ -94,6 +94,19 @@ class TestApproval:
         with pytest.raises(RunStateError, match="expired"):
             run.resolve_approval("approved", current_policy_revision=1)
         assert req.resolution == "expired"
+
+
+class TestQuestions:
+    def test_a_second_question_while_one_is_pending_is_refused(self):
+        """Two concurrent read-only calls can both ask; the second used to
+        overwrite the first, losing it without a trace."""
+        run = make_run()
+        first = run.new_command("demo.ask", {}, "pure")
+        second = run.new_command("demo.ask", {}, "pure")
+        run.ask_question(first, "call_1", Question("which one?"))
+        with pytest.raises(RunStateError, match="already waiting"):
+            run.ask_question(second, "call_2", Question("and this one?"))
+        assert run.pending_question.command_id == first.id
 
 
 class TestSnapshotRoundTrip:

@@ -44,9 +44,7 @@ from .registry import Registry
 from .run import TERMINAL_STATES, ApprovalRequest, PendingQuestion, Run, RunStateError
 from .json_schema import validate_value
 from .runtime import WAITING_OUTCOMES, BudgetState, Hooks, Runtime
-from .tokens import estimate_tokens
 from .working_state import WORKING_STATE_FIELDS, WorkingState
-
 
 
 class ConcurrencyError(RuntimeError):
@@ -143,11 +141,10 @@ class Session:
             # raw dicts that blow up on the next to_dict(). Anything else is
             # app-specific state and lands in `extra`, the documented escape hatch.
             seed = dict(seed or {})
-            known = {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS}
-            self.working_state = WorkingState.from_dict(known)
+            self.working_state = WorkingState.from_dict(
+                {k: v for k, v in seed.items() if k in WORKING_STATE_FIELDS})
             self.working_state.extra.update(
-                {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS}
-            )
+                {k: v for k, v in seed.items() if k not in WORKING_STATE_FIELDS})
             self.budget = BudgetState()
         else:
             self.working_state = WorkingState.from_dict(_restored.state.get("working_state") or {})
@@ -223,7 +220,7 @@ class Session:
         that was attached. It renders as a system message, costs no turn and
         calls no model — what the *user* said goes through :meth:`send`.
         """
-        self._notice(text)
+        self.ledger.append(self.run.id, "notice", {"text": text})
 
     def add_section(self, section: Section, *, before: str = "candidates") -> None:
         self.projection.insert_before(before, section)
@@ -310,11 +307,15 @@ class Session:
         Unlike :meth:`branch`, this mutates the session: the old run is
         cancelled, working_state is restored from the checkpoint at the rewind
         point, and the budget is reset.
+
+        ``to_turn`` must name an existing turn: past the last one there is no
+        checkpoint to restore from, and rewinding anyway would keep the whole
+        history while resetting the working state to an empty one.
         """
-        irreversible = self._irreversible_effects(up_to_turn=to_turn)
-        # One pass: keep renderable events before the to_turn-th user input,
-        # and restore the working state from the checkpoint written right
-        # after it.
+        # One pass: the effects committed before the to_turn-th user input,
+        # the renderable events to keep, and the working state from the
+        # checkpoint written right after it.
+        irreversible: list[str] = []
         kept_renderable: list[Event] = []
         restored_ws = WorkingState()
         user_count = 0
@@ -326,9 +327,15 @@ class Session:
             if not cut:
                 if event.type in RENDERABLE_TYPES:
                     kept_renderable.append(event)
+                elif (effect := self._effect_notice(event)) is not None:
+                    irreversible.append(effect)
             elif event.type == "checkpoint":
                 restored_ws = WorkingState.from_dict(event.data.get("working_state") or {})
                 break
+        if not cut:
+            raise ValueError(
+                f"rewind(to_turn={to_turn}) is out of range: this run has {user_count} user turn(s)"
+            )
 
         old_run_id = self.run.id
         self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
@@ -350,27 +357,26 @@ class Session:
 
         return irreversible
 
-    def _irreversible_effects(self, *, up_to_turn: Optional[int] = None) -> list[str]:
+    def _irreversible_effects(self) -> list[str]:
         """External effects this run already committed — a sent email, a
         pushed commit. Neither branching nor rewinding can undo them, so both
-        report them; ``up_to_turn`` stops the scan at the cut point.
+        report them (:meth:`rewind` collects its own, up to the cut point).
         """
-        notices: list[str] = []
-        user_count = 0
-        for event in self.ledger.iter_run(self.run.id):
-            if event.type == "user_input" and up_to_turn is not None:
-                if user_count >= up_to_turn:
-                    break
-                user_count += 1
-            if event.type != "command_completed":
-                continue
-            command = self.run.commands.get(event.data.get("command_id", ""))
-            if command is None:
-                continue
-            capability = self.registry.get(command.capability_name.rsplit("@", 1)[0])
-            if capability and any(e.kind == "external" for e in capability.effects):
-                notices.append(f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone")
-        return notices
+        return [effect for event in self.ledger.iter_run(self.run.id)
+                if (effect := self._effect_notice(event)) is not None]
+
+    def _effect_notice(self, event: Event) -> Optional[str]:
+        """The note for one already-committed external effect, or None when
+        the event is not one."""
+        if event.type != "command_completed":
+            return None
+        command = self.run.commands.get(event.data.get("command_id", ""))
+        if command is None:
+            return None
+        capability = self.registry.get(command.capability_name.rsplit("@", 1)[0])
+        if capability is None or not any(e.kind == "external" for e in capability.effects):
+            return None
+        return f"{capability.qualified_name} (command {command.id}) already ran and cannot be undone"
 
     # -- process-restart resume ------------------------------------------------
 
@@ -427,17 +433,19 @@ class Session:
                 return stop
 
             ctx, messages = self._project()
-            if await self._fold(ctx, messages):
-                # From scratch: shrinking the first rendering consumed its
-                # candidates and schemas, and the fold may have moved the goal.
-                ctx, messages = self._project()
-            self.ledger.append(self.run.id, "projection_compiled", {
-                "tokens": estimate_tokens(messages), "messages": len(messages),
-                "candidates": [s.tool.name for s in ctx.candidates],
-            })
-
-            started = time.monotonic()
+            # Both model calls of a step are inside the guard: interrupting
+            # the fold must return a value like every other interrupt path,
+            # not raise CancelledError at the caller.
             try:
+                if await self._fold():
+                    # From scratch: shrinking the first rendering consumed its
+                    # candidates and schemas, and the fold may have moved the goal.
+                    ctx, messages = self._project()
+                self.ledger.append(self.run.id, "projection_compiled", {
+                    "tokens": self.projection.last_message_tokens, "messages": len(messages),
+                    "candidates": [s.tool.name for s in ctx.candidates],
+                })
+                started = time.monotonic()
                 decision = extract_finish(await self._complete(messages, ctx.api_tools or None))
             except asyncio.CancelledError:
                 if not self._interrupted:
@@ -468,7 +476,7 @@ class Session:
                 error = validate_value(schema, decision.result) if schema else None
                 if error is not None:
                     self.ledger.append(self.run.id, "decision_validated", {"ok": False, "reason": f"result_schema: {error}"})
-                    self._notice(f"[runtime] finish(result) rejected: {error}. Fix the result and call finish again.")
+                    self.notice(f"[runtime] finish(result) rejected: {error}. Fix the result and call finish again.")
                     continue
                 self.ledger.append(self.run.id, "decision_validated", {"ok": True, "finish": True})
                 if self.config.mode == "job":
@@ -504,8 +512,6 @@ class Session:
             self._inflight = asyncio.ensure_future(self.llm.complete(messages, tools, **streaming))
             try:
                 return await asyncio.wait_for(self._inflight, timeout=cfg.timeout_s)
-            except asyncio.CancelledError:
-                raise
             except Exception as exc:  # noqa: BLE001 — every provider error is one attempt
                 error = (f"timed out after {cfg.timeout_s}s" if isinstance(exc, asyncio.TimeoutError)
                          else f"{type(exc).__name__}: {exc}")
@@ -520,7 +526,7 @@ class Session:
                 self._inflight = None
         raise AssertionError("unreachable")
 
-    def _step_tiers(self) -> bool:
+    def _step_tiers(self) -> None:
         """Move the history's verbatim point forward in steps: only when the
         verbatim tail has grown to four times ``full_window`` is it cut back
         to ``full_window``. Between steps the rendering of every older message
@@ -530,21 +536,18 @@ class Session:
         history = renderable(self.ledger, self.run.id)
         tail = sum(1 for event, _ in history if event.sequence >= self.working_state.verbatim_sequence)
         if keep <= 0 or tail <= 4 * keep:
-            return False
+            return
         self.working_state.verbatim_sequence = history[-keep][0].sequence
-        return True
 
     def _project(self) -> tuple[TurnContext, list[Message]]:
         self._step_tiers()
         ctx = self._context()
         cfg = self.config.projection
-        messages = self.projection.render(
+        return ctx, self.projection.render(
             ctx, api_tools=self._api_tools(ctx),
-            reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens,
-        )
-        return ctx, messages
+            reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens)
 
-    async def _fold(self, ctx: TurnContext, messages: list[Message]) -> bool:
+    async def _fold(self) -> bool:
         """Compaction: when the prompt exceeds ``compaction.trigger_ratio`` of
         the window, fold history older than the full-fidelity window into the
         working state with one model call. Returns True when the projection
@@ -559,7 +562,7 @@ class Session:
         # every turn of a small window.
         cfg = self.config.projection
         room = cfg.window_tokens - cfg.reserved_output_tokens - cfg.provider_overhead_tokens
-        used = estimate_tokens(messages) + self.projection.schema_tokens(ctx.api_tools)
+        used = self.projection.last_message_tokens + self.projection.last_schema_tokens
         if used <= ratio * room:
             return False
         # Fold from the ledger, never from the projection: what masking
@@ -583,7 +586,7 @@ class Session:
         error = ("reply was not a JSON object" if delta is None
                  else apply_fold_delta(self.working_state, delta, transcript=transcript))
         if error is not None:
-            self._notice(f"[runtime] compaction skipped: {error}")
+            self.notice(f"[runtime] compaction skipped: {error}")
             return False
         self.working_state.folded_sequence = foldable[-1][0].sequence
         self.ledger.append(self.run.id, "state_folded", {
@@ -592,7 +595,6 @@ class Session:
         return True
 
     def _apply_batch(self, batch, *, record: bool = True) -> None:
-
         for result in batch.results:
             # A call parked on an approval has no result yet. Recording a
             # placeholder observation would either be overwritten by the real
@@ -613,7 +615,7 @@ class Session:
         if not self._budget_grace_used:
             self._budget_grace_used = True
             hint = " or call finish(result)" if self.config.mode == "job" else ""
-            self._notice(f"[runtime] Budget exceeded: {reason}. Wrap up now with a final answer{hint}.")
+            self.notice(f"[runtime] Budget exceeded: {reason}. Wrap up now with a final answer{hint}.")
             return None
         if self.config.mode == "job":
             if self.run.state not in TERMINAL_STATES:
@@ -633,22 +635,16 @@ class Session:
             self.on_delta("tool", text)
 
     def _layer2_candidates(self) -> list[ScoredTool]:
-        query = "\n".join(q for q in self._candidate_queries() if q)
+        sources = {"last_user_message": lambda: self._last_text(USER),
+                   "last_model_thought": lambda: self._last_text(ASSISTANT),
+                   "goal_if_exists": lambda: self.working_state.goal}
+        query = "\n".join(
+            text for text in (sources[s]() for s in self.config.discovery.query_sources if s in sources) if text
+        )
         if not query:
             return []
         pinned = {c.name for c in self.registry.pinned()}
         return self.search.search(query, k=self.config.discovery.k, layer=2, exclude=pinned)
-
-    def _candidate_queries(self) -> list[str]:
-        parts: list[str] = []
-        for source in self.config.discovery.query_sources:
-            if source == "last_user_message":
-                parts.append(self._last_text(USER))
-            elif source == "last_model_thought":
-                parts.append(self._last_text(ASSISTANT))
-            elif source == "goal_if_exists":
-                parts.append(self.working_state.goal)
-        return parts
 
     def _last_text(self, role: str) -> str:
         for _, message in reversed(renderable(self.ledger, self.run.id)):
@@ -657,14 +653,13 @@ class Session:
         return ""
 
     def _api_tools(self, ctx: TurnContext) -> list[dict]:
-        names: "OrderedDict[str, None]" = OrderedDict()
-        for capability in self.registry.pinned():
-            names[capability.name] = None
-        for scored in ctx.candidates:
-            names[scored.tool.name] = None
-        for name in self._active:
-            names[name] = None
-        schemas = [self.registry.get(n).tool_spec() for n in names if n in self.registry]
+        names = dict.fromkeys(  # ordered and deduplicated: pinned, then candidates, then the LRU
+            [c.name for c in self.registry.pinned()]
+            + [s.tool.name for s in ctx.candidates]
+            + list(self._active)
+        )
+        schemas = [capability.tool_spec() for capability in map(self.registry.get, names)
+                   if capability is not None]
         if self.config.mode == "job":
             schemas.append(FINISH_SPEC)
         return schemas
@@ -688,7 +683,7 @@ class Session:
             self.ledger.append(self.run.id, "run_state_changed",
                                 {"from": self.run.state, "to": self.run.state, "reason": "gave_up_text_only"})
             return decision.text
-        self._notice(
+        self.notice(
             "[runtime] No tool was called. Continue working with tools, "
             "or call finish(result) to finish the job."
         )
@@ -696,9 +691,6 @@ class Session:
 
     def _observe(self, call_id: str, name: str, text: str, *, ok: bool = True) -> None:
         self.ledger.append(self.run.id, "observation", {"call_id": call_id, "name": name, "text": text, "ok": ok})
-
-    def _notice(self, text: str) -> None:
-        self.ledger.append(self.run.id, "notice", {"text": text})
 
     def _checkpoint(self) -> None:
         self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})

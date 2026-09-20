@@ -22,6 +22,7 @@ nothing can give back more.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,10 +34,6 @@ from .messages import Message, ASSISTANT, OBSERVATION, SYSTEM, USER
 from .registry import Registry
 from .tokens import estimate_tokens
 from .serialization import dumps
-
-
-def _schema_name(schema: dict[str, Any]) -> Any:
-    return schema.get("name")
 
 
 class Section:
@@ -120,10 +117,8 @@ class KernelSection(Section):
         if key != self._cached_key:
             self._rebuild(ctx.registry, ctx.config.mode)
             self._cached_key = key
-        native_names = {_schema_name(t) for t in ctx.api_tools}
-        if ctx.api_tools and self._pinned_api_names <= native_names:
-            return list(self._native_messages)
-        return list(self._messages)
+        native = ctx.api_tools and self._pinned_api_names <= {t.get("name") for t in ctx.api_tools}
+        return list(self._native_messages if native else self._messages)
 
 
 class InstructionsSection(Section):
@@ -170,13 +165,10 @@ class TocSection(Section):
         registry = ctx.registry
         if registry.epoch != self._cached_epoch:
             toc = registry.toc_text()
-            hint = (
-                " — discover tools with meta.tool.find(query, category)"
-                if "meta.tool.find" in registry else ""
-            )
-            self._cached = [
-                Message(role=SYSTEM, content=f"[Tool index] {toc}\n(categories(count){hint})")
-            ] if toc else []
+            hint = (" — discover tools with meta.tool.find(query, category)"
+                    if "meta.tool.find" in registry else "")
+            self._cached = ([Message(role=SYSTEM, content=f"[Tool index] {toc}\n(categories(count){hint})")]
+                            if toc else [])
             self._cached_epoch = registry.epoch
         return list(self._cached)
 
@@ -238,8 +230,7 @@ class HistorySection(Section):
                     content = summarize_text(content)
             else:
                 continue
-            message.content = content
-            messages.append(message)
+            messages.append(message if content is message.content else replace(message, content=content))
         return pair_tool_calls(messages)
 
     def shrink(self, ctx: TurnContext, current: list[Message]) -> Optional[list[Message]]:
@@ -298,12 +289,10 @@ class CandidatesSection(Section):
     def render(self, ctx: TurnContext) -> list[Message]:
         if not ctx.candidates:
             return []
-        if ctx.config.projection.dedupe_candidate_cards_against_schemas and ctx.api_tools:
-            lines = [s.tool.card.signature for s in ctx.candidates]
-            header = "[Tool candidates — auto-selected for this turn; schemas sent natively]"
-        else:
-            lines = [s.tool.card_text() for s in ctx.candidates]
-            header = "[Tool candidates — auto-selected for this turn; call directly if useful]"
+        native = bool(ctx.config.projection.dedupe_candidate_cards_against_schemas and ctx.api_tools)
+        header = ("[Tool candidates — auto-selected for this turn; schemas sent natively]" if native
+                  else "[Tool candidates — auto-selected for this turn; call directly if useful]")
+        lines = [s.tool.card.signature if native else s.tool.card_text() for s in ctx.candidates]
         return [Message(role=SYSTEM, content=header + "\n" + "\n".join(lines))]
 
     def shrink(self, ctx: TurnContext, current: list[Message]) -> Optional[list[Message]]:
@@ -312,7 +301,7 @@ class CandidatesSection(Section):
         dropped = ctx.candidates.pop().tool.api_name
         # A dropped card takes its native schema with it, so the budget the
         # provider actually bills shrinks too.
-        ctx.api_tools = [t for t in ctx.api_tools if _schema_name(t) != dropped]
+        ctx.api_tools = [t for t in ctx.api_tools if t.get("name") != dropped]
         return self.render(ctx)
 
 
@@ -322,17 +311,16 @@ class Projection:
         self.window_tokens = window_tokens
 
     def get(self, name: str) -> Optional[Section]:
-        for sec in self.sections:
-            if sec.name == name:
-                return sec
-        return None
+        return next((sec for sec in self.sections if sec.name == name), None)
 
     def insert_before(self, name: str, section: Section) -> None:
-        for i, sec in enumerate(self.sections):
-            if sec.name == name:
-                self.sections.insert(i, section)
-                return
-        self.sections.append(section)
+        names = [sec.name for sec in self.sections]
+        self.sections.insert(names.index(name) if name in names else len(names), section)
+
+    #: What the last :meth:`render` settled on, so callers needing the same
+    #: numbers read them back instead of re-counting the whole prompt.
+    last_message_tokens: int = 0
+    last_schema_tokens: int = 0
 
     def schema_tokens(self, api_tools: list[dict[str, Any]]) -> int:
         if not api_tools:
@@ -350,7 +338,7 @@ class Projection:
         """
         keep = {c.api_name for c in ctx.registry.pinned()} | {FINISH_NAME}
         for i, schema in enumerate(ctx.api_tools):
-            if _schema_name(schema) not in keep:
+            if schema.get("name") not in keep:
                 del ctx.api_tools[i]
                 return True
         return False
@@ -367,12 +355,13 @@ class Projection:
         schema is dropped; a round that frees no tokens ends the loop, so it
         always terminates. The caller sends ``ctx.api_tools`` as left here.
         """
-        ctx.api_tools = api_tools or []
+        ctx.api_tools = list(api_tools or [])
         rendered = [s.render(ctx) for s in self.sections]
 
-        def total() -> int:
-            return (self.schema_tokens(ctx.api_tools) + reserved_tokens
-                    + sum(estimate_tokens(msgs) for msgs in rendered))
+        def total() -> int:  # also what leaves last_*_tokens behind for the caller
+            self.last_message_tokens = sum(estimate_tokens(msgs) for msgs in rendered)
+            self.last_schema_tokens = self.schema_tokens(ctx.api_tools)
+            return self.last_message_tokens + self.last_schema_tokens + reserved_tokens
 
         progress = True
         while progress and total() > self.window_tokens:
@@ -404,10 +393,7 @@ def build_default_sections(
         "history": HistorySection,
         "candidates": CandidatesSection,
     }
-    sections: list[Section] = []
     for name in names:
-        if name in factories:
-            sections.append(factories[name]())
-        else:
+        if name not in factories:
             raise ValueError(f"Unknown section {name!r}; pass Section instances via Session(sections=...)")
-    return sections
+    return [factories[name]() for name in names]

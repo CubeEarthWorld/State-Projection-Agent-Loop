@@ -35,6 +35,46 @@
     {
       "text": "\u001b[31mred\u001b[0m plain",
       "expected": "28d6a9d908eb9ebc"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "expected": "442eb871f893bad0"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "expected": "e3e4cbf90e42faf3"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "expected": "d15b0fec858b1be0"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "expected": "85f822616dcabb54"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "expected": "665ac463902f281f"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "d32aa96237f17048"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "b1d2ae09e9b2935d"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "expected": "1e05a8541f4edb4f"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "expected": "a6580be768d74039"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "expected": "69701aa74cb318c7"
     }
   ],
   "strip_noise": [
@@ -73,6 +113,46 @@
     {
       "text": "\u001b[31mred\u001b[0m plain",
       "expected": "red plain"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "expected": "rest\r\n"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "expected": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "expected": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "expected": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx"
     }
   ],
   "summarize_text": [
@@ -111,6 +191,46 @@
     {
       "text": "\u001b[31mred\u001b[0m plain",
       "expected": "\u001b[31mred\u001b[0m plain"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "expected": "diff --git a/f b/f  [4 lines, 49 chars]"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "HTTP status: 200 OK  [51 lines, 409 chars]"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "expected": "exit code 0  [51 lines, 401 chars]"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "expected": "Meeting at 14:30 with Bob  [51 lines, 415 chars]"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "expected": "at foo.js:12  [51 lines, 452 chars]"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "expected": "x  [41 lines, 81 chars]"
     }
   ],
   "head_tail_truncate": [
@@ -257,7 +377,7 @@
     {
       "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
       "max_lines": 4,
-      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n  [... 2 lines omitted ...]\nreal line\n"
+      "expected": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n"
     },
     {
       "text": "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
@@ -293,6 +413,206 @@
       "text": "\u001b[31mred\u001b[0m plain",
       "max_lines": 40,
       "expected": "\u001b[31mred\u001b[0m plain"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "max_lines": 4,
+      "expected": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "max_lines": 7,
+      "expected": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "max_lines": 10,
+      "expected": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n"
+    },
+    {
+      "text": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",
+      "max_lines": 40,
+      "expected": "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "max_lines": 4,
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "max_lines": 7,
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "max_lines": 10,
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "index 1234567..89abcde 100644\rtail",
+      "max_lines": 40,
+      "expected": "index 1234567..89abcde 100644\rtail"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "max_lines": 4,
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "max_lines": 7,
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "max_lines": 10,
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "a\u000bb\u000bc\u000bd\u000be",
+      "max_lines": 40,
+      "expected": "a\u000bb\u000bc\u000bd\u000be"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "max_lines": 4,
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "max_lines": 7,
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "max_lines": 10,
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "h1\ff2\u001c3\u001d4\u001e56 7 8",
+      "max_lines": 40,
+      "expected": "h1\ff2\u001c3\u001d4\u001e56 7 8"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "max_lines": 4,
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "max_lines": 7,
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "max_lines": 10,
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",
+      "max_lines": 40,
+      "expected": "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 4,
+      "expected": "HTTP status: 200 OK\nbody 0\n  [... 48 lines omitted ...]\nbody 49"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 7,
+      "expected": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\n  [... 46 lines omitted ...]\nbody 49"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 10,
+      "expected": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\n  [... 43 lines omitted ...]\nbody 48\nbody 49"
+    },
+    {
+      "text": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 40,
+      "expected": "HTTP status: 200 OK\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\n  [... 17 lines omitted ...]\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 4,
+      "expected": "exit code 0\nbody 0\n  [... 48 lines omitted ...]\nbody 49"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 7,
+      "expected": "exit code 0\nbody 0\nbody 1\nbody 2\n  [... 46 lines omitted ...]\nbody 49"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 10,
+      "expected": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\n  [... 43 lines omitted ...]\nbody 48\nbody 49"
+    },
+    {
+      "text": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\nbody 23\nbody 24\nbody 25\nbody 26\nbody 27\nbody 28\nbody 29\nbody 30\nbody 31\nbody 32\nbody 33\nbody 34\nbody 35\nbody 36\nbody 37\nbody 38\nbody 39\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49",
+      "max_lines": 40,
+      "expected": "exit code 0\nbody 0\nbody 1\nbody 2\nbody 3\nbody 4\nbody 5\nbody 6\nbody 7\nbody 8\nbody 9\nbody 10\nbody 11\nbody 12\nbody 13\nbody 14\nbody 15\nbody 16\nbody 17\nbody 18\nbody 19\nbody 20\nbody 21\nbody 22\n  [... 17 lines omitted ...]\nbody 40\nbody 41\nbody 42\nbody 43\nbody 44\nbody 45\nbody 46\nbody 47\nbody 48\nbody 49"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "max_lines": 4,
+      "expected": "Meeting at 14:30 with Bob\nnote 0\n  [... 48 lines omitted ...]\nnote 49"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "max_lines": 7,
+      "expected": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\n  [... 46 lines omitted ...]\nnote 49"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "max_lines": 10,
+      "expected": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\n  [... 43 lines omitted ...]\nnote 48\nnote 49"
+    },
+    {
+      "text": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\nnote 23\nnote 24\nnote 25\nnote 26\nnote 27\nnote 28\nnote 29\nnote 30\nnote 31\nnote 32\nnote 33\nnote 34\nnote 35\nnote 36\nnote 37\nnote 38\nnote 39\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49",
+      "max_lines": 40,
+      "expected": "Meeting at 14:30 with Bob\nnote 0\nnote 1\nnote 2\nnote 3\nnote 4\nnote 5\nnote 6\nnote 7\nnote 8\nnote 9\nnote 10\nnote 11\nnote 12\nnote 13\nnote 14\nnote 15\nnote 16\nnote 17\nnote 18\nnote 19\nnote 20\nnote 21\nnote 22\n  [... 17 lines omitted ...]\nnote 40\nnote 41\nnote 42\nnote 43\nnote 44\nnote 45\nnote 46\nnote 47\nnote 48\nnote 49"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "max_lines": 4,
+      "expected": "at foo.js:12\nframe 0\n  [... 48 lines omitted ...]\nframe 49"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "max_lines": 7,
+      "expected": "at foo.js:12\nframe 0\nframe 1\nframe 2\n  [... 46 lines omitted ...]\nframe 49"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "max_lines": 10,
+      "expected": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\n  [... 43 lines omitted ...]\nframe 48\nframe 49"
+    },
+    {
+      "text": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\nframe 23\nframe 24\nframe 25\nframe 26\nframe 27\nframe 28\nframe 29\nframe 30\nframe 31\nframe 32\nframe 33\nframe 34\nframe 35\nframe 36\nframe 37\nframe 38\nframe 39\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49",
+      "max_lines": 40,
+      "expected": "at foo.js:12\nframe 0\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nframe 7\nframe 8\nframe 9\nframe 10\nframe 11\nframe 12\nframe 13\nframe 14\nframe 15\nframe 16\nframe 17\nframe 18\nframe 19\nframe 20\nframe 21\nframe 22\n  [... 17 lines omitted ...]\nframe 40\nframe 41\nframe 42\nframe 43\nframe 44\nframe 45\nframe 46\nframe 47\nframe 48\nframe 49"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "max_lines": 4,
+      "expected": "x\nx\n  [... 38 lines omitted ...]\nx"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "max_lines": 7,
+      "expected": "x\nx\nx\nx\n  [... 36 lines omitted ...]\nx"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "max_lines": 10,
+      "expected": "x\nx\nx\nx\nx\nx\n  [... 33 lines omitted ...]\nx\nx"
+    },
+    {
+      "text": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx",
+      "max_lines": 40,
+      "expected": "x\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx\nx"
     }
   ]
 }

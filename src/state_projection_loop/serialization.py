@@ -13,14 +13,29 @@ alone, which silently changed every token estimate.
 * unencodable values fall back to ``str`` rather than raising: ``extra`` is
   documented as a free-form escape hatch, and a ledger append must not fail
   because something in it was not JSON
+* non-finite floats become ``null``: ``NaN``/``Infinity`` are a Python
+  extension to JSON that the Dart port's decoder rejects outright, so a
+  ledger line carrying one would be permanently unreadable there
 """
 from __future__ import annotations
 
 import json
+from math import isfinite
 from typing import Any
 
 _SEPARATORS = (",", ":")
 
 
+def _json_safe(obj: Any) -> Any:
+    """Replace what has no JSON form; see the ``null`` note above."""
+    if isinstance(obj, float) and not isfinite(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
 def dumps(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, separators=_SEPARATORS, default=str)
+    return json.dumps(_json_safe(obj), ensure_ascii=False, separators=_SEPARATORS, default=str)

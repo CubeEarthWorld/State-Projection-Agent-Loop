@@ -59,6 +59,41 @@
       "value": "planning.checklist.manage",
       "pattern": "state.*",
       "expected": false
+    },
+    {
+      "value": "🎌",
+      "pattern": "?",
+      "expected": true
+    },
+    {
+      "value": "🎌",
+      "pattern": "*",
+      "expected": true
+    },
+    {
+      "value": "a🎌b",
+      "pattern": "a?b",
+      "expected": true
+    },
+    {
+      "value": "ab",
+      "pattern": "[!z-a]",
+      "expected": false
+    },
+    {
+      "value": "ab",
+      "pattern": "[z-a]",
+      "expected": false
+    },
+    {
+      "value": "a",
+      "pattern": "[b-a]",
+      "expected": false
+    },
+    {
+      "value": "-",
+      "pattern": "[a-]",
+      "expected": true
     }
   ]
 }

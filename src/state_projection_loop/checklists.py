@@ -33,7 +33,9 @@ def _identifier(value: Any) -> str:
 def _item(data: Any, *, generate: bool = False) -> dict[str, Any]:
     _keys(data, {"id", "text", "status", "notes"})
     return {
-        "id": _identifier(data.get("id", new_ulid() if generate else None)),
+        # Lazily: a present id must not burn a ULID and advance the
+        # monotonic counter for nothing.
+        "id": _identifier(data["id"] if "id" in data else (new_ulid() if generate else None)),
         "text": _text(data.get("text"), "text", 500),
         "status": _choice(data.get("status", "pending"), STATUSES, "status"),
         "notes": _text(data.get("notes", ""), "notes", 2000, empty=True),
@@ -69,9 +71,9 @@ def _checklist(data: Any) -> dict[str, Any]:
 
 
 def _view(data: dict, mode: str = "full") -> dict[str, Any]:
-    result = {k: copy.deepcopy(v) for k, v in data.items() if k != "items"}
     if mode == "name":
         return {"id": data["id"], "name": data["name"]}
+    result = {k: copy.deepcopy(v) for k, v in data.items() if k != "items"}
     counts = {s: sum(x["status"] == s for x in data["items"]) for s in STATUSES}
     total = len(data["items"])
     remaining = total - counts["completed"] - counts["cancelled"]
@@ -100,6 +102,14 @@ class ChecklistStore:
 
     def to_dict(self) -> dict[str, Any]:
         return {"version": 1, "checklists": copy.deepcopy(list(self._lists.values()))}
+
+    def copy(self) -> "ChecklistStore":
+        """A deep copy that skips revalidation: what is stored here is
+        already valid, so a mutation only has to validate the checklist it
+        touches. ``from_dict(store.to_dict())`` revalidates all 100x200."""
+        store = ChecklistStore()
+        store._lists = copy.deepcopy(self._lists)
+        return store
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ChecklistStore":
@@ -202,14 +212,16 @@ class ChecklistStore:
         if max_chars < 100:
             return ""
         lines: list[str] = []
+        used = 0
         visible = [v for v in self._lists.values() if v["include_in_context"]]
         for value in visible:
             line = dumps(_view(value, value["context_mode"]))
-            if sum(len(x) + 1 for x in lines) + len(line) > max_chars - 100:
+            if used + len(line) > max_chars - 100:
                 line = dumps(_view(value, "summary"))
-            if sum(len(x) + 1 for x in lines) + len(line) > max_chars - 100:
+            if used + len(line) > max_chars - 100:
                 break
             lines.append(line)
+            used += len(line) + 1
         if len(lines) < len(visible):
             lines.append(f"[{len(visible) - len(lines)} more checklists omitted; use planning.checklist.manage.]")
         return "\n".join(lines)

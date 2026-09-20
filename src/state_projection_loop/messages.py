@@ -82,10 +82,6 @@ class Usage:
         return {"prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
                 "cached_tokens": self.cached_tokens}
 
-    @property
-    def total_tokens(self) -> int:
-        return self.prompt_tokens + self.completion_tokens
-
 
 @dataclass
 class Decision:

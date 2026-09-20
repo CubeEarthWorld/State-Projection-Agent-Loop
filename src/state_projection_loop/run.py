@@ -72,9 +72,8 @@ class ApprovalRequest:
     def from_dict(cls, d: dict[str, Any]) -> "ApprovalRequest":
         return cls(**{**d, "effects": [Effect.from_dict(e) for e in d["effects"]]})
 
-    def is_expired(self, *, now: Optional[float] = None) -> bool:
-        now = now if now is not None else time.time()
-        return self.expires_at is not None and now >= self.expires_at
+    def is_expired(self) -> bool:
+        return self.expires_at is not None and time.time() >= self.expires_at
 
 
 @dataclass
@@ -230,7 +229,14 @@ class Run:
     # -- questions ------------------------------------------------------------
 
     def ask_question(self, command: Command, call_id: str, question: Question) -> PendingQuestion:
-        """Park the run on a question the model asked the user (the ``ask`` pack)."""
+        """Park the run on a question the model asked the user (the ``ask``
+        pack). One at a time: concurrently executed read-only calls can both
+        ask, and overwriting the first would lose it without a trace."""
+        if self.pending_question is not None:
+            raise RunStateError(
+                f"Run {self.id} is already waiting on question {self.pending_question.id}; "
+                "answer it before asking another"
+            )
         pending = PendingQuestion(id=new_id("question"), command_id=command.id, call_id=call_id,
                                   text=question.text, choices=question.choices)
         self.pending_question = pending

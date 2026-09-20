@@ -1,8 +1,7 @@
 """Token estimation utilities.
 
 Budgets are enforced against a conservative estimate, never an exact
-tokenizer count. The estimator is pluggable via :func:`set_estimator` so a
-real tokenizer can be swapped in when precision matters.
+tokenizer count.
 
 Heuristic: CJK characters count as ~1 token each, everything else as ~1
 token per 4 characters. This overestimates slightly for English and is close
@@ -31,7 +30,9 @@ _CJK_RANGES: tuple[tuple[int, int], ...] = (
 
 def _is_cjk(ch: str) -> bool:
     o = ord(ch)
-    return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
+    # 0x1100 is the lowest range start, so this rejects ASCII — the common
+    # case, run per character of every message — in one comparison.
+    return o >= 0x1100 and any(lo <= o <= hi for lo, hi in _CJK_RANGES)
 
 
 def estimate_text_tokens(text: str) -> int:
@@ -49,12 +50,6 @@ _estimator: Callable[[str], int] = estimate_text_tokens
 IMAGE_TOKENS = 1000
 
 
-def set_estimator(fn: Callable[[str], int]) -> None:
-    """Replace the global token estimator (e.g. with a real tokenizer)."""
-    global _estimator
-    _estimator = fn
-
-
 def estimate_tokens(obj: Any) -> int:
     """Estimate tokens for text, Message-like objects, or containers."""
     if obj is None:
@@ -66,10 +61,7 @@ def estimate_tokens(obj: Any) -> int:
     if hasattr(obj, "role") and hasattr(obj, "content"):  # Message-like
         total = 4 + estimate_tokens(obj.content)
         for tc in getattr(obj, "tool_calls", None) or []:
-            args = getattr(tc, "arguments", {})
-            total += 6 + _estimator(getattr(tc, "name", "")) + _estimator(
-                dumps(args)
-            )
+            total += 6 + _estimator(getattr(tc, "name", "")) + _estimator(dumps(getattr(tc, "arguments", {})))
         return total
     if isinstance(obj, dict):
         if obj.get("type") in ("image_url", "image"):

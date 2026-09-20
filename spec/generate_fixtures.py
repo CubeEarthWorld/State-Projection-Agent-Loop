@@ -39,6 +39,19 @@ TEXTS = [
     "ERROR: boom\r\n  at frame 1\r\n  at frame 2\r\n",
     "diff --git a/x b/x\nindex 1234567..89abcde 100644\n--- a/x\n+++ b/x\nreal line\n",
     "\x1b[31mred\x1b[0m plain",
+    # Every cross-port divergence found so far lived in a gap in this list:
+    # the two ports agreed on all nine cases above and disagreed the moment
+    # a line ended in anything but "\n". Keep the awkward inputs here.
+    "diff --git a/f b/f\r\nindex 111..222 100644\r\nrest\r\n",  # CRLF throughout
+    "index 1234567..89abcde 100644\rtail",                      # lone \r
+    "a\vb\vc\vd\ve",                                            # \v is a Python line break
+    "h1\x0cf2\x1c3\x1d4\x1e5\x856 7 8",               # the rest of them
+    "𝔘𝔫𝔦𝔠𝔬𝔡𝔢 astral 🎌🇯🇵 surrogate pairs",                       # non-BMP, UTF-16 vs code points
+    "HTTP status: 200 OK\n" + "\n".join(f"body {i}" for i in range(50)),
+    "exit code 0\n" + "\n".join(f"body {i}" for i in range(50)),
+    "Meeting at 14:30 with Bob\n" + "\n".join(f"note {i}" for i in range(50)),
+    "at foo.js:12\n" + "\n".join(f"frame {i}" for i in range(50)),
+    "\n".join("x" for _ in range(41)),  # truncating this one would lengthen it
 ]
 
 GLOBS = [
@@ -46,6 +59,10 @@ GLOBS = [
     ("a\nb", "a*b"), ("a.c", "a?c"), ("x[y", "x[[]y"), ("a]b", "a[]]b"),
     ("web.search.query", "web.*"), ("web.search.query", "web.search.query"),
     ("state.goal.set", "state.*"), ("planning.checklist.manage", "state.*"),
+    # `?` counts one code point, not one UTF-16 unit, and a reversed range
+    # matches nothing rather than raising — Dart got both wrong.
+    ("🎌", "?"), ("🎌", "*"), ("a🎌b", "a?b"),
+    ("ab", "[!z-a]"), ("ab", "[z-a]"), ("a", "[b-a]"), ("-", "[a-]"),
 ]
 
 SIGNATURES = [
@@ -80,6 +97,14 @@ VALIDATION = [
     ({"type": "object", "properties": {"a": {"type": "array", "items": {"type": "integer"}}}},
      {"a": [1, "two"]}),
     ({"type": "object", "properties": {"a": {"type": "string", "default": "d"}}}, {}),
+    # An enum member that is an object or an array has to compare by value.
+    # Dart's `List.contains` compares collections by identity, so it rejected
+    # everything here until the validator learned to compare structurally.
+    ({"type": "object", "properties": {"a": {"enum": [{"k": 1}, {"k": 2}]}}}, {"a": {"k": 1}}),
+    ({"type": "object", "properties": {"a": {"enum": [{"k": 1}]}}}, {"a": {"k": 9}}),
+    ({"type": "object", "properties": {"a": {"enum": [[1, 2], [3]]}}}, {"a": [1, 2]}),
+    ({"type": "object", "properties": {"a": {"enum": [[1, 2]]}}}, {"a": [2, 1]}),
+    ({"type": "object", "properties": {"a": {"enum": [None, "x"]}}}, {"a": None}),
 ]
 
 def projection_scenario() -> dict:
@@ -134,6 +159,15 @@ JSON_VALUES = [
     {"日本語": "🎌", "n": 1.5, "t": True},
     [],
     {},
+    # Float rendering is part of the contract: every tool schema, artifact
+    # body and ledger row carries numbers through `dumps`. Python's repr
+    # goes scientific outside 1e-4 .. 1e16 and pads the exponent to two
+    # digits; Dart's `toString` does neither, so `1e-7` and `1e20` came out
+    # differently in the two ports until Dart got a matching formatter.
+    {"tiny": 1e-7, "small": 1e-6, "edge_lo": 1e-5, "fixed_lo": 1e-4},
+    {"big": 1e20, "edge_hi": 1e16, "fixed_hi": 1e15, "huge": 1e100},
+    {"neg": -1.5e20, "denormal": 5e-324, "max": 1.7976931348623157e308},
+    {"whole": 2.0, "third": 0.3333333333333333, "zero": 0.0, "negzero": -0.0},
 ]
 
 

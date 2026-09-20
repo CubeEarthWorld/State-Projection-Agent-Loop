@@ -51,14 +51,19 @@ def head_tail_truncate(text: str, max_lines: int) -> str:
     if len(lines) <= max_lines:
         return text
     head_n = max(1, int(max_lines * _HEAD_RATIO))
-    tail_n = max(1, int(max_lines * _TAIL_RATIO))
+    # The marker is itself a line, so head + tail + marker must still fit
+    # `max_lines` — with the shipped defaults this clamp never binds.
+    tail_n = max(0, min(max(1, int(max_lines * _TAIL_RATIO)), max_lines - head_n - 1))
     omitted = len(lines) - head_n - tail_n
     if omitted <= 0:
         return text
     head = lines[:head_n]
     tail = lines[-tail_n:] if tail_n > 0 else []
     marker = f"  [... {omitted} lines omitted ...]\n"
-    return "".join(head) + marker + "".join(tail)
+    result = "".join(head) + marker + "".join(tail)
+    # Truncating many short lines costs more characters than it saves; the
+    # budget is in characters, so hand back the original when that happens.
+    return result if len(result) < len(text) else text
 
 
 def compress_text(text: str, *, max_lines: int = 80) -> str:
@@ -82,8 +87,12 @@ def compress_text(text: str, *, max_lines: int = 80) -> str:
 # call *failed* is treated as an error without consulting this at all.
 _ERROR_MARKER = re.compile(
     r"(?i)\b(error|traceback|exception|failed|denied|fatal|panic|fehler|erreur|errore)\b"
-    r"|(?:exit(?: code)?|returncode|status)[=: ]+[1-9]"
-    r"|\bline \d+, in \b|\bat [^\n]+:\d+"
+    # A process that exited non-zero: the whole code, not its first digit, and
+    # never a bare "status" (an HTTP "status: 200" is not a failure).
+    r"|\b(?:exit(?: code| status)?|returncode)[=: ]+(?!0+\b)\d{1,3}\b"
+    # A stack frame's file:line. The token before the colon must contain a
+    # non-digit, so a clock time ("at 14:30") is not mistaken for a frame.
+    r"|\bline \d+, in \b|\bat [^\n]*[^\s:\d][^\s:]*:\d+"
     r"|エラー|失敗|例外|错误|失败|异常|오류|실패|ошибка|исключение"
 )
 
@@ -136,6 +145,3 @@ def summarize_text(text: str) -> str:
     if len(first) > max_first:
         first = first[:max_first] + "…"
     return first + suffix
-
-
-

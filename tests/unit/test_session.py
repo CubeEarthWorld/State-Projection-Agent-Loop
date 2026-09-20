@@ -381,6 +381,24 @@ class TestRewind:
         session.rewind(to_turn=1)
         assert session.working_state.goal == "find the key"
 
+    def test_rewind_past_the_last_turn_is_refused(self):
+        """Out of range there is no checkpoint to restore from: rewinding
+        silently kept the whole history while resetting the working state to
+        an empty one, leaving the two permanently out of sync."""
+        from state_projection_loop import install_builtins
+
+        llm = ScriptedLLM([ScriptedLLM.call("state.goal.set", text="find the key"), "goal set", "reply 1"])
+        session = Session(llm, policy=allow_all())
+        install_builtins(session.registry, ["state"])
+        session.send("set goal")
+        session.send("msg 1")
+
+        for out_of_range in (2, 7, -1):
+            with pytest.raises(ValueError, match="out of range"):
+                session.rewind(to_turn=out_of_range)
+        assert session.working_state.goal == "find the key"
+        assert len(session.conversation) == 6  # nothing was rewritten either
+
     def test_conversation_after_rewind_continues_normally(self):
         llm = ScriptedLLM(["reply 0", "reply 1", "new reply after rewind"])
         session = Session(llm)

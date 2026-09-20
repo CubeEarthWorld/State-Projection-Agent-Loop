@@ -4,7 +4,7 @@ modes never granting a unilateral allow or the final deny."""
 from __future__ import annotations
 
 from state_projection_loop.capability import Capability, Effect
-from state_projection_loop.policy import PolicyEngine, Rule
+from state_projection_loop.policy import PolicyEngine, Rule, glob_match
 
 
 def cap(name="demo.thing", effects=None):
@@ -126,3 +126,37 @@ class TestLlmSafetyMode:
         engine.add_rule("llm", Rule(decision="deny"))
         decision = engine.evaluate(cap(effects=[Effect(kind="write", resource="workspace:*")]), {})
         assert decision.decision == "require_approval"
+
+
+class TestAutoPresetsCoverStateReads:
+    """The state.* preset rule named effect_kind="write", so the one state
+    capability that declares a READ — ``state.extra.get`` — matched nothing
+    and fell through to require_approval, while every state WRITE was
+    auto-allowed."""
+
+    def _state_cap(self, kind):
+        return Capability(name="state.extra.get" if kind == "read" else "state.extra.set",
+                          effects=[Effect(kind=kind, resource="working_state:extra")])
+
+    def test_reads_and_writes_are_both_allowed(self):
+        for preset in ("auto_safe", "auto_workspace_dev"):
+            engine = PolicyEngine()
+            engine.apply_preset(preset)
+            for kind in ("read", "write"):
+                decision = engine.evaluate(self._state_cap(kind), {})
+                assert decision.decision == "allow", (preset, kind)
+                assert decision.reason == "preset:local_working_state"
+
+
+class TestGlobDialect:
+    """The reference the Dart port's globMatch is pinned against; these two
+    shapes are not in the shared fixtures."""
+
+    def test_question_mark_matches_one_code_point_not_one_utf16_unit(self):
+        assert glob_match("\U0001F38C", "?") is True
+        assert glob_match("ab", "?") is False
+
+    def test_an_empty_range_declines_instead_of_erroring(self):
+        assert glob_match("a", "[z-a]") is False
+        assert glob_match("a", "[!z-a]") is True
+        assert glob_match("ab", "[!z-a]") is False

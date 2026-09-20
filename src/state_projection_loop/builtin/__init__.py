@@ -52,5 +52,8 @@ def _install(registry: Registry, definitions: list[dict], handlers: dict[str, Ca
     resolves that name."""
     for definition in definitions:
         name = definition["name"]
-        if name not in registry:
+        # has_definition, not `in registry`: `get()` hides a *disabled*
+        # capability, so a developer's own definition that happens to be
+        # switched off would otherwise look unregistered and be replaced.
+        if not registry.has_definition(name):
             registry.register(definition, handler=handlers[name], replace=True)
