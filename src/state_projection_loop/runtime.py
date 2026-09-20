@@ -28,6 +28,7 @@ import asyncio
 import inspect
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -230,6 +231,30 @@ class Runtime:
             ),
         )
 
+    def _batch_guard(
+        self, call: ToolCall, capability: Capability, args_hash: str, seen: dict[tuple[str, str], int],
+    ) -> Optional[ToolResult]:
+        """The same cap, applied inside one batch.
+
+        ``_loop_guard`` keys off results, so it cannot see repeats that have
+        not finished yet — and read-only calls are buffered and run
+        concurrently, so a model can pack N identical calls into one turn and
+        every one of them runs. Writes never hit this: they take the
+        sequential path, where each result is remembered before the next
+        starts. Only the count is checked here; with identical arguments in a
+        single batch there is no later result that could differ.
+        """
+        limit = self.config.limits.max_repeats
+        if limit <= 0 or seen[(capability.name, args_hash)] < limit:
+            return None
+        return ToolResult(
+            call=call, outcome="failed", error="loop_guard",
+            observation=(
+                f"Loop guard: \"{capability.name}\" appears {limit} times with these exact "
+                f"arguments in one batch. Ask for it once, or vary the arguments."
+            ),
+        )
+
     def _remember(self, capability: Capability, args_hash: str, result: ToolResult) -> None:
         if result.outcome in WAITING_OUTCOMES:
             return
@@ -261,6 +286,7 @@ class Runtime:
         """
         results: list[ToolResult] = []
         buffer: list[tuple[ToolCall, Capability, dict[str, Any], str]] = []
+        in_batch: dict[tuple[str, str], int] = defaultdict(int)
         # A batch supersedes any approval resolved before it: pending_calls is
         # about to belong to this batch, and a leftover request would send
         # resume_pending looking for the wrong call's command.
@@ -294,6 +320,10 @@ class Runtime:
             capability, args = pre
             args_hash = self._args_hash(args)
             tripped = self._loop_guard(call, capability, args_hash)
+            if tripped is None:
+                tripped = self._batch_guard(call, capability, args_hash, in_batch)
+                if tripped is None:
+                    in_batch[(capability.name, args_hash)] += 1
             if tripped is not None:
                 if await flush(idx):
                     return ExecuteBatchResult(results=results, halted=True)

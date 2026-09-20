@@ -176,7 +176,7 @@ class JsonlLedger:
         path = self._path(run_id)
         n = 0
         if path.exists():
-            with path.open("r", encoding="utf-8") as f:
+            with path.open("r", encoding="utf-8", errors="replace") as f:
                 n = sum(1 for line in f if line.strip())
         self._last_seq[run_id] = n
         return n
@@ -193,7 +193,7 @@ class JsonlLedger:
         path = self._path(run_id)
         if not path.exists():
             return
-        with path.open("r", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -202,8 +202,10 @@ class JsonlLedger:
                     event = Event.from_line(line)
                 except (ValueError, KeyError, TypeError):
                     # Appends are unbuffered, so a crash mid-append leaves a
-                    # torn last line. One bad line must not make the run
-                    # unresumable; every good line before it still replays.
+                    # torn last line — and if it was torn mid-character, the
+                    # bytes do not even decode, which is why the reader above
+                    # replaces rather than raises. One bad line must not make
+                    # the run unresumable; every good line before it replays.
                     continue
                 if event.sequence > after:
                     yield event

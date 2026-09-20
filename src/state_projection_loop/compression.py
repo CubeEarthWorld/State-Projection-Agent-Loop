@@ -110,6 +110,26 @@ def mask_observation(text: str, *, max_lines: int = 40, failed: bool = False) ->
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_][\w./:-]*[\w/]")
 
 
+def _grounded(haystack: str, token: str) -> bool:
+    """Whether ``token`` occurs in ``haystack`` on its own, rather than
+    buried inside a longer run of letters and digits.
+
+    A plain substring test grounds an invented "order 942" on an unrelated
+    "commit 8942", which is exactly the fabrication the caller is trying to
+    catch. Punctuation still counts as a boundary, so "src/main.py" is
+    grounded by "a/src/main.py:42".
+    """
+    start = haystack.find(token)
+    while start >= 0:
+        end = start + len(token)
+        before = haystack[start - 1] if start else ""
+        after = haystack[end] if end < len(haystack) else ""
+        if not before.isalnum() and not after.isalnum():
+            return True
+        start = haystack.find(token, start + 1)
+    return False
+
+
 def ungrounded(entry: str, transcript: str) -> list[str]:
     """Identifier-like tokens of ``entry`` (paths, ids, numbers, names with
     digits or punctuation) that never occur in ``transcript``: the parts a
@@ -118,7 +138,7 @@ def ungrounded(entry: str, transcript: str) -> list[str]:
     return [
         token for token in _IDENTIFIER.findall(entry)
         if len(token) >= 3 and (any(ch.isdigit() for ch in token) or any(ch in "./:_-" for ch in token))
-        and token.lower() not in haystack
+        and not _grounded(haystack, token.lower())
     ]
 
 

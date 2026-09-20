@@ -124,7 +124,10 @@ def parse_text_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
         body = match.group(1).strip()
         try:
             data = json.loads(body)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
+            # RecursionError: deeply nested brackets blow the parser's stack.
+            # The body is model-controlled, so this has to read as "not a
+            # tool call" rather than escape the adapter and end the run.
             m = re.search(r'"(?:name|tool)"\s*:\s*"([^"]+)"', body)
             if m:
                 calls.append(ToolCall(name=m.group(1), arguments={}, raw_arguments=body))

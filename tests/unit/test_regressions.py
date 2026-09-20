@@ -146,3 +146,69 @@ class TestExtractFinishCopies:
     def test_a_decision_without_finish_passes_straight_through(self):
         original = Decision(calls=[ToolCall(name="demo.echo", arguments={})])
         assert extract_finish(original) is original
+
+
+class TestSpecaFindings:
+    """Four defects the speca spec-driven audit surfaced, each reproduced
+    before it was fixed. The first and third apply to both ports."""
+
+    def test_a_line_torn_mid_character_does_not_break_resume(self, tmp_path):
+        from state_projection_loop.events import JsonlLedger
+        ledger = JsonlLedger(str(tmp_path))
+        ledger.append("run_1", "user_input", {"text": "hello"})
+        ledger.append("run_1", "user_input", {"text": "こんにちは世界"})
+        path = tmp_path / "run_1.jsonl"
+        # A crash mid-append can truncate inside a multi-byte character, so
+        # the bytes do not decode at all — the JSON guard never even sees it.
+        path.write_bytes(path.read_bytes()[:-12])
+        assert len(list(ledger.iter_run("run_1"))) == 1
+
+    def test_deeply_nested_json_is_not_a_tool_call(self):
+        from state_projection_loop.llm import parse_text_tool_calls
+        # json.loads raises RecursionError, not JSONDecodeError, and the body
+        # is model-controlled: it must not escape the adapter.
+        parse_text_tool_calls("```tool_call\n" + "[" * 20000 + "]" * 20000 + "\n```")
+
+    def test_a_number_inside_a_longer_number_does_not_ground_it(self):
+        from state_projection_loop.compression import ungrounded
+        assert ungrounded("order 942 was cancelled", "we looked at commit 8942") == ["942"]
+        assert ungrounded("v1.2 shipped", "we tagged v1.23 last week") == ["v1.2"]
+        # Punctuation is still a boundary, so a real path stays grounded.
+        assert ungrounded("see src/main.py", "edited a/src/main.py:42 today") == []
+
+    def test_identical_calls_in_one_batch_hit_the_repeat_cap(self):
+        from state_projection_loop import Config, Registry, ScriptedLLM, Session
+        from state_projection_loop.messages import Decision, ToolCall
+        from state_projection_loop.policy import PolicyEngine
+
+        ran: list[str] = []
+
+        def handler(x: str) -> str:
+            ran.append(x)
+            return "ok"
+
+        registry = Registry()
+        registry.register({
+            "name": "demo.read.thing", "category": "demo",
+            "spec": {"description": "Read a thing.", "parameters": {
+                "type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]}},
+            "effects": [{"kind": "read", "resource": "workspace:*"}],
+        }, handler=handler)
+        config = Config()
+
+        def run(arguments) -> int:
+            ran.clear()
+            llm = ScriptedLLM([
+                Decision(text="go", calls=[
+                    ToolCall(name="demo.read.thing", arguments=arguments(i), id=f"c{i}")
+                    for i in range(8)]),
+                ScriptedLLM.finish(result="done"),
+            ])
+            Session(llm, kernel="k", registry=registry, config=config,
+                    policy=PolicyEngine(default_decision="allow")).run_job("go")
+            return len(ran)
+
+        # Read-only calls are buffered and run concurrently, so the
+        # result-keyed loop guard could never see them repeat.
+        assert run(lambda i: {"x": "same"}) == config.limits.max_repeats
+        assert run(lambda i: {"x": f"v{i}"}) == 8

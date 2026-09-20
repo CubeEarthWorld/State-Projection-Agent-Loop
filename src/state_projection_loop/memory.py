@@ -50,7 +50,7 @@ class JsonlMemoryStore:
         self.path = Path(path) if path is not None else None
         self._notes: list[Note] = []
         if self.path is not None and self.path.exists():
-            with self.path.open("r", encoding="utf-8") as f:
+            with self.path.open("r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     if not line.strip():
                         continue
