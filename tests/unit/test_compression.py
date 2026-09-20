@@ -245,3 +245,11 @@ class TestRegressions:
         assert head_tail_truncate(text, max_lines=4) == (
             "x" * 20 + "\v" + "x" * 20 + "\v  [... 17 lines omitted ...]\n" + "x" * 20
         )
+
+    def test_an_unpaired_surrogate_hashes_the_same_in_both_ports(self):
+        # Python encodes with errors="replace", which emits "?" — the Dart
+        # port has to match, or the two dedupe differently on the same text.
+        assert content_hash("\ud800") == content_hash("?")
+        assert content_hash("a\ud800b") == content_hash("a?b")
+        # A well-formed astral character is untouched by that substitution.
+        assert content_hash("\U0001F38C") != content_hash("?")

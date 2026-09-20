@@ -63,7 +63,9 @@ class CompressionConfig:
 
 @dataclass
 class BudgetConfig:
-    max_steps: int = 50
+    # None means no step limit, as for the other caps below; the runtime
+    # already tests `is not None`, and the Dart port already types it so.
+    max_steps: Optional[int] = 50
     max_tokens: Optional[int] = None
     max_cost: Optional[float] = None
     max_seconds: Optional[float] = None
