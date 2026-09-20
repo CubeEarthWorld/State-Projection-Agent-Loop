@@ -12,7 +12,8 @@ from state_projection_loop.artifacts import ArtifactStore, ref
 from state_projection_loop.context import ToolContext
 from state_projection_loop.events import InMemoryLedger
 from state_projection_loop.policy import PolicyEngine
-from state_projection_loop.run import Question, Run
+from state_projection_loop.policy import Effect
+from state_projection_loop.run import ApprovalRequest, Question, Run
 from state_projection_loop.builtin import install_builtins
 from state_projection_loop.runtime import BudgetState, Runtime
 
@@ -330,6 +331,69 @@ class TestQuestions:
         assert batch.halted is True
         assert ran == []
         assert [c.name for c in run.pending_calls] == ["demo.write"]
+
+
+class TestHandlerRaisedApproval:
+    """A handler may park its own command by returning an ApprovalRequest
+    (what ``meta.agent.spawn`` does with a sub-agent's approval). Unlike a
+    policy approval, which gates a call that has not run, this one is
+    mid-flight: it must be re-invoked either way, so it can finish or wind
+    down, and it learns the decision from ``ctx.resolution``."""
+
+    @staticmethod
+    def _registry(seen: list):
+        def handler(ctx: ToolContext):
+            seen.append(ctx.resolution)
+            if ctx.resolution is None:
+                return ApprovalRequest(id="apr_x", command_id=ctx.command_id,
+                                       effects=[Effect(kind="write", resource="child")],
+                                       reason="the child wants to write", policy_revision=0)
+            return f"wound down: {ctx.resolution}"
+
+        reg = Registry()
+        reg.register(capability_dict("demo.park", effects=[("external", "*")]), handler=handler)
+        reg.register(capability_dict("demo.after", effects=[("write", "*")]), handler=echo_handler)
+        return reg
+
+    def test_the_parked_call_itself_goes_back_on_the_queue(self):
+        seen: list = []
+        runtime, turn, ctx, run, policy = make_runtime(self._registry(seen))
+        calls = [ToolCall(name="demo.park", arguments={}), ToolCall(name="demo.after", arguments={})]
+        batch = run_batch(runtime, calls, turn, ctx, run, policy)
+
+        assert run.state == "WAITING_FOR_APPROVAL"
+        assert batch.halted is True
+        assert run.pending_approval.reason == "the child wants to write"
+        # Inclusive: a question resumes with an answer, this resumes by
+        # calling the handler again.
+        assert [c.name for c in run.pending_calls] == ["demo.park", "demo.after"]
+
+    def test_both_decisions_re_invoke_the_handler_with_the_resolution(self):
+        for decision in ("approved", "denied"):
+            seen: list = []
+            runtime, turn, ctx, run, policy = make_runtime(self._registry(seen))
+            run_batch(runtime, [ToolCall(name="demo.park", arguments={})], turn, ctx, run, policy)
+            run.resolve_approval(decision, current_policy_revision=policy.revision)
+            batch = asyncio.run(runtime.resume_pending(run, ctx, policy))
+
+            assert seen == [None, decision]
+            assert batch.results[0].value == f"wound down: {decision}"
+            assert run.commands[batch.results[0].command_id].outcome == "ok"
+
+    def test_a_policy_approval_that_never_ran_is_still_just_denied(self):
+        """The re-invocation is only for a command with attempts: a call the
+        policy stopped before it ran must not start running on denial."""
+        ran: list[str] = []
+        reg = Registry()
+        reg.register(capability_dict("demo.write", effects=[("write", "*")]),
+                     handler=lambda text="": ran.append("write") or "written")
+        runtime, turn, ctx, run, policy = make_runtime(reg, allow_all=False)
+        run_batch(runtime, [ToolCall(name="demo.write", arguments={})], turn, ctx, run, policy)
+        run.resolve_approval("denied", current_policy_revision=policy.revision)
+        batch = asyncio.run(runtime.resume_pending(run, ctx, policy))
+
+        assert ran == []
+        assert batch.results[0].error == "approval_denied"
 
 
 class TestOutputPolicy:

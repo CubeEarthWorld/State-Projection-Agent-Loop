@@ -104,7 +104,10 @@ class OutputPolicy:
 @dataclass
 class CapabilityExecution:
     handler: Optional[Callable[..., Any]] = None
-    timeout_s: float = 30.0
+    # None means no wall clock at all. Only for a handler whose own budget
+    # bounds it and whose work must not be abandoned half-done (spawn: a
+    # timeout would strand sub-agents mid-run).
+    timeout_s: Optional[float] = 30.0
     retries: int = 0
     retry_safety: str = "never_retry"  # one of RETRY_SAFETY
     resolve_handles: bool = True  # False for tools that take artifact refs literally (e.g. peek)
@@ -258,7 +261,8 @@ class Capability:
                 "parameters, not authored — remove it from the definition"
             )
         execution = _sub(CapabilityExecution, dict(data.get("execution") or {}),
-                         timeout_s=float, retries=int, resolve_handles=bool,
+                         timeout_s=lambda v: None if v is None else float(v),
+                         retries=int, resolve_handles=bool,
                          output_policy=lambda v: _sub(OutputPolicy, dict(v or {})))
         execution.handler = handler
         return cls(
@@ -445,7 +449,7 @@ def build_capability_from_function(
     embedding_text: str = "",
     no_embed: bool = False,
     kernel_note: str = "",
-    timeout_s: float = 30.0,
+    timeout_s: Optional[float] = 30.0,
     retries: int = 0,
     retry_safety: str = "never_retry",
     effects: Optional[list[tuple[str, str]]] = None,

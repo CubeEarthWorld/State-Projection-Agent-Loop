@@ -47,6 +47,10 @@ class ToolContext:
     store: Optional["ArtifactStore"] = None
     search: Optional["ToolSearch"] = None
     command_id: str = ""
+    # "approved" / "denied" when this command is being re-invoked after an
+    # approval it raised itself by returning an ApprovalRequest; None on a
+    # first call. A handler that never parks never sees anything else.
+    resolution: Optional[str] = None
     # Hands a chunk of the tool's progress output to the session's on_delta
     # observer, if any. Delivery only: nothing emitted reaches the ledger.
     emit: Callable[[str], None] = _no_emit
@@ -55,12 +59,12 @@ class ToolContext:
     def run_id(self) -> str:
         return self.run.id if self.run is not None else ""
 
-    def for_command(self, command_id: str) -> "ToolContext":
+    def for_command(self, command_id: str, *, resolution: Optional[str] = None) -> "ToolContext":
         """The handler-facing view of this context for one command."""
         # Not dataclasses.replace: ``self`` is usually a TurnContext, and
         # replace would hand the handler one back, projection state and all.
         shared = {f.name: getattr(self, f.name) for f in fields(ToolContext)}
-        return ToolContext(**{**shared, "command_id": command_id})
+        return ToolContext(**{**shared, "command_id": command_id, "resolution": resolution})
 
 
 @dataclass

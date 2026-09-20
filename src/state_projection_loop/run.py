@@ -57,6 +57,11 @@ class Command:
 
 @dataclass
 class ApprovalRequest:
+    """A pending approval. The policy raises one before a command runs; a
+    handler may also *return* one to park its own command mid-flight (a
+    sub-agent forwarding its child's approval), in which case the command is
+    re-invoked on resolution with ``ctx.resolution`` set."""
+
     id: str
     command_id: str
     effects: list[Effect]
@@ -181,6 +186,14 @@ class Run:
         self, command: Command, effects: list[Effect], reason: str, *,
         policy_revision: int, expires_in_s: Optional[float] = None,
     ) -> ApprovalRequest:
+        """Park the run on an approval. One at a time, like
+        :meth:`ask_question`: concurrently executed read-only handlers can
+        both raise one, and overwriting the first would lose it."""
+        if self.pending_approval is not None:
+            raise RunStateError(
+                f"Run {self.id} is already waiting on approval {self.pending_approval.id}; "
+                "resolve it before requesting another"
+            )
         expires_at = time.time() + expires_in_s if expires_in_s is not None else None
         request = ApprovalRequest(
             id=new_id("approval"), command_id=command.id, effects=effects, reason=reason,

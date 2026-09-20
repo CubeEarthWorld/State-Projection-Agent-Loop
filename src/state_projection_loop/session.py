@@ -159,6 +159,9 @@ class Session:
         # tracked here and can never be evicted.
         self._active: "OrderedDict[str, None]" = OrderedDict()
         self._interrupted = False
+        # Sub-agent sessions a spawn handler is currently driving, so
+        # interrupt() reaches them. Registered and removed by the handler.
+        self._children: list["Session"] = []
         self._idle_turns = 0
         self._budget_grace_used = False
         self._lock = asyncio.Lock()
@@ -205,11 +208,20 @@ class Session:
     def interrupt(self) -> None:
         """Stop after the current step. A model call still waiting for the
         provider is cancelled outright; a tool that is already running
-        finishes, so its outcome is recorded."""
+        finishes, so its outcome is recorded. Running sub-agents are
+        interrupted too, and end up ``CANCELLED`` in the ledger."""
         self._interrupted = True
         inflight = self._inflight
         if inflight is not None:
             inflight.get_loop().call_soon_threadsafe(inflight.cancel)
+        for child in list(self._children):
+            child.interrupt()
+
+    def cancel(self, reason: str = "cancelled") -> None:
+        """End this run for good. For abandoning a run parked on an approval
+        or a question — :meth:`interrupt` only stops a loop that is moving."""
+        self.run.cancel(reason)
+        self._snapshot()
 
     def notice(self, text: str) -> None:
         """Put out-of-band text into the run's context.

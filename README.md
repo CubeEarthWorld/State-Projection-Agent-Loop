@@ -312,11 +312,28 @@ if session.run.state == "WAITING_FOR_USER":     # the model asked something
 
 ```python
 session = Session(llm, builtins=["meta", "checklist", "spawn"])
-# the model can now: spawn(task=..., tool_scope=["web.*"], max_steps=15)
+# the model can now: spawn(tasks=[{"task": ..., "tool_scope": ["web.*"], "max_steps": 15}, ...])
 ```
 
-Parent and child share **only** the task string and the result; a child's
+A sub-agent is **an ordinary `Run` in the parent's ledger**, not a private
+world: its every step is auditable, `resume_from_ledger` resumes it after a
+crash, and a parent whose `on_event` is set already sees the child's events
+under the child's `run_id`. Parent and child share **only** the task string
+and the result — the child cannot see the parent's conversation, and its
 artifacts must be explicitly moved into the parent's namespace.
+
+Several tasks in one call run **concurrently** (up to 8); the runtime's
+ordering contract is untouched, because the fan-out lives inside one
+command. Each task returns `{run_id, state, result, error?}`, so a child
+that failed is not mistaken for one that succeeded.
+
+The parent's remaining `max_tokens` / `max_cost` are **split** between the
+children and their usage is charged back, so spawning cannot multiply the
+budget. Sub-agents cannot ask the user (`meta.user.ask` is off in every
+child), but they *can* stop for approval: the child's request surfaces on
+the root session as an ordinary `WAITING_FOR_APPROVAL`, and
+`resolve_approval(...)` + `resume()` drives the child on — across a process
+restart too. `session.interrupt()` reaches running children.
 
 ## Swappable everything
 

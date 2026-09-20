@@ -41,7 +41,7 @@ from .llm import FINISH_NAME
 from .messages import Decision, Message, ToolCall
 from .policy import PolicyEngine
 from .registry import Registry
-from .run import Command, Question, Run
+from .run import ApprovalRequest, Command, Question, Run
 from .serialization import dumps
 from .tokens import estimate_tokens, truncate_to_tokens
 
@@ -241,8 +241,10 @@ class Runtime:
     async def _run(
         self, capability: Capability, args: dict[str, Any], ctx: ToolContext, run: Run, call: ToolCall,
         command: Optional[Command] = None, args_hash: Optional[str] = None,
+        resolution: Optional[str] = None,
     ) -> ToolResult:
-        result = await self._execute_one(capability, args, ctx, run, call, command=command)
+        result = await self._execute_one(capability, args, ctx, run, call, command=command,
+                                         resolution=resolution)
         self._remember(capability, args_hash if args_hash is not None else self._args_hash(args), result)
         return result
 
@@ -266,17 +268,20 @@ class Runtime:
 
         async def flush(idx: int) -> bool:
             """Run the buffered read-only calls concurrently. True when one of
-            them parked the run on a question: like the sequential path, the
-            rest of the batch (from ``idx``) waits for the answer."""
+            them parked the run: like the sequential path, the rest of the
+            batch (from ``idx``) waits. A call parked on an approval it
+            raised itself goes back on the queue — it must be re-invoked to
+            learn the decision, unlike a question, which resumes with an answer."""
             if not buffer:
                 return False
             flushed = await asyncio.gather(
                 *(self._run(cap, args, ctx, run, call, args_hash=h) for call, cap, args, h in buffer))
             results.extend(flushed)
             buffer.clear()
-            if not any(r.outcome == "waiting_user" for r in flushed):
+            if not any(r.outcome in WAITING_OUTCOMES for r in flushed):
                 return False
-            run.pending_calls = list(calls[idx:])
+            run.pending_calls = ([r.call for r in flushed if r.outcome == "waiting_approval"]
+                                 + list(calls[idx:]))
             return True
 
         for idx, call in enumerate(calls):
@@ -322,8 +327,11 @@ class Runtime:
                 if await flush(idx):
                     return ExecuteBatchResult(results=results, halted=True)
                 results.append(await self._run(capability, args, ctx, run, call, args_hash=args_hash))
-                if results[-1].outcome == "waiting_user":
-                    run.pending_calls = list(calls[idx + 1:])
+                if results[-1].outcome in WAITING_OUTCOMES:
+                    # Inclusive for an approval the handler raised itself:
+                    # resume re-invokes it with the decision.
+                    first = idx if results[-1].outcome == "waiting_approval" else idx + 1
+                    run.pending_calls = list(calls[first:])
                     return ExecuteBatchResult(results=results, halted=True)
         halted = await flush(len(calls))
         return ExecuteBatchResult(results=results, halted=halted)
@@ -352,6 +360,11 @@ class Runtime:
             denied_command = run.commands.get(resolved.command_id)
             denied_name = denied_command.capability_name if denied_command else first_call.name
             run.pending_calls = []
+            if denied_command is not None and denied_command.attempts > 0:
+                # The handler parked itself mid-flight; it has state to wind
+                # down and must hear the decision. A command that never ran
+                # must not start running now, which is the branch below.
+                return await self._resume_command(denied_command, run, ctx, policy, pending, "denied")
             # Every parked call needs its own result: the denial cancels the
             # rest of the decision too, and a call left without one would
             # take the whole decision out of the projection.
@@ -371,14 +384,27 @@ class Runtime:
             # Parked behind a question, not an approval: nothing here was
             # checked yet, so every call takes the normal path.
             return await self.execute(pending, ctx, run, policy)
-        capability = self.registry.get(approved.capability_name)
+        return await self._resume_command(approved, run, ctx, policy, pending, "approved")
+
+    async def _resume_command(
+        self, command: Command, run: Run, ctx: ToolContext, policy: PolicyEngine,
+        pending: list[ToolCall], resolution: str,
+    ) -> ExecuteBatchResult:
+        """Run the resolved command (reusing its ``command_id``, so an
+        approved action keeps its idempotency key), then the rest of the batch."""
+        first_call = pending[0]
+        capability = self.registry.get(command.capability_name)
         if capability is None:
             results = [ToolResult(call=first_call, outcome="failed", error="unknown_capability",
                                   observation=f"Error: capability \"{first_call.name}\" no longer registered.")]
         else:
-            results = [await self._run(capability, approved.arguments, ctx, run, first_call, command=approved)]
-            if results[-1].outcome == "waiting_user":
-                run.pending_calls = list(pending[1:])
+            results = [await self._run(capability, command.arguments, ctx, run, first_call,
+                                       command=command, resolution=resolution)]
+            if results[-1].outcome in WAITING_OUTCOMES:
+                # Parked again (a second sub-agent approval): the call itself
+                # goes back on the queue when it must be re-invoked.
+                head = [first_call] if results[-1].outcome == "waiting_approval" else []
+                run.pending_calls = head + list(pending[1:])
                 return ExecuteBatchResult(results=results, halted=True)
         rest = await self.execute(pending[1:], ctx, run, policy)
         return ExecuteBatchResult(results=results + rest.results, halted=rest.halted)
@@ -454,11 +480,11 @@ class Runtime:
 
     async def _execute_one(
         self, capability: Capability, args: dict[str, Any], ctx: ToolContext, run: Run, call: ToolCall,
-        command: Optional[Command] = None,
+        command: Optional[Command] = None, resolution: Optional[str] = None,
     ) -> ToolResult:
         if command is None:
             command = run.new_command(capability.qualified_name, args, capability.execution.retry_safety)
-        call_ctx = ctx.for_command(command.id)
+        call_ctx = ctx.for_command(command.id, resolution=resolution)
 
         handler = capability.execution.handler
         if handler is None:
@@ -524,6 +550,20 @@ class Runtime:
                     return ToolResult(
                         call=call, outcome="waiting_user", error="question_pending",
                         observation=f"Question pending: {value.text}", command_id=command.id,
+                    )
+                if isinstance(value, ApprovalRequest):
+                    # The handler parked its own command (a sub-agent
+                    # forwarding its child's approval). Same expiry and
+                    # policy revision, so resolving here resolves there.
+                    run.request_approval(
+                        command, value.effects, value.reason,
+                        policy_revision=value.policy_revision,
+                        expires_in_s=(None if value.expires_at is None
+                                      else max(0.0, value.expires_at - time.time())),
+                    )
+                    return ToolResult(
+                        call=call, outcome="waiting_approval", error="approval_required",
+                        observation=f"Approval required: {value.reason}", command_id=command.id,
                     )
                 serialized = serialize_value(value)
                 observation, artifact_id = self._observation_for(capability, serialized, value, ctx.store)

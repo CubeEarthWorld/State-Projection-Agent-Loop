@@ -3,7 +3,7 @@
     "name": "meta.agent.spawn",
     "category": "meta",
     "card": {
-      "summary": "サブエージェントを起動しタスクを委任、結果アーティファクトを受け取る",
+      "summary": "サブエージェントを起動しタスクを委任、結果を受け取る(複数指定で並列)",
       "tags": [
         "meta",
         "swarm",
@@ -11,64 +11,76 @@
       ]
     },
     "spec": {
-      "description": "Run a sub-agent with its own independent context on the given task. Parent and child share the task string and result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved.",
+      "description": "Run sub-agents, each with its own independent context, on the given tasks. Several tasks in one call run concurrently. Parent and child share the task string and the result, plus explicitly selected checklist_ids as independent copies; artifacts must be explicitly moved. Returns one entry per task, in order: {run_id, state, result, error?, checklists?}.",
       "parameters": {
         "type": "object",
         "properties": {
-          "task": {
-            "type": "string",
-            "description": "委任するタスクの完全な記述(子は親の文脈を一切見られない)"
-          },
-          "kernel": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "子のシステムプロンプト(省略時は汎用ジョブカーネル)"
-          },
-          "tool_scope": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "type": "string"
-            },
-            "description": "子に許可するツール名/カテゴリ(例 ['web/*','file'])。省略時は親と同じ台帳"
-          },
-          "model": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "子で使うモデル名(spawn_llm_factory が必要)"
-          },
-          "max_steps": {
-            "type": "integer",
-            "default": 15,
-            "minimum": 1,
-            "maximum": 100
-          },
-          "checklist_ids": {
+          "tasks": {
             "type": "array",
+            "description": "独立したタスクの配列。2件以上を1回の呼び出しで渡すと並列実行される(最大8件)",
             "items": {
-              "type": "string"
-            },
-            "description": "Explicitly copy these checklist ULIDs to the child. Returns result plus a checklists export document. Parent plans are never auto-merged."
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "description": "委任するタスクの完全な記述(子は親の文脈を一切見られない)"
+                },
+                "kernel": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "子のシステムプロンプト(省略時は汎用ジョブカーネル)"
+                },
+                "tool_scope": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "子に許可するツール名/カテゴリ(例 ['web/*','file'])。省略時は親と同じ台帳"
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "子で使うモデル名(spawn_llm_factory が必要)"
+                },
+                "max_steps": {
+                  "type": "integer",
+                  "default": 15,
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "checklist_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Explicitly copy these checklist ULIDs to the child. The entry then carries a checklists export document. Parent plans are never auto-merged."
+                }
+              },
+              "required": [
+                "task"
+              ]
+            }
           }
         },
         "required": [
-          "task"
+          "tasks"
         ]
       },
-      "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。"
+      "usage_notes": "自己完結したタスクの記述を渡すこと。親の会話内容は共有されない。独立したタスクは1回の呼び出しにまとめて並列化する。サブエージェントはユーザーに質問できない。"
     },
     "discovery": {
       "pinned": true,
       "no_embed": true
     },
     "execution": {
-      "timeout_s": 600,
+      "timeout_s": null,
       "retry_safety": "never_retry"
     },
     "effects": [
