@@ -264,7 +264,7 @@ def run_one(arm: str, size: int, task: Task, run: int, model: str,
         text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False, default=str)
         r.ok = bool(task.check(text))
     except Exception as exc:  # an arm that cannot run IS the finding; record it
-        r.error = f"{type(exc).__name__}: {exc}"[:300]
+        r.error = f"{type(exc).__name__}: {exc}"
     r.seconds = time.time() - t0
     r.steps = session.budget.steps
     r.api_calls = adapter.api_calls

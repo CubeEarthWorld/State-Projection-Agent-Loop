@@ -47,7 +47,7 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
     for event in ctx.ledger.iter_run(ctx.run.id):
         blob = str(event.data)
         if q in blob.lower():
-            hits.append(f"[{event.sequence}] {event.type}: {blob[:300]}")
+            hits.append(f"[{event.sequence}] {event.type}: {blob}")
             if len(hits) >= k:
                 break
     return hits or [f"No ledger events matched \"{query}\"."]
