@@ -73,6 +73,13 @@ preloading:
 
 Every registered capability stays reachable even with vectors disabled.
 
+The native tools array keeps its order for the whole run: pinned schemas
+first, then every other tool in the order it was first sent (a candidate
+offered for the first time, or a tool found or used, is appended and stays).
+The per-step ranking lives only in the candidates section at the tail, so
+new candidates never reorder the array a provider caches ahead of the
+conversation. See [docs/compression.md](docs/compression.md#the-tools-array).
+
 ## Install
 
 ```bash

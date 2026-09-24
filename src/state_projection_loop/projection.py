@@ -338,17 +338,19 @@ class Projection:
     def _drop_schema(ctx: TurnContext) -> bool:
         """Last resort: drop the least recently used non-pinned native schema.
 
-        ``api_tools`` is ordered pinned, candidates, then the recently-used
-        LRU oldest first; candidates remove their own schemas when they
-        shrink, so the first droppable entry here is the least recently used
-        tool. Pinned schemas and ``finish`` are never dropped.
+        ``api_tools`` is in the order the tools were first sent (see
+        ``Session._api_tools``), which says nothing about which one matters
+        least now; ``ctx.tool_recency`` does, least recently used or offered
+        first. Absent from it, the first droppable entry goes. Pinned schemas
+        and ``finish`` are never dropped.
         """
         keep = {c.api_name for c in ctx.registry.pinned()} | {FINISH_NAME}
-        for i, schema in enumerate(ctx.api_tools):
-            if schema.get("name") not in keep:
-                del ctx.api_tools[i]
-                return True
-        return False
+        droppable = [i for i, schema in enumerate(ctx.api_tools) if schema.get("name") not in keep]
+        if not droppable:
+            return False
+        rank = {name: r for r, name in enumerate(ctx.tool_recency)}
+        del ctx.api_tools[min(droppable, key=lambda i: (rank.get(ctx.api_tools[i].get("name"), -1), i))]
+        return True
 
     def render(
         self, ctx: TurnContext, *, api_tools: Optional[list[dict[str, Any]]] = None,

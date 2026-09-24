@@ -163,10 +163,16 @@ class Session:
                     self.working_state.checklists = ChecklistStore.from_dict(event.data["checklists"])
             self.budget = BudgetState.from_dict(_restored.state.get("budget") or {})
 
-        # Recently used non-pinned tools (an LRU). Pinned capabilities are
-        # added by _api_tools straight from the registry, so they are never
-        # tracked here and can never be evicted.
-        self._active: "OrderedDict[str, None]" = OrderedDict()
+        # The non-pinned tools whose schemas go out natively, in the order
+        # each was first sent, and the same names least recently used or
+        # offered first. Pinned capabilities are added by _api_tools straight
+        # from the registry, so they are never tracked here and can never be
+        # evicted. Part of the snapshot: the tools array is the front of
+        # most providers' cached prefix, so a resumed run must send the same one.
+        self._native: list[str] = []
+        self._recency: "OrderedDict[str, None]" = OrderedDict()
+        if _restored is not None:
+            self._restore_tools(_restored.state.get("tools"))
         self._interrupted = False
         # This run's sub-agents, until they are collected. A blocking spawn
         # adds and removes them around its own command; a background one
@@ -412,10 +418,20 @@ class Session:
             spawn_llm_factory=self.spawn_llm_factory, policy=self.policy, **self._branch_args,
         )
         new_session.working_state = copy.deepcopy(self.working_state)
+        new_session._native = list(self._native)
+        new_session._recency = OrderedDict(self._recency)
+        # The first `cut` messages, and the checkpoints among them so the
+        # branch can be rewound like any other run.
         events = [event for event, _ in renderable(self.ledger, self.run.id)]
         cut = len(events) if at_message is None else at_message
-        for event in events[:cut]:
-            new_session.ledger.append(new_session.run.id, event.type, dict(event.data))
+        kept = len(events[:cut])
+        stop = events[kept].sequence if kept < len(events) else None
+        moved = new_session._copy_events([
+            event for event in self.ledger.iter_run(self.run.id)
+            if (stop is None or event.sequence < stop)
+            and (event.type in RENDERABLE_TYPES or event.type == "checkpoint")
+        ])
+        _carry_boundaries(new_session.working_state, moved, new_session._next_sequence())
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
         })
@@ -433,8 +449,11 @@ class Session:
         these to the user.
 
         Unlike :meth:`branch`, this mutates the session: the old run is
-        cancelled, working_state is restored from the checkpoint at the rewind
-        point, and the budget is reset.
+        cancelled, working_state and the native tool list are restored from
+        the checkpoint at the rewind point, and the budget is reset. The kept
+        events (checkpoints included) are renumbered in the new run, and the
+        restored history boundaries are re-pointed at them, so the kept
+        history renders exactly as it did before.
 
         ``to_turn`` must name an existing turn: past the last one there is no
         checkpoint to restore from, and rewinding anyway would keep the whole
@@ -444,8 +463,8 @@ class Session:
         # the renderable events to keep, and the working state from the
         # checkpoint written right after it.
         irreversible: list[str] = []
-        kept_renderable: list[Event] = []
-        restored_ws = WorkingState()
+        kept: list[Event] = []  # the renderable events, and the checkpoints among them
+        checkpoint: dict[str, Any] = {}  # the one written right after the to_turn-th input
         user_count = 0
         cut = False
         for event in self.ledger.iter_run(self.run.id):
@@ -453,12 +472,12 @@ class Session:
                 cut = user_count == to_turn
                 user_count += 1
             if not cut:
-                if event.type in RENDERABLE_TYPES:
-                    kept_renderable.append(event)
+                if event.type in RENDERABLE_TYPES or event.type == "checkpoint":
+                    kept.append(event)
                 elif (effect := self._effect_notice(event)) is not None:
                     irreversible.append(effect)
             elif event.type == "checkpoint":
-                restored_ws = WorkingState.from_dict(event.data.get("working_state") or {})
+                checkpoint = event.data
                 break
         if not cut:
             raise ValueError(
@@ -466,24 +485,49 @@ class Session:
             )
 
         old_run_id = self.run.id
-        self.ledger.append(old_run_id, "rewound", {"to_turn": to_turn, "kept_messages": len(kept_renderable)})
+        self.ledger.append(old_run_id, "rewound", {
+            "to_turn": to_turn, "kept_messages": sum(1 for e in kept if e.type in RENDERABLE_TYPES),
+        })
         if self.run.state not in TERMINAL_STATES:
             self.cancel(f"rewound to turn {to_turn}")
 
         self.run = Run(new_id("run"), self.session_id, self.ledger)
-        for event in kept_renderable:
-            self.ledger.append(self.run.id, event.type, dict(event.data))
-        self.ledger.append(self.run.id, "checkpoint", {"working_state": restored_ws.to_dict()})
-
+        # The kept checkpoints come along too, so this run can be rewound
+        # again to any turn it still has.
+        moved = self._copy_events(kept)
+        restored_ws = WorkingState.from_dict(checkpoint.get("working_state") or {})
+        _carry_boundaries(restored_ws, moved, self._next_sequence())
         self.working_state = restored_ws
+        # The native tools go back to what they were when that turn began;
+        # a checkpoint written without them (an older one) starts empty.
+        self._restore_tools(checkpoint.get("tools"))
+        self._checkpoint()
+
         self.budget = BudgetState()
         self._idle_turns = 0
         self._budget_grace_used = False
-        self._active = OrderedDict()
         self.runtime.reset()
         self._snapshot()
 
         return irreversible
+
+    def _copy_events(self, events: list[Event]) -> list[tuple[int, int]]:
+        """Append ``events`` to the current run, in order, and return each
+        one's ``(old, new)`` sequence. The copies are numbered afresh, so a
+        checkpoint copied along has its history boundaries re-pointed at them."""
+        moved: list[tuple[int, int]] = []
+        for event in events:
+            data = dict(event.data)
+            if event.type == "checkpoint" and isinstance(data.get("working_state"), dict):
+                state = WorkingState.from_dict(data["working_state"])
+                _carry_boundaries(state, moved, self._next_sequence())
+                data["working_state"] = {**data["working_state"], "verbatim_sequence": state.verbatim_sequence,
+                                         "folded_sequence": state.folded_sequence}
+            moved.append((event.sequence, self.ledger.append(self.run.id, event.type, data).sequence))
+        return moved
+
+    def _next_sequence(self) -> int:
+        return self.ledger.last_sequence(self.run.id) + 1
 
     def _irreversible_effects(self) -> list[str]:
         """External effects this run already committed — a sent email, a
@@ -534,6 +578,7 @@ class Session:
         state = {
             "working_state": self.working_state.to_dict(),
             "budget": self.budget.to_dict(),
+            "tools": self._tools_state(),
             **self.run.to_snapshot_state(),
         }
         self.ledger.save_snapshot(Snapshot(
@@ -697,9 +742,11 @@ class Session:
         self._step_tiers()
         ctx = self._context()
         cfg = self.config.projection
-        return ctx, self.projection.render(
-            ctx, api_tools=self._api_tools(ctx),
-            reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens)
+        tools = self._api_tools(ctx)
+        messages = self.projection.render(
+            ctx, api_tools=tools, reserved_tokens=cfg.reserved_output_tokens + cfg.provider_overhead_tokens)
+        self._settle_tools(ctx, tools)
+        return ctx, messages
 
     async def _fold(self) -> bool:
         """Compaction: when the prompt exceeds ``compaction.trigger_ratio`` of
@@ -813,27 +860,83 @@ class Session:
         return ""
 
     def _api_tools(self, ctx: TurnContext) -> list[dict]:
-        names = dict.fromkeys(  # ordered and deduplicated: pinned, then candidates, then the LRU
-            [c.name for c in self.registry.pinned()]
-            + [s.tool.name for s in ctx.candidates]
-            + list(self._active)
-        )
-        schemas = [capability.tool_spec() for capability in map(self.registry.get, names)
+        """The native schemas for this step: pinned ones in registry order,
+        then every other native tool in the order it was first sent, then
+        ``finish`` in job mode.
+
+        Most providers render the tools array ahead of the whole
+        conversation, so it is the front of the cached prefix: a list that
+        changes changes everything after it. Nothing here reorders it — not
+        this step's candidate ranking (that is the candidates section's
+        job, at the tail), not recency. A candidate offered for the first
+        time is appended and then stays, so it is callable natively as
+        before, and a step whose candidates were all offered already sends
+        the same bytes as the step before. The list shrinks only when it
+        outgrows ``discovery.active_tools`` (one deliberate rebuild) or the
+        window forces it.
+        """
+        pinned = [c.name for c in self.registry.pinned()]
+        offered = [s.tool.name for s in ctx.candidates]
+        for name in offered:
+            self._activate(name)
+        self._evict(keep=set(offered))
+        ctx.tool_recency = [c.api_name for c in map(self.registry.get, self._recency) if c is not None]
+        schemas = [capability.tool_spec() for capability in map(self.registry.get, dict.fromkeys(pinned + self._native))
                    if capability is not None]
         if self.config.mode == "job":
             schemas.append(FINISH_SPEC)
         return schemas
 
+    def _settle_tools(self, ctx: TurnContext, sent: list[dict]) -> None:
+        """Forget the native tools the window made this step leave out, so
+        the next step appends them again instead of re-inserting them
+        mid-list. A tool left out because it is disabled for now keeps its
+        place and returns there when it is enabled again."""
+        names = {t.get("name") for t in ctx.api_tools}
+        for tool in sent:
+            if tool.get("name") not in names:
+                name = self.registry.resolve_api_name(tool.get("name", ""))
+                if name in self._recency:
+                    self._native.remove(name)
+                    del self._recency[name]
+
     def _activate(self, name: str) -> None:
-        self._active[name] = None
-        self._active.move_to_end(name)
-        while len(self._active) > self.config.discovery.active_tools:
-            self._active.popitem(last=False)
+        capability = self.registry.get(name)
+        if capability is not None and capability.discovery.pinned:
+            return  # always sent, never tracked
+        if name not in self._recency:
+            self._native.append(name)
+        self._recency[name] = None
+        self._recency.move_to_end(name)
+
+    def _evict(self, keep: set[str]) -> None:
+        """Hold the native tools other than this step's candidates to
+        ``discovery.active_tools``, dropping the least recently used or offered."""
+        over = sum(1 for name in self._native if name not in keep) - self.config.discovery.active_tools
+        for name in [n for n in self._recency if n not in keep][:max(over, 0)]:
+            self._native.remove(name)
+            del self._recency[name]
 
     def activate(self, names: Iterable[str]) -> None:
-        """Mark tools recently used so their schemas are sent natively next turn."""
+        """Mark tools used so their schemas are sent natively from the next
+        step on. A tool not yet in the native list joins it at the end."""
         for name in names:
             self._activate(name)
+
+    @property
+    def native_tools(self) -> list[str]:
+        """The non-pinned tools whose schemas are sent natively, in the
+        order they appear in the tools array (first sent first)."""
+        return list(self._native)
+
+    def _tools_state(self) -> dict[str, list[str]]:
+        return {"native": list(self._native), "recency": list(self._recency)}
+
+    def _restore_tools(self, state: Any) -> None:
+        state = state if isinstance(state, dict) else {}
+        self._native = [str(n) for n in state.get("native") or []]
+        order = [str(n) for n in state.get("recency") or [] if n in self._native]
+        self._recency = OrderedDict.fromkeys([n for n in self._native if n not in order] + order)
 
     def _handle_text_only(self, decision) -> Any:
         if self.config.mode == "chat":
@@ -853,7 +956,21 @@ class Session:
         self.ledger.append(self.run.id, "observation", {"call_id": call_id, "name": name, "text": text, "ok": ok})
 
     def _checkpoint(self) -> None:
-        self.ledger.append(self.run.id, "checkpoint", {"working_state": self.working_state.to_dict()})
+        self.ledger.append(self.run.id, "checkpoint", {
+            "working_state": self.working_state.to_dict(), "tools": self._tools_state(),
+        })
 
 
 _CONTINUE = object()  # sentinel: the loop should keep going
+
+
+def _carry_boundaries(state: WorkingState, moved: list[tuple[int, int]], next_sequence: int) -> None:
+    """Re-point ``state``'s history boundaries after its events were copied
+    into another run under new sequence numbers (``moved``: ``(old, new)``
+    pairs, oldest first). The verbatim point moves to the first copy at or
+    after it (``next_sequence`` when none is, so every copy stays older), and
+    the fold point to the last copy at or before it. Left as they were, the
+    old run's numbers mean different messages in the new run: a verbatim
+    point past the copies compressed the whole kept history."""
+    state.verbatim_sequence = next((new for old, new in moved if old >= state.verbatim_sequence), next_sequence)
+    state.folded_sequence = max((new for old, new in moved if old <= state.folded_sequence), default=0)

@@ -76,3 +76,8 @@ class TurnContext(ToolContext):
 
     candidates: list["ScoredTool"] = field(default_factory=list)
     api_tools: list[dict[str, Any]] = field(default_factory=list)
+    # The api names of the non-pinned native schemas, least recently used or
+    # offered first: the order the window budget gives them back in. The
+    # order of ``api_tools`` itself is the order they were first sent, which
+    # says nothing about which one matters least now.
+    tool_recency: list[str] = field(default_factory=list)

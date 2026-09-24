@@ -38,7 +38,10 @@ class DiscoveryConfig:
     vector: str = "auto"  # "auto" | "on" | "off"
     k: int = 8
     toc: bool = True
-    # Recently used non-pinned tools whose native schemas are re-sent each turn.
+    # Non-pinned tools, besides this step's candidates, whose native schemas
+    # stay in the tools array (used, found or offered before). The array
+    # keeps first-sent order; past this many, the least recently used or
+    # offered one leaves it.
     active_tools: int = 48
     query_sources: list[str] = field(
         default_factory=lambda: ["last_user_message", "last_model_thought", "goal_if_exists"]

@@ -60,7 +60,26 @@ is byte-identical and grows only at the end. A step is one deliberate
 cache rebuild every few turns, instead of one every turn.
 
 The point is part of the working state, so it survives a restart and
-`rewind` restores it with the rest.
+`rewind` restores it with the rest. `rewind` and `branch` copy the kept
+history into a new run, where every event gets a new sequence number, so
+they re-point the verbatim point (and the fold point) at the copies of the
+messages they named: the kept history renders exactly as it did before.
+
+## The tools array
+
+Most providers render the native tool schemas ahead of the whole
+conversation, so the tools array is the front of the cached prefix: change
+it and nothing after it hits. The session therefore sends pinned schemas in
+registry order and every other schema **in the order it was first sent**.
+Neither the candidates' per-step ranking nor recency of use reorders it —
+the ranking is what the candidates section at the tail shows. A candidate
+offered for the first time is appended and then stays, so a step whose
+candidates were all offered before sends the same tools as the step before.
+The list shrinks only when the tools other than this step's candidates
+outgrow `discovery.active_tools` (the least recently used or offered goes,
+one deliberate rebuild) or when the window forces a schema out. The list is
+part of the snapshot and of each turn's checkpoint, so a resumed run sends
+the same array and `rewind` puts back the one that turn began with.
 
 ## The fold
 
