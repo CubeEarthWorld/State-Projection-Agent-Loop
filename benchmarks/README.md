@@ -11,7 +11,12 @@ tools. Only how capabilities reach the model differs:
 | arm | configuration |
 |---|---|
 | `preload` | every capability `pinned=True`, discovery off (`toc=False, k=0`). The conventional agent loop: every full spec, every turn. |
-| `spal` | nothing pinned; TOC + BM25/tag candidate cards, `tool_search` as fallback. |
+| `spal` | task tools unpinned; TOC + category browsing and selected detail loading through `tool_search`. |
+
+The standard agent tools remain pinned in both arms. Automatic candidates
+are disabled. The offline scripted oracle knows each required tool's name
+and explicitly describes it; it measures schema loading, not discovery skill.
+The separate [three-agent comparison](comparison.md) uses ts-bench coding tasks.
 
 Holding the runtime fixed is the point. A hand-written baseline loop would only
 prove that two different harnesses are different.
@@ -40,6 +45,9 @@ python -m benchmarks.test_bench
 ```
 
 ## Results: deepseek-flash, 2026-09-19
+
+These historical measurements used the earlier BM25/tag candidate strategy.
+They do not describe the current category-browsing implementation.
 
 72 runs, 3 per cell, temperature 0, medians reported.
 

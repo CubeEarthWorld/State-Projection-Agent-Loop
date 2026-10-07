@@ -66,7 +66,13 @@ class Row:
 
 def measure(arm: str, size: int, task_key: str) -> Row:
     spec = ARMS[arm]
-    steps = [ScriptedLLM.call(name, **args) for name, args in SCRIPTS[task_key]]
+    steps = []
+    for name, args in SCRIPTS[task_key]:
+        if not spec["pinned"]:
+            # This scripted oracle knows the name; it measures schema loading,
+            # not the model's ability to choose a category or find the tool.
+            steps.append(ScriptedLLM.call("tool_search", action="describe", name=name))
+        steps.append(ScriptedLLM.call(name, **args))
     steps.append(ScriptedLLM.finish(ANSWERS[task_key]))
     llm = ScriptedLLM(steps, strict=False)
 
