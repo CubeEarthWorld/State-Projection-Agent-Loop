@@ -122,6 +122,18 @@ Use `--model`, `--base-url`, `--steps`, and `--seconds` to configure a run.
 `--prompt-file` reads a UTF-8 task and `--trace` saves the event ledger.
 The CLI allows tool execution; file tools are confined to `--cwd`, while Bash
 runs on the host with that working directory.
+The coding CLI keeps 24 recent messages in full when history tiers advance
+(the library default remains 6), reserves 8192 output tokens, and instructs
+the model to finish immediately after verification.
+
+`read(path, offset=1, limit=2000)` uses 1-based lines and reports the next offset
+when more lines remain. Its inline limit is 16,000 estimated tokens, so ordinary
+source and test files are returned directly; larger results use artifacts.
+`edit(path, old_text, new_text)` requires a unique exact match. If ambiguous,
+it returns up to three matching locations with numbered context; add surrounding
+text to identify the intended block. `replace_all=True` is only for intentional
+replacement of every occurrence. A failed edit leaves the file intact, and edits
+always operate on the full file regardless of previous read ranges.
 This migration removes the old tool names and discovery configuration fields;
 there are no compatibility aliases.
 
@@ -284,12 +296,13 @@ Bundled tools come in **packs** and there is one switch for them:
 | Pack | Tools | Default |
 |---|---|---|
 | `meta` | `tool_search`, `peek`, `history_search` | on |
+| `toolkits` | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | on |
 | `checklist` | `checklist` | on |
 | `state` | `state.goal.set`, `state.fact.add`, … (9 tools) | off |
 | `spawn` | `spawn`, `join` | off |
 
 ```python
-Session(llm)                                     # meta + checklist
+Session(llm, workspace_root="./workspace")        # meta + checklist + toolkits
 Session(llm, builtins=["meta", "state"])        # no checklist, with state tools
 Session(llm, builtins=())                        # nothing bundled at all
 install_builtins(registry, ["spawn"])            # same operation on a registry you built yourself
@@ -344,7 +357,7 @@ the pin set you chose, never by registry size.
 | Compression | `compression.*` (always on) | History renders in tiers by distance from a verbatim point that moves in steps, so the prompt prefix stays byte-identical between steps (prompt caches hit); old tool results are masked to one line unless they failed, the user's words are never touched. See [docs/compression.md](docs/compression.md). |
 | Compaction | `compaction.trigger_ratio` (default `0.75`, `0` off) | When the prompt exceeds the ratio of the window, one extra model call folds the history before the verbatim point into `WorkingState` as a schema-validated, grounding-checked JSON delta (`state_folded` keeps the pre-fold state). |
 | Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `tool_search` with no second index. |
-| Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `find/read/write` and `bash` with declared effects; never installed unless you ask. |
+| Toolkits | default pack `toolkits`; `install_toolkits(registry, root, shell=True)` for a custom registry | Pinned `read/bash/edit/write/grep/find/ls`. File operations are root-confined; Bash uses the root as cwd with host permissions. |
 
 ```python
 session = Session(llm, builtins=["meta", "checklist", "ask"], on_event=print,

@@ -54,7 +54,7 @@ class TestBugFixWorkflow:
         assert "do not read" not in obs
 
     def test_large_file_read_becomes_artifact_and_peek_works(self, workspace):
-        big = "\n".join(f"line {i}: {'x' * 60}" for i in range(400))
+        big = "\n".join(f"line {i}: {'x' * 200}" for i in range(400))
         (workspace / "big.txt").write_text(big, encoding="utf-8")
 
         def peek_step(messages, tools):

@@ -50,7 +50,9 @@ def main():
     root = args.cwd.resolve()
     if not root.is_dir():
         parser.error("--cwd must be an existing directory")
-    config = Config.from_dict({"mode": "job", "budget": {"max_steps": args.steps, "max_seconds": args.seconds}})
+    config = Config.from_dict({"mode": "job", "budget": {"max_steps": args.steps, "max_seconds": args.seconds},
+                               "projection": {"reserved_output_tokens": 8192},
+                               "compression": {"full_window": 24}})
     adapter = MeasuredAdapter(args.model, api_key=key, base_url=args.base_url, temperature=0,
                               max_tokens=8192, timeout=min(args.seconds, 120),
                               extra_body={"reasoning": {"enabled": False}})
@@ -59,6 +61,10 @@ def main():
     session = Session(adapter, config=config, policy=PolicyEngine(default_decision="allow"), workspace_root=root,
                       kernel="You are a coding agent. Implement the requested change in the working directory. "
                              "Use read, write, edit, grep, find, ls and bash. "
+                             "Read source and tests before editing; use read offset/limit to continue large files. "
+                             "Make old_text unique by including nearby lines; on an ambiguous edit, use the returned "
+                             "line contexts to retry with a unique match. Use write for a complete file rewrite. "
+                             "Once verification succeeds, finish immediately; do not send a separate text-only report. "
                              "Call finish(result) when the task is complete.")
     started = time.perf_counter()
     error = None

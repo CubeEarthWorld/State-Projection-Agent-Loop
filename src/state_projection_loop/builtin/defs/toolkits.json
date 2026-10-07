@@ -46,13 +46,24 @@
     "name": "read",
     "category": "filesystem",
     "spec": {
-      "description": "Read a UTF-8 text file from the workspace.",
+      "description": "Read a UTF-8 text file from the workspace. offset is a 1-based line number; limit is the maximum number of lines. If more lines remain, continue at the offset shown in the result.",
       "parameters": {
         "type": "object",
         "properties": {
           "path": {
             "type": "string",
             "description": "Workspace-relative file path."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 2000
           }
         },
         "required": [
@@ -69,7 +80,7 @@
       "timeout_s": 10,
       "retry_safety": "pure",
       "output_policy": {
-        "max_inline_tokens": 1200
+        "max_inline_tokens": 16000
       }
     },
     "effects": [
@@ -196,7 +207,7 @@
     "name": "edit",
     "category": "filesystem",
     "spec": {
-      "description": "Replace exact text in a UTF-8 file. Fails without writing when text is absent or ambiguous. Repeated matches require replace_all=True.",
+      "description": "Replace exact text in a UTF-8 file. old_text must uniquely identify the intended location. On an ambiguous match, inspect the returned line contexts and add surrounding text to old_text. Fails without writing if absent or ambiguous. Use replace_all only when every occurrence should change.",
       "parameters": {
         "type": "object",
         "properties": {
