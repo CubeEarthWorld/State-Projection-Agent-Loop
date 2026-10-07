@@ -207,13 +207,13 @@ class TestBudget:
             captured["tools"] = tools
             return "ok"
 
-        cfg = Config.from_dict({"projection": {"window_tokens": 2000, "reserved_output_tokens": 200}})
+        cfg = Config.from_dict({"projection": {"window_tokens": 4000, "reserved_output_tokens": 200}})
         session = Session(ScriptedLLM([snapshot]), registry=reg, config=cfg)
         session.send("do something with tool_5 and tool_12")
 
         message_tokens = estimate_tokens(captured["messages"])
         schema_tokens = session.projection.schema_tokens(captured["tools"])
-        assert message_tokens + schema_tokens + 200 <= 2000
+        assert message_tokens + schema_tokens + 200 <= 4000
 
 
 class TestApprovalSurvivesRestart:

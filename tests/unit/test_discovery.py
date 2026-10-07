@@ -61,9 +61,29 @@ class TestLexical:
 
 class TestLayers:
     def test_layer2_excludes_no_embed(self):
-        search = ToolSearch(make_registry(), vector="off")
+        search = ToolSearch(make_registry(), embedder=HashingEmbedding())
         names = [s.tool.name for s in search.search("hidden admin tool", layer=2, k=8)]
         assert "admin.secret_tool" not in names
+
+    def test_layer2_requires_embeddings(self):
+        search = ToolSearch(make_registry(), vector="off")
+        assert search.search("web.search", layer=2) == []
+
+    def test_layer2_ranks_by_vectors_without_lexical_match(self):
+        class Embedder:
+            def embed_documents(self, texts):
+                return [[1.0, 0.0] if text == "stock" else [0.0, 1.0] for text in texts]
+
+            def embed_query(self, text):
+                return [1.0, 0.0]
+
+        reg = Registry()
+        reg.register(capability_dict("inventory.stock", embedding_text="stock"))
+        reg.register(capability_dict("file.read", embedding_text="file"))
+        search = ToolSearch(reg, embedder=Embedder())
+        results = search.search("file.read 在庫を確認", layer=2)
+        assert results[0].tool.name == "inventory.stock"
+        assert results[0].components == {"vector": 1.0}
 
     def test_layer3_reaches_no_embed(self):
         search = ToolSearch(make_registry(), vector="off")

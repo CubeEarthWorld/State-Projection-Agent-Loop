@@ -16,11 +16,11 @@ from state_projection_loop.capability import (
 
 class TestNaming:
     def test_valid_names(self):
-        for name in ("a.b", "a.b.c", "a.b.c.d", "a.b.c.d.e", "filesystem.file.read"):
+        for name in ("a.b", "a.b.c", "a.b.c.d", "a.b.c.d.e", "read", "tool_search"):
             validate_capability_name(name)  # no raise
 
     def test_invalid_names(self):
-        for name in ("singleword", "A.b", "a..b", "a.b.c.d.e.f", "a.B"):
+        for name in ("", "a-b", "A.b", "a..b", "a.b.c.d.e.f", "a.B"):
             with pytest.raises(ValueError):
                 validate_capability_name(name)
 

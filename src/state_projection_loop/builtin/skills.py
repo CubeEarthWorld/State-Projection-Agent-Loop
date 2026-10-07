@@ -4,7 +4,7 @@ A skill is a body of instructions the model should only read when it is
 relevant. Making it a capability ``skill.<name>.load`` reuses every
 discovery mechanism that already exists — it shows up in the TOC under
 ``skill``, in auto-selected candidates when the request matches its
-summary, and in ``meta.tool.find`` — with no second index to maintain.
+summary, and in ``tool_search`` — with no second index to maintain.
 """
 from __future__ import annotations
 

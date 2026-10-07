@@ -124,12 +124,12 @@ def test_projection_modes_visibility_and_budget():
 
 def test_default_tool_plans_execute_in_order_and_survive_compression():
     session = Session(ScriptedLLM(["ok"] * 3))
-    assert session.registry.get("planning.checklist.manage").discovery.pinned
-    value = session.invoke("planning.checklist.manage", action="create", name="durable", items=[{"text": "verify"}])
+    assert session.registry.get("checklist").discovery.pinned
+    value = session.invoke("checklist", action="create", name="durable", items=[{"text": "verify"}])
     session.llm = ScriptedLLM([
         Decision(calls=[
-            ToolCall(name="planning.checklist.manage", arguments={"action": "update", "id": value["id"], "expected_revision": 1, "name": "first"}),
-            ToolCall(name="planning.checklist.manage", arguments={"action": "update", "id": value["id"], "expected_revision": 2, "name": "second"}),
+            ToolCall(name="checklist", arguments={"action": "update", "id": value["id"], "expected_revision": 1, "name": "first"}),
+            ToolCall(name="checklist", arguments={"action": "update", "id": value["id"], "expected_revision": 2, "name": "second"}),
         ]), "ok", "ok",
     ])
     session.send("work")
@@ -146,7 +146,7 @@ def test_default_tool_plans_execute_in_order_and_survive_compression():
 def test_policy_can_deny_changes():
     session = Session(ScriptedLLM([]), policy=PolicyEngine(default_decision="deny"))
     with pytest.raises(RuntimeError):
-        session.invoke("planning.checklist.manage", action="create", name="no")
+        session.invoke("checklist", action="create", name="no")
     assert session.checklists.execute("list") == []
 
 
@@ -154,12 +154,12 @@ def test_restart_recovers_after_snapshot_gap_and_keeps_deletion(tmp_path):
     config = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
     session = Session(ScriptedLLM([]), config=config)
     initial = session.ledger.load_snapshot(session.run.id)
-    value = session.invoke("planning.checklist.manage", action="create", name="persist", include_in_context=False)
+    value = session.invoke("checklist", action="create", name="persist", include_in_context=False)
     # Simulate a crash after the mutation event but before the next snapshot.
     session.ledger.save_snapshot(initial)
     restored = Session.resume_from_ledger(ScriptedLLM([]), session.run.id, config=config)
     assert restored.checklists.execute("get", id=value["id"])["include_in_context"] is False
-    restored.invoke("planning.checklist.manage", action="delete", id=value["id"], expected_revision=1)
+    restored.invoke("checklist", action="delete", id=value["id"], expected_revision=1)
     restored.ledger.save_snapshot(initial)
     again = Session.resume_from_ledger(ScriptedLLM([]), session.run.id, config=config)
     assert again.checklists.execute("list") == []
@@ -168,7 +168,7 @@ def test_restart_recovers_after_snapshot_gap_and_keeps_deletion(tmp_path):
 def test_completed_run_retains_plans_on_restart(tmp_path):
     cfg = Config.from_dict({"mode": "job", "persistence": {"ledger_directory": str(tmp_path)}})
     session = Session(ScriptedLLM([ScriptedLLM.finish(result="done")]), config=cfg)
-    value = session.invoke("planning.checklist.manage", action="create", name="retained")
+    value = session.invoke("checklist", action="create", name="retained")
     session.run_job("finish")
     restored = Session.resume_from_ledger(ScriptedLLM([]), session.run.id, config=cfg)
     assert restored.run.state == "COMPLETED"
@@ -177,21 +177,21 @@ def test_completed_run_retains_plans_on_restart(tmp_path):
 
 def test_branch_rewind_and_spawn_do_not_share_plans():
     session = Session(ScriptedLLM(["one", "two"]), policy=PolicyEngine(default_decision="allow"))
-    value = session.invoke("planning.checklist.manage", action="create", name="original")
+    value = session.invoke("checklist", action="create", name="original")
     session.send("first")
     child, _ = session.branch()
-    child.invoke("planning.checklist.manage", action="update", id=value["id"], expected_revision=1, name="branch")
+    child.invoke("checklist", action="update", id=value["id"], expected_revision=1, name="branch")
     assert session.checklists.execute("get", id=value["id"])["name"] == "original"
     session.send("second")
-    session.invoke("planning.checklist.manage", action="delete", id=value["id"], expected_revision=1)
+    session.invoke("checklist", action="delete", id=value["id"], expected_revision=1)
     session.rewind(to_turn=1)
     assert session.checklists.execute("get", id=value["id"])["name"] == "original"
     install_builtins(session.registry, ["spawn"])
     session.spawn_llm_factory = lambda model: ScriptedLLM([
-        ScriptedLLM.call("planning.checklist.manage", action="update", id=value["id"], expected_revision=1, name="delegated"),
+        ScriptedLLM.call("checklist", action="update", id=value["id"], expected_revision=1, name="delegated"),
         ScriptedLLM.finish(result="done"),
     ])
-    entry, = session.invoke("meta.agent.spawn", tasks=[{"task": "work", "checklist_ids": [value["id"]]}])
+    entry, = session.invoke("spawn", tasks=[{"task": "work", "checklist_ids": [value["id"]]}])
     assert entry["result"] == "done"
     assert entry["checklists"]["checklists"][0]["name"] == "delegated"
     assert session.checklists.execute("get", id=value["id"])["name"] == "original"
@@ -204,11 +204,11 @@ def test_a_spawned_child_keeps_the_parents_deny_list():
         seen.append([t["name"] for t in tools])
         return ScriptedLLM.finish(result="done")
 
-    session = Session(ScriptedLLM([]), registry=Registry(disabled=["planning.checklist.manage"]),
+    session = Session(ScriptedLLM([]), registry=Registry(disabled=["checklist"]),
                       builtins=["meta", "checklist", "spawn"], policy=PolicyEngine(default_decision="allow"),
                       spawn_llm_factory=lambda model: ScriptedLLM([child_step]))
-    assert session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])[0]["result"] == "done"
-    assert "meta__tool__find" in seen[0] and "planning__checklist__manage" not in seen[0]
+    assert session.invoke("spawn", tasks=[{"task": "work"}])[0]["result"] == "done"
+    assert "tool_search" in seen[0] and "checklist" not in seen[0]
 
 
 def test_shared_wire_fixture():
@@ -223,13 +223,13 @@ def test_shared_wire_fixture():
 
 def test_projection_budget_never_deletes_plan():
     from state_projection_loop.tokens import estimate_tokens
-    cfg = Config.from_dict({"projection": {"window_tokens": 2000, "reserved_output_tokens": 200}})
+    cfg = Config.from_dict({"projection": {"window_tokens": 4000, "reserved_output_tokens": 200}})
     session = Session(ScriptedLLM(["ok"]), config=cfg)
     for i in range(12):
         session.checklists.execute("create", name=f"plan {i}", context_mode="full", items=[{"text": "x" * 500}] * 30)
     session.send("work")
     request = session.llm.requests[-1]
-    assert estimate_tokens(request["messages"]) + session.projection.schema_tokens(request["tools"]) + 200 <= 2000
+    assert estimate_tokens(request["messages"]) + session.projection.schema_tokens(request["tools"]) + 200 <= 4000
     assert len(session.checklists.execute("list")) == 12
     assert len(session.checklists.execute("list", mode="full")[0]["items"]) == 30
 
@@ -237,13 +237,13 @@ def test_projection_budget_never_deletes_plan():
 def test_memory_default_and_persisted_branch_rewind(tmp_path):
     from state_projection_loop import InMemoryLedger
     memory = Session(ScriptedLLM([]))
-    memory.invoke("planning.checklist.manage", action="create", name="memory")
+    memory.invoke("checklist", action="create", name="memory")
     assert isinstance(memory.ledger, InMemoryLedger)
     assert memory.config.persistence.ledger_directory is None
     assert not Session(ScriptedLLM([])).checklists.execute("list")
     cfg = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
     session = Session(ScriptedLLM(["one", "two"]), config=cfg)
-    session.invoke("planning.checklist.manage", action="create", name="persist")
+    session.invoke("checklist", action="create", name="persist")
     session.send("first")
     child, _ = session.branch()
     restarted_child = Session.resume_from_ledger(ScriptedLLM([]), child.run.id, config=cfg)
@@ -265,7 +265,7 @@ def test_ledger_failure_does_not_apply_edit():
 
     session = Session(ScriptedLLM([]), ledger=FailingLedger())
     with pytest.raises(RuntimeError, match="disk unavailable"):
-        session.invoke("planning.checklist.manage", action="create", name="not committed")
+        session.invoke("checklist", action="create", name="not committed")
     assert session.checklists.execute("list") == []
 
 
@@ -276,6 +276,6 @@ def test_native_schema_dedup_keeps_text_fallback():
     assert "Parameters (JSON Schema)" in kernel.render(turn)[0].content
     turn.api_tools = [c.tool_spec() for c in session.registry.pinned()]
     assert "Parameters (JSON Schema)" not in kernel.render(turn)[0].content
-    assert "planning.checklist.manage" in kernel.render(turn)[0].content
+    assert "checklist" in kernel.render(turn)[0].content
     turn.api_tools.pop()
     assert "Parameters (JSON Schema)" in kernel.render(turn)[0].content

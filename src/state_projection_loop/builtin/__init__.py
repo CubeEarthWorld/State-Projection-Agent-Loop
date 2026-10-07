@@ -7,6 +7,7 @@ written per language.
 from __future__ import annotations
 
 from typing import Callable, Iterable
+from pathlib import Path
 
 from ..registry import Registry
 from .ask import ASK_HANDLERS
@@ -17,7 +18,7 @@ from .meta import META_HANDLERS, SPAWN_HANDLERS
 from .state import STATE_HANDLERS
 
 # Packs a bare ``Session(llm)`` installs.
-DEFAULT_BUILTINS: tuple[str, ...] = ("meta", "checklist")
+DEFAULT_BUILTINS: tuple[str, ...] = ("meta", "checklist", "toolkits")
 
 _PACKS: dict[str, dict[str, Callable]] = {
     "meta": META_HANDLERS,
@@ -26,13 +27,14 @@ _PACKS: dict[str, dict[str, Callable]] = {
     "spawn": SPAWN_HANDLERS,
     "ask": ASK_HANDLERS,
     "memory": MEMORY_HANDLERS,
+    "toolkits": {},  # handlers are bound to the workspace root at installation
 }
 
 # Every pack name `install_builtins` accepts.
 BUILTIN_PACKS: tuple[str, ...] = tuple(_PACKS)
 
 
-def install_builtins(registry: Registry, packs: Iterable[str]) -> None:
+def install_builtins(registry: Registry, packs: Iterable[str], *, root: str | Path = ".") -> None:
     """Install the named packs into ``registry``.
 
     Idempotent: a name the registry already resolves is left alone (a
@@ -41,6 +43,10 @@ def install_builtins(registry: Registry, packs: Iterable[str]) -> None:
     ``packs`` the per-pack one.
     """
     for pack in packs:
+        if pack == "toolkits":
+            from .toolkits import install_toolkits
+            install_toolkits(registry, root)
+            continue
         handlers = _PACKS.get(pack)
         if handlers is None:
             raise ValueError(f"Unknown builtin pack {pack!r}; expected one of {sorted(_PACKS)}")

@@ -29,7 +29,7 @@ def build_coding_registry(root: Path) -> Registry:
             outputs.append(f"{test.name}: {status}\n{detail}")
         return "\n\n".join(outputs) or "no test files found"
 
-    install_toolkits(registry, root, shell=False)  # filesystem.file.* confined to the workspace
+    install_toolkits(registry, root, shell=False)  # File tools are confined to the workspace.
 
     registry.register({
         "name": "dev.tests.run",
@@ -49,8 +49,8 @@ def build_coding_registry(root: Path) -> Registry:
 
 CODING_KERNEL = """あなたはコーディングエージェントです。手順:
 1. dev.tests.run でまず現状を確認する。
-2. 失敗があれば filesystem.file.read で該当コードを読み、原因を特定する。
-3. filesystem.file.write で修正し、必ず dev.tests.run で修正を検証する。
+2. 失敗があれば read で該当コードを読み、原因を特定する。
+3. write で修正し、必ず dev.tests.run で修正を検証する。
 4. テストが全て通ったら、行った修正を簡潔に報告してから finish(result) を呼ぶ。"""
 
 BUGGY_CALCULATOR = '''\

@@ -24,8 +24,8 @@ class TestBugFixWorkflow:
     def test_full_red_green_cycle(self, workspace):
         llm = ScriptedLLM([
             ScriptedLLM.call("dev.tests.run"),
-            ScriptedLLM.call("filesystem.file.read", path="calculator.py"),
-            ScriptedLLM.call("filesystem.file.write", path="calculator.py", content=FIXED_CALCULATOR),
+            ScriptedLLM.call("read", path="calculator.py"),
+            ScriptedLLM.call("write", path="calculator.py", content=FIXED_CALCULATOR),
             ScriptedLLM.call("dev.tests.run"),
             ScriptedLLM.finish(result="divide() にゼロ除算ガードを追加し、全テストが通ることを確認しました。"),
         ])
@@ -44,7 +44,7 @@ class TestBugFixWorkflow:
         secret = workspace.parent / "secret.txt"
         secret.write_text("do not read", encoding="utf-8")
         llm = ScriptedLLM([
-            ScriptedLLM.call("filesystem.file.read", path="../secret.txt"),
+            ScriptedLLM.call("read", path="../secret.txt"),
             "読めませんでした。",
         ])
         session = make_session(llm, workspace)
@@ -60,10 +60,10 @@ class TestBugFixWorkflow:
         def peek_step(messages, tools):
             obs = next(m for m in reversed(messages) if m.role == "tool")
             artifact_id = obs.content.split("[", 1)[1].split(" ", 1)[0]
-            return ScriptedLLM.call("meta.artifact.peek", artifact=ref(artifact_id), range="399-400")
+            return ScriptedLLM.call("peek", artifact=ref(artifact_id), range="399-400")
 
         llm = ScriptedLLM([
-            ScriptedLLM.call("filesystem.file.read", path="big.txt"),
+            ScriptedLLM.call("read", path="big.txt"),
             peek_step,
             "確認しました。",
         ])

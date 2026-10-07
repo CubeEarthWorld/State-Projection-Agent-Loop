@@ -1,6 +1,6 @@
-"""Handlers of the ``meta`` pack (``meta.tool.find``, ``meta.artifact.peek``,
-``meta.history.search``) and the opt-in ``spawn`` pack (``meta.agent.spawn``,
-``meta.agent.join``).
+"""Handlers of the ``meta`` pack (``tool_search``, ``peek``,
+``history_search``) and the opt-in ``spawn`` pack (``spawn``,
+``join``).
 
 There is no ``done`` capability: completion is ``Decision.finish``, a
 property of the model's response handled directly by the session loop, not
@@ -18,19 +18,7 @@ from typing import Any, Optional
 from ..artifacts import is_ref
 from ..context import ToolContext
 from ..serialization import dumps
-
-
-def _find_tools(ctx: ToolContext, query: str, category: Optional[str] = None, k: int = 8) -> Any:
-    results = ctx.search.search(query, category=category, k=k, layer=3)
-    if not results:
-        toc = ctx.registry.toc_text()
-        return f"No tools matched \"{query}\". Categories: {toc or '(none)'}"
-    if ctx.session is not None:
-        ctx.session.activate([s.tool.name for s in results])
-    return [
-        {"name": s.tool.name, "category": s.tool.category, "card": s.tool.card_text(), "score": round(s.score, 3)}
-        for s in results
-    ]
+from .discovery import find_tools as _find_tools
 
 
 def _peek(ctx: ToolContext, artifact: dict, query: Optional[str] = None, range: Optional[str] = None) -> str:  # noqa: A002
@@ -53,9 +41,9 @@ def _search_history(ctx: ToolContext, query: str, k: int = 10) -> Any:
     return hits or [f"No ledger events matched \"{query}\"."]
 
 
-SPAWN_NAME = "meta.agent.spawn"
-JOIN_NAME = "meta.agent.join"
-ASK_NAME = "meta.user.ask"
+SPAWN_NAME = "spawn"
+JOIN_NAME = "join"
+ASK_NAME = "ask"
 # Wide enough for any real fan-out; narrow enough that a confused model
 # cannot open fifty model streams in one call.
 MAX_FANOUT = 8
@@ -105,6 +93,7 @@ def child_session(parent: Any, spec: dict[str, Any], n: int, restored: Any = Non
         config=cfg,
         registry=registry,
         builtins=(),  # whatever the scope carried, nothing re-installed behind it
+        workspace_root=parent.workspace_root,
         embedder=parent.search.embedder,
         seed=None if restored else {"checklists": {"version": 1, "checklists": documents}},
         policy=parent.policy,
@@ -240,7 +229,7 @@ async def _spawn(ctx: ToolContext, tasks: list[dict[str, Any]], background: bool
 
     if background:
         # The loop head tends them from here: it nudges the parent when one
-        # finishes, and meta.agent.join collects the results.
+        # finishes, and join collects the results.
         return [{"run_id": c.run.id, "state": c.run.state} for c in children]
     return await _join_children(parent, list(zip(children, tasks)), ctx.resolution, cancel=False)
 
@@ -256,9 +245,9 @@ async def _join(ctx: ToolContext, run_ids: Optional[list[str]] = None, cancel: b
 
 
 META_HANDLERS = {
-    "meta.tool.find": _find_tools,
-    "meta.artifact.peek": _peek,
-    "meta.history.search": _search_history,
+    "tool_search": _find_tools,
+    "peek": _peek,
+    "history_search": _search_history,
 }
 
-SPAWN_HANDLERS = {"meta.agent.spawn": _spawn, "meta.agent.join": _join}
+SPAWN_HANDLERS = {"spawn": _spawn, "join": _join}

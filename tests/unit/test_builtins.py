@@ -21,18 +21,18 @@ class TestInstall:
         membership with it made a switched-off name look unregistered and
         the pack replaced it — losing the developer's definition."""
         reg = Registry()
-        reg.register(capability_dict("meta.tool.find", category="mine", description="Mine."))
-        reg.disable("meta.tool.find")
+        reg.register(capability_dict("tool_search", category="mine", description="Mine."))
+        reg.disable("tool_search")
         install_builtins(reg, ["meta"])
-        reg.enable("meta.tool.find")
-        assert reg.get("meta.tool.find").category == "mine"
-        assert reg.get("meta.tool.find").spec.description == "Mine."
+        reg.enable("tool_search")
+        assert reg.get("tool_search").category == "mine"
+        assert reg.get("tool_search").spec.description == "Mine."
 
     def test_an_enabled_developer_definition_still_wins(self):
         reg = Registry()
-        reg.register(capability_dict("meta.tool.find", category="mine"))
+        reg.register(capability_dict("tool_search", category="mine"))
         install_builtins(reg, ["meta"])
-        assert reg.get("meta.tool.find").category == "mine"
+        assert reg.get("tool_search").category == "mine"
 
     def test_a_definition_without_a_handler_fails_at_install(self):
         """Adding a tool to a shared <pack>.json with no handler must not
@@ -80,7 +80,7 @@ class TestSpawn:
         session = Session(ScriptedLLM(["done"]), policy=allow_all(), builtins=["meta", "spawn"])
         session.checklists.execute("create", name="a", items=[{"text": "one"}])
         cid = session.checklists.to_dict()["checklists"][0]["id"]
-        handler = session.registry.get("meta.agent.spawn").execution.handler
+        handler = session.registry.get("spawn").execution.handler
         with pytest.raises(ValueError, match="Duplicate checklist_ids"):
             import asyncio
 
@@ -91,7 +91,7 @@ class TestSpawn:
         """The child used to get a throwaway InMemoryLedger, so sub-agent
         work was absent from the one thing the package calls the truth."""
         session = _parent(ScriptedLLM([ScriptedLLM.finish(result="from the child")]))
-        entry, = session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])
+        entry, = session.invoke("spawn", tasks=[{"task": "work"}])
 
         assert entry["state"] == "COMPLETED" and entry["result"] == "from the child"
         spawned = [e for e in session.ledger.iter_run(session.run.id) if e.type == "run_spawned"]
@@ -123,7 +123,7 @@ class TestSpawn:
             session = _parent(None)
             children = iter([Rendezvous(0), Rendezvous(1)])
             session.spawn_llm_factory = lambda model: next(children)
-            return await session.ainvoke("meta.agent.spawn", tasks=[{"task": "a"}, {"task": "b"}])
+            return await session.ainvoke("spawn", tasks=[{"task": "a"}, {"task": "b"}])
 
         entries = asyncio.run(go())
         assert [e["result"] for e in entries] == ["child 0", "child 1"]
@@ -134,7 +134,7 @@ class TestSpawn:
         parent's tool result and then dropped on the floor: unapprovable,
         unresumable, invisible."""
         session, done = _parent_with_guarded_tool()
-        pending = session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])
+        pending = session.invoke("spawn", tasks=[{"task": "work"}])
 
         assert session.run.state == "WAITING_FOR_APPROVAL"
         assert pending.reason.startswith("sub-agent run_")
@@ -150,7 +150,7 @@ class TestSpawn:
 
         config = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
         session, done = _parent_with_guarded_tool(config=config)
-        session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])
+        session.invoke("spawn", tasks=[{"task": "work"}])
         run_id = session.run.id
         del session
 
@@ -172,15 +172,15 @@ class TestSpawn:
             steps += 1
             if steps == 1:
                 session.interrupt()
-                return ScriptedLLM.call("meta.tool.find", query="anything")
+                return ScriptedLLM.call("tool_search", query="anything")
             return ScriptedLLM.finish(result="finished later")
 
         session.spawn_llm_factory = lambda model: ScriptedLLM([step] * 4)
-        entry, = session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])
+        entry, = session.invoke("spawn", tasks=[{"task": "work"}])
         assert entry["state"] == "RUNNING" and entry["result"] is None
         assert [c.run.id for c in session.children] == [entry["run_id"]]
 
-        assert session.invoke("meta.agent.join")[0]["result"] == "finished later"
+        assert session.invoke("join")[0]["result"] == "finished later"
         assert session.children == []
 
     def test_budget_is_split_between_children_and_charged_back(self):
@@ -196,7 +196,7 @@ class TestSpawn:
         scripts = iter([ScriptedLLM([ScriptedLLM.finish(result="a")]),
                         ScriptedLLM([ScriptedLLM.finish(result="b")])])
         session.spawn_llm_factory = lambda model: next(scripts)
-        session.invoke("meta.agent.spawn", tasks=[{"task": "a"}, {"task": "b"}])
+        session.invoke("spawn", tasks=[{"task": "a"}, {"task": "b"}])
         assert session.budget.prompt_tokens > 200  # the children's usage came home
 
     def test_a_child_cannot_ask_the_user(self):
@@ -208,8 +208,8 @@ class TestSpawn:
             return ScriptedLLM.finish(result="done")
 
         session.spawn_llm_factory = lambda model: ScriptedLLM([step])
-        session.invoke("meta.agent.spawn", tasks=[{"task": "work", "tool_scope": ["*"]}])
-        assert "meta__user__ask" not in tools[0]
+        session.invoke("spawn", tasks=[{"task": "work", "tool_scope": ["*"]}])
+        assert "ask" not in tools[0]
 
     def test_a_child_cannot_spawn_or_join_by_default(self):
         session = _parent(None)
@@ -220,9 +220,9 @@ class TestSpawn:
             return ScriptedLLM.finish(result="done")
 
         session.spawn_llm_factory = lambda model: ScriptedLLM([step])
-        session.invoke("meta.agent.spawn", tasks=[{"task": "work"}])
-        assert "meta__agent__spawn" not in tools[0]
-        assert "meta__agent__join" not in tools[0]
+        session.invoke("spawn", tasks=[{"task": "work"}])
+        assert "spawn" not in tools[0]
+        assert "join" not in tools[0]
 
 
 class TestBackgroundSpawn:
@@ -234,7 +234,7 @@ class TestBackgroundSpawn:
         model call. A blocking spawn can never get there, so this deadlocks
         unless the parent really is still running."""
         session = _background_parent([
-            ScriptedLLM.call("meta.agent.spawn", tasks=[{"task": "work"}], background=True),
+            ScriptedLLM.call("spawn", tasks=[{"task": "work"}], background=True),
             _reach_step_two,
             ScriptedLLM.call("demo.wait"),
             ScriptedLLM.finish(result="parent done"),
@@ -248,7 +248,7 @@ class TestBackgroundSpawn:
         """A notice wedged between an assistant's tool calls and their
         results renders a message sequence no provider accepts."""
         session = _background_parent([
-            ScriptedLLM.call("meta.agent.spawn", tasks=[{"task": "work"}], background=True),
+            ScriptedLLM.call("spawn", tasks=[{"task": "work"}], background=True),
             _reach_step_two,
             ScriptedLLM.call("demo.wait"),
             ScriptedLLM.finish(result="ok"),
@@ -267,9 +267,9 @@ class TestBackgroundSpawn:
 
     def test_finish_is_refused_while_a_child_runs_and_join_collects_it(self):
         session = _background_parent([
-            ScriptedLLM.call("meta.agent.spawn", tasks=[{"task": "work"}], background=True),
+            ScriptedLLM.call("spawn", tasks=[{"task": "work"}], background=True),
             ScriptedLLM.finish(result="too early"),
-            ScriptedLLM.call("meta.agent.join"),
+            ScriptedLLM.call("join"),
             ScriptedLLM.finish(result="collected"),
         ], child_steps=4)
         assert session.run_job("go") == "collected"
@@ -280,7 +280,7 @@ class TestBackgroundSpawn:
 
     def test_a_terminal_parent_never_leaves_a_running_child(self):
         session = _background_parent([
-            ScriptedLLM.call("meta.agent.spawn", tasks=[{"task": "work"}], background=True),
+            ScriptedLLM.call("spawn", tasks=[{"task": "work"}], background=True),
             "parked here",
         ], child_steps=20, mode="chat")
         session.send("go")
@@ -294,7 +294,7 @@ class TestBackgroundSpawn:
     def test_a_background_child_survives_a_restart(self, tmp_path):
         config = Config.from_dict({"persistence": {"ledger_directory": str(tmp_path)}})
         session = _background_parent(["unused"], child_steps=20, mode="chat", config=config)
-        session.invoke("meta.agent.spawn", tasks=[{"task": "work"}], background=True)
+        session.invoke("spawn", tasks=[{"task": "work"}], background=True)
         run_id, child_id = session.run.id, session.children[0].run.id
         del session
 
@@ -360,7 +360,7 @@ def _background_parent(steps, *, child_steps=1, mode="job", config=None, resume=
     def child_llm(model=None):
         if child_steps == 1:
             return Waiting()
-        return ScriptedLLM([*([ScriptedLLM.call("meta.tool.find", query="x")] * (child_steps - 1)),
+        return ScriptedLLM([*([ScriptedLLM.call("tool_search", query="x")] * (child_steps - 1)),
                             ScriptedLLM.finish(result="child done")])
 
     args = dict(registry=registry, policy=allow_all(), builtins=["meta", "spawn"],

@@ -6,13 +6,12 @@ what it touches (``effects``) and whether it is safe to retry after a
 timeout (``retry_safety``). The LLM only ever sees the projected card/spec
 text; it never gets to assert any of these properties itself.
 
-Naming: capabilities live in a dotted namespace 3-5 levels deep, mirroring a
-stable service/resource/operation shape rather than an org chart, e.g.::
+Naming: use a short lowercase name or an optional dotted namespace, e.g.::
 
-    filesystem.file.read@1
+    read@1
     github.pull_request.create@1
 
-``name`` is the dotted path; ``version`` is a plain integer. The qualified id
+``name`` is the tool name; ``version`` is a plain integer. The qualified id
 (``name@version``) is what the registry indexes on, so two versions of the
 same capability can coexist during a rollout.
 """
@@ -174,7 +173,7 @@ def _first_sentence(text: str) -> str:
     return text
 
 
-_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,4}$")
+_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){0,4}$")
 
 # Many native-function-calling providers (OpenAI included) reject "." in a
 # function name (they require ``^[a-zA-Z0-9_-]+$``). The dotted name is the
@@ -187,11 +186,11 @@ API_NAME_SEPARATOR = "__"
 
 
 def validate_capability_name(name: str) -> None:
-    """Enforce the 2-5 level dotted namespace convention (service.resource.op)."""
+    """Accept short lowercase tool names and optional dotted namespaces."""
     if not _NAME_RE.match(name):
         raise ValueError(
-            f"Capability name {name!r} must be 2-5 lowercase dotted segments, "
-            "e.g. 'filesystem.file.read' or 'github.pull_request.create'"
+            f"Capability name {name!r} must be 1-5 lowercase segments, "
+            "e.g. 'read', 'tool_search' or 'github.pull_request.create'"
         )
     if API_NAME_SEPARATOR in name:
         raise ValueError(

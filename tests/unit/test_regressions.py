@@ -237,7 +237,7 @@ class TestSpecaReviewFindings:
         from state_projection_loop.builtin import install_builtins
         registry = Registry()
         install_builtins(registry, ["checklist"])
-        parameters = registry.get("planning.checklist.manage").spec.parameters
+        parameters = registry.get("checklist").spec.parameters
         started = time.time()
         error = validate_args(parameters, {
             "action": "create", "name": "x",

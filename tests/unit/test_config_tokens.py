@@ -14,11 +14,9 @@ class TestConfigDefaults:
         assert cfg.projection.window_tokens == 30000
         assert cfg.projection.sections == ["kernel", "toc", "history", "working_state", "checklists", "candidates"]
         assert cfg.discovery.vector == "auto"
+        assert cfg.discovery.auto_candidates is False
         assert cfg.discovery.k == 8
         assert cfg.discovery.toc is True
-        assert cfg.discovery.query_sources == [
-            "last_user_message", "last_model_thought", "goal_if_exists",
-        ]
         assert cfg.compression.full_window == 6
         assert cfg.compression.compressed_window == 24
         assert cfg.compression.summary_window == 60

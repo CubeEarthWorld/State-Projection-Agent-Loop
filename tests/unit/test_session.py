@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from state_projection_loop import Config, Registry, ScriptedLLM, Session
+from state_projection_loop import Config, HashingEmbedding, Registry, ScriptedLLM, Session
 from state_projection_loop.messages import Decision, ToolCall, Usage
 from state_projection_loop.policy import PolicyEngine
 from state_projection_loop.session import ConcurrencyError
@@ -55,9 +55,9 @@ class TestChatMode:
 
     def test_meta_capabilities_always_present(self):
         session = Session(ScriptedLLM(["ok"]))
-        assert "meta.tool.find" in session.registry
-        assert "meta.artifact.peek" in session.registry
-        assert "meta.history.search" in session.registry
+        assert "tool_search" in session.registry
+        assert "peek" in session.registry
+        assert "history_search" in session.registry
 
     def test_kernel_carries_pinned_meta_specs(self):
         llm = ScriptedLLM([lambda messages, tools: "ok"])
@@ -66,39 +66,58 @@ class TestChatMode:
         kernel = llm.requests[0]["messages"][0]
         assert kernel.role == "system"
         assert "You are a helper." in kernel.content
-        assert "### meta.tool.find@1" in kernel.content and "### meta.artifact.peek@1" in kernel.content
+        assert "### tool_search@1" in kernel.content and "### peek@1" in kernel.content
 
-    def test_candidates_injected_from_user_message(self):
+    def test_candidate_summaries_do_not_load_definitions(self):
         def check(messages, tools):
             joined = "\n".join(str(m.content) for m in messages)
-            # Native schemas are sent, so the candidate card dedupes down to
-            # just the signature instead of repeating the full card.
-            assert "[Tool candidates" in joined and "demo.echo(" in joined
+            assert "[Tool candidates" in joined and "demo.echo" in joined
             tool_names = [t["name"] for t in tools]
             # native schema names are provider-safe encoded (dots -> "__")
-            assert "demo__echo" in tool_names and "meta__tool__find" in tool_names
+            assert "demo__echo" not in tool_names and "tool_search" in tool_names
             return "saw candidates"
 
-        session = Session(ScriptedLLM([check]), registry=echo_registry())
+        cfg = Config.from_dict({"discovery": {"auto_candidates": True}})
+        session = Session(ScriptedLLM([check]), registry=echo_registry(), config=cfg,
+                          embedder=HashingEmbedding())
         assert session.send("echo repeat this") == "saw candidates"
 
-    def test_find_tools_activates_results(self):
+    def test_auto_candidates_disabled_by_default_without_embedding_calls(self):
+        class Embedder:
+            def embed_documents(self, texts):
+                raise AssertionError("Auto candidates must not build vectors by default")
+
+            def embed_query(self, text):
+                raise AssertionError("Auto candidates must not embed queries by default")
+
+        llm = ScriptedLLM(["ok"])
+        session = Session(llm, registry=echo_registry(), embedder=Embedder())
+        assert session.send("echo repeat this") == "ok"
+        assert "demo__echo" not in [t["name"] for t in llm.requests[0]["tools"]]
+
+    def test_describe_activates_only_selected_result(self):
         reg = echo_registry()
 
         def step2(messages, tools):
             names = [t["name"] for t in tools]
-            assert "demo__echo" in names  # activated by find even without candidates
+            assert "demo__echo" not in names
+            return ScriptedLLM.call("tool_search", action="describe", name="demo.echo")
+
+        def step3(messages, tools):
+            names = [t["name"] for t in tools]
+            assert "demo__echo" in names
             return ScriptedLLM.call("demo.echo", text="via find_tools")
 
         llm = ScriptedLLM([
-            ScriptedLLM.call("meta.tool.find", query="オウム返し echo"),
+            ScriptedLLM.call("tool_search", action="search", query="オウム返し echo"),
             step2,
+            step3,
             "done",
         ])
-        cfg = Config.from_dict({"discovery": {"query_sources": []}})  # kill layer 2
+        cfg = Config.from_dict({"discovery": {"auto_candidates": False}})  # kill layer 2
         session = Session(llm, registry=reg, config=cfg, policy=allow_all())
         assert session.send("noise") == "done"
-        find_obs = next(m for m in session.conversation if m.role == "tool" and m.name == "meta.tool.find")
+        find_obs = next(m for m in session.conversation if m.role == "tool" and m.name == "tool_search")
         assert "demo.echo" in str(find_obs.content)
 
 
@@ -435,11 +454,11 @@ class TestDisabledCapabilitiesAreInvisible:
         return prompt, [t["name"] for t in request["tools"]]
 
     def test_bundled_checklist_tool_can_be_disabled(self):
-        session = self._session("planning.checklist.manage")
+        session = self._session("checklist")
         session.send("hello")
         prompt, tools = self._sent(session)
-        assert "planning__checklist__manage" not in tools
-        assert "planning.checklist.manage" not in prompt  # no pinned spec, no runtime note
+        assert "checklist" not in tools
+        assert "checklist" not in prompt  # no pinned spec, no runtime note
         assert "planning" not in prompt                    # and no tool-index entry
 
     def test_disabled_tool_is_not_discoverable(self):
@@ -457,13 +476,13 @@ class TestDisabledCapabilitiesAreInvisible:
         session = self._session(steps=["one", "two"])
         session.send("hello")
         prompt, tools = self._sent(session)
-        assert "planning__checklist__manage" in tools and "planning.checklist.manage" in prompt
+        assert "checklist" in tools and "checklist" in prompt
 
-        session.registry.disable("planning.checklist.manage")
+        session.registry.disable("checklist")
         session.send("hello again")
         prompt, tools = self._sent(session)
-        assert "planning__checklist__manage" not in tools
-        assert "planning.checklist.manage" not in prompt
+        assert "checklist" not in tools
+        assert "checklist" not in prompt
 
 
 class TestResumedRunArtifacts:
@@ -471,7 +490,7 @@ class TestResumedRunArtifacts:
 
     The runtime must write into that one, not into a copy captured when it
     was constructed, or every artifact produced after the resume becomes
-    unreachable to meta.artifact.peek.
+    unreachable to peek.
     """
 
     def test_artifacts_produced_after_resume_are_readable(self, tmp_path):
@@ -505,7 +524,7 @@ class TestResumedRunArtifacts:
         ids = re.findall(r"art_[0-9A-Z]+", observations)
         assert ids, f"expected the oversized result to become an artifact, got {observations!r}"
         assert is_ref({"$artifact": ids[0]})
-        # The store the session hands to meta.artifact.peek must be the one
+        # The store the session hands to peek must be the one
         # the runtime just wrote to.
         assert "xxx" in resumed.store.peek(ids[0])
 

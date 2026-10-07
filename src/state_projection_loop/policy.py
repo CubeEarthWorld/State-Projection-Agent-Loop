@@ -47,9 +47,11 @@ SCOPES: dict[str, tuple[Optional[str], str]] = {
 # so the auto presets allow them; they are declared as writes so the runtime
 # keeps them in the model's stated order.
 _LOCAL_STATE = (
-    dict(decision="allow", capability_pattern="planning.checklist.manage", effect_kind="write",
+    dict(decision="allow", capability_pattern="tool_search", effect_kind="write",
+         resource_pattern="working_state:discovery", reason="preset:local_discovery"),
+    dict(decision="allow", capability_pattern="checklist", effect_kind="write",
          resource_pattern="working_state:checklists", reason="preset:local_checklists"),
-    dict(decision="allow", capability_pattern="meta.user.ask", effect_kind="external",
+    dict(decision="allow", capability_pattern="ask", effect_kind="external",
          resource_pattern="user:*", reason="preset:ask_user"),
     # No effect_kind: reads of the working state are covered too (a read is
     # strictly less dangerous than the writes right beside it), exactly like

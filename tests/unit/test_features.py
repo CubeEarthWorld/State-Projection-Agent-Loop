@@ -26,7 +26,7 @@ def notices(session: Session) -> list[str]:
 class TestAsk:
     def test_pauses_survives_snapshot_and_resumes_with_the_answer(self):
         session = Session(
-            ScriptedLLM([ScriptedLLM.call("meta.user.ask", question="Which colour?"), "you said blue"]),
+            ScriptedLLM([ScriptedLLM.call("ask", question="Which colour?"), "you said blue"]),
             builtins=["meta", "ask"], policy=allow_all(),
         )
         paused = session.send("pick a colour for me")
@@ -40,7 +40,7 @@ class TestAsk:
         session.answer("blue")
         assert session.run.state == "RUNNING"
         assert session.resume() == "you said blue"
-        assert observations(session) == [("meta.user.ask", "blue")]
+        assert observations(session) == [("ask", "blue")]
         types = {e.type for e in session.ledger.iter_run(session.run.id)}
         assert {"question_asked", "question_answered"} <= types
         assert [c.outcome for c in session.run.commands.values()] == ["ok"]
@@ -53,7 +53,7 @@ class TestAsk:
         policy = PolicyEngine(default_decision="allow")
         policy.add_rule("admin", Rule(decision="deny", capability_pattern="mail.*"))
         session = Session(
-            ScriptedLLM([ScriptedLLM.calls(("meta.user.ask", {"question": "Send it?"}), ("mail.message.send", {})),
+            ScriptedLLM([ScriptedLLM.calls(("ask", {"question": "Send it?"}), ("mail.message.send", {})),
                          "ok"]),
             registry=registry, builtins=["ask"], policy=policy,
         )
@@ -66,7 +66,7 @@ class TestAsk:
 
     def test_default_policy_lets_the_model_ask_without_approval(self):
         session = Session(ScriptedLLM([]), builtins=["ask"])
-        ask = session.registry.get("meta.user.ask")
+        ask = session.registry.get("ask")
         assert session.policy.evaluate(ask, {"question": "q"}).decision == "allow"
 
 
@@ -195,15 +195,15 @@ class TestToolkits:
         registry = Registry()
         install_toolkits(registry, tmp_path)
         session = Session(ScriptedLLM([]), registry=registry, policy=allow_all(), builtins=())
-        assert "wrote 5" in session.invoke("filesystem.file.write", path="a/b.txt", content="hello")
-        assert session.invoke("filesystem.file.read", path="a/b.txt") == "hello"
-        assert session.invoke("filesystem.file.list") == ["a/b.txt"]
+        assert "wrote 5" in session.invoke("write", path="a/b.txt", content="hello")
+        assert session.invoke("read", path="a/b.txt") == "hello"
+        assert session.invoke("find") == ["a/b.txt"]
         with pytest.raises(RuntimeError):
-            session.invoke("filesystem.file.read", path="../outside.txt")
-        out = session.invoke("shell.command.run", command="echo hi")
+            session.invoke("read", path="../outside.txt")
+        out = session.invoke("bash", command="echo hi")
         assert out.startswith("exit=0") and "hi" in out
 
     def test_shell_can_be_left_out(self, tmp_path):
         registry = Registry()
         install_toolkits(registry, tmp_path, shell=False)
-        assert "shell.command.run" not in registry and "filesystem.file.read" in registry
+        assert "bash" not in registry and "read" in registry

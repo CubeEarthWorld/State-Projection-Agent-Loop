@@ -38,7 +38,7 @@ from .llm import FINISH_SPEC, LLMAdapter, extract_finish
 from .memory import JsonlMemoryStore, MemoryStore
 from .messages import ASSISTANT, Decision, Message, SYSTEM, ToolCall, USER
 from .policy import PolicyEngine
-from .context import TurnContext
+from .context import ToolContext, TurnContext
 from .projection import Projection, Section, build_default_sections
 from .registry import Registry
 from .run import TERMINAL_STATES, ApprovalRequest, PendingQuestion, Run, RunStateError
@@ -94,6 +94,7 @@ class Session:
         spawn_llm_factory: Optional[Callable[[Optional[str]], LLMAdapter]] = None,
         ledger: Optional[EventLedger] = None,
         builtins: Iterable[str] = DEFAULT_BUILTINS,
+        workspace_root: str | Path = ".",
         on_event: Optional[Callable[[Event], None]] = None,
         on_delta: Optional[Callable[[str, str], None]] = None,
         hooks: Optional[Hooks] = None,
@@ -106,7 +107,8 @@ class Session:
         self.llm = llm
         self.spawn_llm_factory = spawn_llm_factory
         self.registry = registry if registry is not None else Registry()
-        install_builtins(self.registry, builtins)
+        self.workspace_root = Path(workspace_root).resolve()
+        install_builtins(self.registry, builtins, root=self.workspace_root)
 
         base = ledger if ledger is not None else _make_ledger(self.config)
         self.ledger = base if on_event is None else ObservedLedger(base, on_event)
@@ -131,7 +133,8 @@ class Session:
         # What branch() hands to the new session: code, not state, so it is
         # passed on rather than rebuilt from defaults.
         self._branch_args = dict(kernel=kernel, sections=sections, builtins=builtins, on_event=on_event,
-                                 hooks=hooks, on_delta=on_delta, memory=self.memory)
+                                 hooks=hooks, on_delta=on_delta, memory=self.memory,
+                                 workspace_root=self.workspace_root)
         if sections is None:
             sections = build_default_sections(
                 self.config.projection.sections, kernel_text=kernel,
@@ -173,6 +176,7 @@ class Session:
         self._recency: "OrderedDict[str, None]" = OrderedDict()
         if _restored is not None:
             self._restore_tools(_restored.state.get("tools"))
+            self._restore_discovery(after_sequence=_restored.sequence)
         self._interrupted = False
         # This run's sub-agents, until they are collected. A blocking spawn
         # adds and removes them around its own command; a background one
@@ -319,7 +323,7 @@ class Session:
                 detail = "" if child.run.state == "COMPLETED" else f" ({_last_reason(child)})"
                 self.notice(
                     f"[runtime] sub-agent {child.run.id} finished: {child.run.state}{detail}. "
-                    f'Call meta.agent.join(run_ids=["{child.run.id}"]) for its result.',
+                    f'Call join(run_ids=["{child.run.id}"]) for its result.',
                     child_run_id=child.run.id,
                 )
                 self.children.remove(child)
@@ -365,10 +369,10 @@ class Session:
         return self.run.resolve_approval(decision, current_policy_revision=self.policy.revision)
 
     def answer(self, text: str) -> PendingQuestion:
-        """Answer the question the model asked through ``meta.user.ask``; the
+        """Answer the question the model asked through ``ask``; the
         run is ``RUNNING`` again and continues with :meth:`resume`."""
         question = self.run.answer(text)
-        self._observe(question.call_id, "meta.user.ask", text)
+        self._observe(question.call_id, "ask", text)
         self._snapshot()
         return question
 
@@ -429,8 +433,9 @@ class Session:
         moved = new_session._copy_events([
             event for event in self.ledger.iter_run(self.run.id)
             if (stop is None or event.sequence < stop)
-            and (event.type in RENDERABLE_TYPES or event.type == "checkpoint")
+            and (event.type in RENDERABLE_TYPES or event.type in ("checkpoint", "tool_discovery"))
         ])
+        new_session._restore_discovery(after_sequence=new_session.ledger.last_sequence(new_session.run.id))
         _carry_boundaries(new_session.working_state, moved, new_session._next_sequence())
         new_session.ledger.append(new_session.run.id, "branch_created", {
             "parent_run_id": self.run.id, "parent_session_id": self.session_id, "at_message": cut,
@@ -472,7 +477,7 @@ class Session:
                 cut = user_count == to_turn
                 user_count += 1
             if not cut:
-                if event.type in RENDERABLE_TYPES or event.type == "checkpoint":
+                if event.type in RENDERABLE_TYPES or event.type in ("checkpoint", "tool_discovery"):
                     kept.append(event)
                 elif (effect := self._effect_notice(event)) is not None:
                     irreversible.append(effect)
@@ -507,6 +512,7 @@ class Session:
         self._idle_turns = 0
         self._budget_grace_used = False
         self.runtime.reset()
+        self._restore_discovery(after_sequence=self.ledger.last_sequence(self.run.id))
         self._snapshot()
 
         return irreversible
@@ -667,7 +673,7 @@ class Session:
                     })
                     self.notice(
                         f"[runtime] finish(result) rejected: sub-agents {', '.join(running)} are still "
-                        "running. Call meta.agent.join to wait for them (cancel=true to stop them), "
+                        "running. Call join to wait for them (cancel=true to stop them), "
                         "then finish."
                     )
                     continue
@@ -842,16 +848,16 @@ class Session:
             self.on_delta("tool", text)
 
     def _layer2_candidates(self) -> list[ScoredTool]:
-        sources = {"last_user_message": lambda: self._last_text(USER),
-                   "last_model_thought": lambda: self._last_text(ASSISTANT),
-                   "goal_if_exists": lambda: self.working_state.goal}
-        query = "\n".join(
-            text for text in (sources[s]() for s in self.config.discovery.query_sources if s in sources) if text
-        )
+        if not self.config.discovery.auto_candidates:
+            return []
+        query = self._last_text(USER)
         if not query:
             return []
         pinned = {c.name for c in self.registry.pinned()}
-        return self.search.search(query, k=self.config.discovery.k, layer=2, exclude=pinned)
+        from .builtin.discovery import exploration
+        seen, rejected, _ = exploration(ToolContext(ledger=self.ledger, run=self.run))
+        excluded = pinned | {c.name for c in self.registry if c.qualified_name in seen | rejected}
+        return self.search.search(query, k=self.config.discovery.k, layer=2, exclude=excluded)
 
     def _last_text(self, role: str) -> str:
         for _, message in reversed(renderable(self.ledger, self.run.id)):
@@ -861,25 +867,19 @@ class Session:
 
     def _api_tools(self, ctx: TurnContext) -> list[dict]:
         """The native schemas for this step: pinned ones in registry order,
-        then every other native tool in the order it was first sent, then
+        then selected/used native tools in the order first sent, then
         ``finish`` in job mode.
 
         Most providers render the tools array ahead of the whole
         conversation, so it is the front of the cached prefix: a list that
         changes changes everything after it. Nothing here reorders it — not
         this step's candidate ranking (that is the candidates section's
-        job, at the tail), not recency. A candidate offered for the first
-        time is appended and then stays, so it is callable natively as
-        before, and a step whose candidates were all offered already sends
-        the same bytes as the step before. The list shrinks only when it
-        outgrows ``discovery.active_tools`` (one deliberate rebuild) or the
-        window forces it.
+        job, at the tail), not recency. Candidate cards do not activate
+        definitions; describe does. The list shrinks on rejection, beyond
+        ``discovery.active_tools``, or when the window forces it.
         """
         pinned = [c.name for c in self.registry.pinned()]
-        offered = [s.tool.name for s in ctx.candidates]
-        for name in offered:
-            self._activate(name)
-        self._evict(keep=set(offered))
+        self._evict()
         ctx.tool_recency = [c.api_name for c in map(self.registry.get, self._recency) if c is not None]
         schemas = [capability.tool_spec() for capability in map(self.registry.get, dict.fromkeys(pinned + self._native))
                    if capability is not None]
@@ -909,11 +909,10 @@ class Session:
         self._recency[name] = None
         self._recency.move_to_end(name)
 
-    def _evict(self, keep: set[str]) -> None:
-        """Hold the native tools other than this step's candidates to
-        ``discovery.active_tools``, dropping the least recently used or offered."""
-        over = sum(1 for name in self._native if name not in keep) - self.config.discovery.active_tools
-        for name in [n for n in self._recency if n not in keep][:max(over, 0)]:
+    def _evict(self) -> None:
+        """Cap loaded definitions, evicting the least recently used first."""
+        over = len(self._native) - self.config.discovery.active_tools
+        for name in list(self._recency)[:max(over, 0)]:
             self._native.remove(name)
             del self._recency[name]
 
@@ -922,6 +921,13 @@ class Session:
         step on. A tool not yet in the native list joins it at the end."""
         for name in names:
             self._activate(name)
+
+    def deactivate(self, names: Iterable[str]) -> None:
+        """Remove rejected non-pinned schemas from the next model input."""
+        for name in names:
+            if name in self._native:
+                self._native.remove(name)
+                self._recency.pop(name, None)
 
     @property
     def native_tools(self) -> list[str]:
@@ -937,6 +943,22 @@ class Session:
         self._native = [str(n) for n in state.get("native") or []]
         order = [str(n) for n in state.get("recency") or [] if n in self._native]
         self._recency = OrderedDict.fromkeys([n for n in self._native if n not in order] + order)
+
+    def _restore_discovery(self, *, after_sequence: int) -> None:
+        """Recover selected definitions, including events newer than the snapshot."""
+        for event in self.ledger.iter_run(self.run.id):
+            if event.type != "tool_discovery":
+                continue
+            data = event.data
+            capability = self.registry.get(data.get("name") or "")
+            if capability is None:
+                continue
+            if data["action"] == "describe" and capability.qualified_name in data.get("shown", []):
+                self.runtime.seen_specs.add(capability.name)
+                if event.sequence > after_sequence:
+                    self._activate(capability.name)
+            elif data["action"] == "reject" and event.sequence > after_sequence:
+                self.deactivate([capability.name])
 
     def _handle_text_only(self, decision) -> Any:
         if self.config.mode == "chat":

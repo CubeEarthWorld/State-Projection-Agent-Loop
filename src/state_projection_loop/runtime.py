@@ -175,7 +175,7 @@ class Runtime:
     # No artifact store of its own: it uses ctx.store, the session's current
     # one. A resumed run installs a fresh store for its new run id, and a
     # second copy captured here would silently keep writing artifacts the
-    # session (and therefore meta.artifact.peek) could no longer read.
+    # session (and therefore peek) could no longer read.
     def __init__(self, registry: Registry, config: Config, *, hooks: Optional[Hooks] = None) -> None:
         self.registry = registry
         self.config = config
@@ -448,8 +448,8 @@ class Runtime:
             # Never point at a search tool that is itself absent or disabled:
             # a capability the model cannot reach must not be advertised.
             hint = (
-                " Use meta.tool.find(query) to locate the right one."
-                if "meta.tool.find" in self.registry else ""
+                " Use tool_search(action='categories'), list a category, then describe the chosen tool."
+                if "tool_search" in self.registry else ""
             )
             return ToolResult(
                 call=call, outcome="failed", error="unknown_capability",
@@ -652,9 +652,9 @@ class Runtime:
         ref_text = store.ref_text(
             record, preview=policy.preview, preview_tokens=self.config.artifacts.preview_tokens,
         )
-        if "meta.artifact.peek" in self.registry:
+        if "peek" in self.registry:
             ref_text += (
-                f'\nUse meta.artifact.peek(artifact={{"$artifact": "{record.id}"}}, '
+                f'\nUse peek(artifact={{"$artifact": "{record.id}"}}, '
                 "query=..., range=...) to inspect further."
             )
         return ref_text, record.id

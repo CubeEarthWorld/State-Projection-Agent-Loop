@@ -11,7 +11,7 @@ tools. Only how capabilities reach the model differs:
 | arm | configuration |
 |---|---|
 | `preload` | every capability `pinned=True`, discovery off (`toc=False, k=0`). The conventional agent loop: every full spec, every turn. |
-| `spal` | nothing pinned; TOC + BM25/tag candidate cards, `meta.tool.find` as fallback. |
+| `spal` | nothing pinned; TOC + BM25/tag candidate cards, `tool_search` as fallback. |
 
 Holding the runtime fixed is the point. A hand-written baseline loop would only
 prove that two different harnesses are different.
@@ -61,7 +61,7 @@ N=1000 (+3%), against 6,596 -> 167,714 (+2,443%). The ratio is 2.2x / 11.5x /
 offline estimator predicted 2,748 and the provider billed 3,080.
 
 **Discovery costs no extra round-trips.** Turn count is identical in every
-cell. The predicted `meta.tool.find` tax did not materialise: BM25 put the
+cell. The predicted `tool_search` tax did not materialise: BM25 put the
 right tool in the native schema list on turn 1, every time, including the
 keyword-mismatched task at N=1000 with vector search off.
 

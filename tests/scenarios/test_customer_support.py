@@ -50,7 +50,7 @@ class TestManualSearchFlow:
         def peek_step(messages, tools):
             obs = next(m for m in reversed(messages) if m.role == "tool")
             artifact_id = obs.content.split("[", 1)[1].split(" ", 1)[0]
-            return ScriptedLLM.call("meta.artifact.peek", artifact=ref(artifact_id), query="E03")
+            return ScriptedLLM.call("peek", artifact=ref(artifact_id), query="E03")
 
         session = make_session(backend, [
             ScriptedLLM.call("support.manual.search", query="エラー 交換 手順 リセット"),
@@ -128,8 +128,8 @@ class TestChartCards:
         assert backend.charts[0]["chart_type"] == "pie"
 
 
-class TestCandidateDiscovery:
-    def test_support_tools_surface_as_candidates(self, backend):
+class TestCategoryDiscovery:
+    def test_support_tools_load_only_after_selection(self, backend):
         def check(messages, tools):
             names = [t["name"] for t in tools]
             # native schema names are provider-safe encoded (dots -> "__")
@@ -137,4 +137,5 @@ class TestCandidateDiscovery:
             return "説明書を確認しますね。"
 
         session = make_session(backend, [check])
+        session.invoke("tool_search", action="describe", name="support.manual.search")
         session.send("説明書のエラー対処の手順を調べてほしい")

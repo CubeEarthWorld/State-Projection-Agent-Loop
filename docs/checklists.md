@@ -1,8 +1,8 @@
 # チェックリストによる計画管理
 
 Python版とDart版は同じ仕様・JSON形式を実装しています。Sessionを作るだけで、
-`planning.checklist.manage` が常駐ツールとして登録されます。追加インストールは不要です。
-LLMプロバイダへ送る関数名は既存の命名規約により `planning__checklist__manage` になります。
+`checklist` が常駐ツールとして登録されます。追加インストールは不要です。
+LLMプロバイダへ送る関数名は既存の命名規約により `checklist` になります。
 
 ## 保存と寿命
 
@@ -96,17 +96,17 @@ from state_projection_loop import Session, ScriptedLLM
 
 session = Session(ScriptedLLM([]))  # 実運用では利用するLLMAdapterを渡す
 plan = session.invoke(
-    "planning.checklist.manage", action="create", name="機能実装",
+    "checklist", action="create", name="機能実装",
     context_mode="full", items=[{"text": "実装"}, {"text": "テスト"}],
 )
 plan = session.invoke(
-    "planning.checklist.manage", action="update_item",
+    "checklist", action="update_item",
     id=plan["id"], expected_revision=plan["revision"],
     item_id=plan["items"][0]["id"], item={"status": "in_progress"},
 )
-document = session.invoke("planning.checklist.manage", action="export", id=plan["id"])
+document = session.invoke("checklist", action="export", id=plan["id"])
 other = Session(ScriptedLLM([]))
-other.invoke("planning.checklist.manage", action="import", document=document)
+other.invoke("checklist", action="import", document=document)
 ```
 
 ## Dart
@@ -116,21 +116,21 @@ import 'package:state_projection_loop/state_projection_loop.dart';
 
 Future<void> main() async {
   final session = Session(ScriptedLLM([]));
-  var plan = await session.invoke('planning.checklist.manage', {
+  var plan = await session.invoke('checklist', {
     'action': 'create', 'name': '機能実装', 'context_mode': 'full',
     'items': [{'text': '実装'}, {'text': 'テスト'}],
   }) as Map;
-  plan = await session.invoke('planning.checklist.manage', {
+  plan = await session.invoke('checklist', {
     'action': 'update_item', 'id': plan['id'],
     'expected_revision': plan['revision'],
     'item_id': (plan['items'] as List).first['id'],
     'item': {'status': 'in_progress'},
   }) as Map;
-  final document = await session.invoke('planning.checklist.manage', {
+  final document = await session.invoke('checklist', {
     'action': 'export', 'id': plan['id'],
   });
   final other = Session(ScriptedLLM([]));
-  await other.invoke('planning.checklist.manage', {
+  await other.invoke('checklist', {
     'action': 'import', 'document': document,
   });
 }
@@ -138,7 +138,7 @@ Future<void> main() async {
 
 ## 子エージェントへの受け渡し
 
-`builtins` に `"spawn"` パックを加えて（または `install_builtins` / `installBuiltins`）有効化する `meta.agent.spawn` に
+`builtins` に `"spawn"` パックを加えて（または `install_builtins` / `installBuiltins`）有効化する `spawn` に
 各タスクに `checklist_ids: [ULID, ...]` を指定すると、その計画だけを独立コピーします。
 指定した場合、そのタスクの結果エントリに `checklists`（version 1の文書）が付きます
 （エントリ自体は常に `{run_id, state, result, error?}`）。

@@ -80,13 +80,13 @@ class TestValidation:
         runtime, turn, ctx, run, policy = make_runtime(registry)
         batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
         assert not batch.results[0].ok
-        assert "meta.tool.find" in batch.results[0].observation
+        assert "tool_search" in batch.results[0].observation
 
     def test_unknown_capability_never_advertises_an_absent_search_tool(self):
         runtime, turn, ctx, run, policy = make_runtime(echo_registry())
         batch = run_batch(runtime, [ToolCall(name="nope.nope", arguments={})], turn, ctx, run, policy)
         assert not batch.results[0].ok
-        assert "meta.tool.find" not in batch.results[0].observation
+        assert "tool_search" not in batch.results[0].observation
 
 
 class TestRequireSpec:
@@ -335,7 +335,7 @@ class TestQuestions:
 
 class TestHandlerRaisedApproval:
     """A handler may park its own command by returning an ApprovalRequest
-    (what ``meta.agent.spawn`` does with a sub-agent's approval). Unlike a
+    (what ``spawn`` does with a sub-agent's approval). Unlike a
     policy approval, which gates a call that has not run, this one is
     mid-flight: it must be re-invoked either way, so it can finish or wind
     down, and it learns the decision from ``ctx.resolution``."""

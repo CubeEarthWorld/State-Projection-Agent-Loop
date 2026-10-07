@@ -46,6 +46,7 @@ EVENT_TYPES = (
     "checkpoint",
     "rewound",
     "checklists_changed",
+    "tool_discovery",
     "question_asked",
     "question_answered",
     "state_folded",

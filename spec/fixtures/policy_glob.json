@@ -56,7 +56,7 @@
       "expected": true
     },
     {
-      "value": "planning.checklist.manage",
+      "value": "checklist",
       "pattern": "state.*",
       "expected": false
     },

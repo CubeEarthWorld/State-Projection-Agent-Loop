@@ -36,9 +36,7 @@ def capability_dict(
     overflow: str = "artifact",
 ) -> dict[str, Any]:
     """Build a capability definition dict. ``name`` should already be dotted
-    (e.g. ``"demo.echo.say"``); a bare name is namespaced under ``test.``."""
-    if "." not in name:
-        name = f"test.{name}"
+    (e.g. ``"demo.echo.say"``), or use a short name such as ``"read"``."""
     parameters: dict[str, Any] = {"type": "object", "properties": properties or {}}
     if required:
         parameters["required"] = required

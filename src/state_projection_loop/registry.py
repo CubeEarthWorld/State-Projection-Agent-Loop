@@ -69,7 +69,7 @@ class Registry:
 
     Both ``__iter__`` and ``get()`` skip disabled capabilities, and every
     other surface — the TOC, pinned specs, native tool schemas, layer-2
-    candidates, ``meta.tool.find``, and execution — derives from those two.
+    candidates, ``tool_search``, and execution — derives from those two.
     Disabling therefore removes a capability from all of them at once.
     """
 

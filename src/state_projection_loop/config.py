@@ -27,25 +27,20 @@ class ProjectionConfig:
     # Provider-side fixed overhead not visible in the message list itself
     # (e.g. a vendor's per-request wrapping tokens); 0 is a safe default.
     provider_overhead_tokens: int = 0
-    # When native tool schemas are sent to the provider, the candidates
-    # section only needs the one-line signature, not the full card
-    # description a second time (dedup).
-    dedupe_candidate_cards_against_schemas: bool = True
 
 
 @dataclass
 class DiscoveryConfig:
+    # Opt in after supplying an embedding backend; no lexical fallback.
+    auto_candidates: bool = False
     vector: str = "auto"  # "auto" | "on" | "off"
     k: int = 8
     toc: bool = True
-    # Non-pinned tools, besides this step's candidates, whose native schemas
-    # stay in the tools array (used, found or offered before). The array
+    # Non-pinned selected/used tools whose native schemas stay in the array.
+    # The array
     # keeps first-sent order; past this many, the least recently used or
     # offered one leaves it.
     active_tools: int = 48
-    query_sources: list[str] = field(
-        default_factory=lambda: ["last_user_message", "last_model_thought", "goal_if_exists"]
-    )
 
 
 @dataclass

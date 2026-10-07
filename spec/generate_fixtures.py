@@ -58,7 +58,7 @@ GLOBS = [
     ("bcd", "[^a]*"), ("^bc", "[^a]*"), ("abc", "[!a]*"), ("bbc", "[!a]*"),
     ("a\nb", "a*b"), ("a.c", "a?c"), ("x[y", "x[[]y"), ("a]b", "a[]]b"),
     ("web.search.query", "web.*"), ("web.search.query", "web.search.query"),
-    ("state.goal.set", "state.*"), ("planning.checklist.manage", "state.*"),
+    ("state.goal.set", "state.*"), ("checklist", "state.*"),
     # `?` counts one code point, not one UTF-16 unit, and a reversed range
     # matches nothing rather than raising — Dart got both wrong.
     ("🎌", "?"), ("🎌", "*"), ("a🎌b", "a?b"),
@@ -78,7 +78,7 @@ SIGNATURES = [
         },
         "required": ["query"],
     }),
-    ("meta.tool.find", {"type": "object", "properties": {}}),
+    ("tool_search", {"type": "object", "properties": {}}),
 ]
 
 # Validation messages are a self-repair prompt sent to the model, so the
@@ -199,7 +199,7 @@ def main() -> None:
         ],
         "api_name": [
             {"name": n, "expected": to_api_name(n)}
-            for n in ("meta.tool.find", "planning.checklist.manage", "a.b.c.d.e")
+            for n in ("tool_search", "checklist", "a.b.c.d.e")
         ],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

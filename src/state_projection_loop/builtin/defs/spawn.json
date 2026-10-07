@@ -1,6 +1,6 @@
 [
   {
-    "name": "meta.agent.spawn",
+    "name": "spawn",
     "category": "meta",
     "card": {
       "summary": "サブエージェントを起動しタスクを委任、結果を受け取る(複数指定で並列)",
@@ -71,7 +71,7 @@
           "background": {
             "type": "boolean",
             "default": false,
-            "description": "true なら即座に {run_id, state:\"RUNNING\"} を返して作業を続行。各サブエージェントの終了時に [runtime] 通知が届き、結果は meta.agent.join で受け取る。未終了の子がいる間 finish(result) は拒否される"
+            "description": "true なら即座に {run_id, state:\"RUNNING\"} を返して作業を続行。各サブエージェントの終了時に [runtime] 通知が届き、結果は join で受け取る。未終了の子がいる間 finish(result) は拒否される"
           }
         },
         "required": [
@@ -96,7 +96,7 @@
     ]
   },
   {
-    "name": "meta.agent.join",
+    "name": "join",
     "category": "meta",
     "card": {
       "summary": "バックグラウンドのサブエージェントを待ち、結果を回収する",
@@ -107,7 +107,7 @@
       ]
     },
     "spec": {
-      "description": "Wait for sub-agents started with meta.agent.spawn(background=true) and return one entry per run_id: {run_id, state, result, error?, checklists?}. With run_ids omitted, every sub-agent of this run that is still outstanding. cancel=true stops them instead of waiting and returns their final entries.",
+      "description": "Wait for sub-agents started with spawn(background=true) and return one entry per run_id: {run_id, state, result, error?, checklists?}. With run_ids omitted, every sub-agent of this run that is still outstanding. cancel=true stops them instead of waiting and returns their final entries.",
       "parameters": {
         "type": "object",
         "properties": {

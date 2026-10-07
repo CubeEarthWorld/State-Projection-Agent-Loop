@@ -49,7 +49,7 @@ Registry ──▶ Projection ──▶ LLM ──▶ Validate ──▶ Authori
 
 | Component | Responsibility |
 |---|---|
-| **Registry** | Versioned `Capability` ledger: dotted names (`filesystem.file.read`), JSON schema, declared effects, retry safety, categories, epochs, external `ToolProvider`s |
+| **Registry** | Versioned `Capability` ledger: names (`read` or `research.search`), JSON schema, declared effects, retry safety, categories, epochs, external `ToolProvider`s |
 | **Projection** | Ordered sections (`fixed` / `append` / `epoch` / `volatile`) rendered into the per-turn prompt; window budget includes native tool schemas and reserved output tokens |
 | **PolicyEngine** | The sole owner of execution permission — layered `absolute > admin > developer > workspace > session > llm`; a higher layer's `deny` can never be relaxed by a lower one |
 | **Runtime** | Schema validation & self-repair, in-order execution (only adjacent read-only calls run concurrently), retry-safety-gated retries, `OUTCOME_UNKNOWN` on timeout, output-size artifacts |
@@ -66,21 +66,64 @@ preloading:
 
 | Layer | What | Cost |
 |---|---|---|
-| 0 | Pinned capabilities — full spec resident in the kernel | opt-in |
+| 0 | Pinned capabilities — full spec resident, including the seven basic agent tools | fixed |
 | 1 | TOC — category names + counts, epoch-cached | ≤100 tk |
-| 2 | Auto candidates — vector+BM25+tag search, top-k cards injected each turn | ~300 tk |
-| 3 | `meta.tool.find` — the model searches the registry itself (fallback) | +1 loop |
+| 2 | Auto candidates — opt-in vector similarity search, top-k cards injected each turn | ~300 tk when enabled |
+| 3 | `tool_search` — categories -> unseen summaries -> selected definition | on demand |
 
 Every registered capability stays reachable even with vectors disabled.
 
+Automatic candidates are disabled by default. To enable them, set
+`config.discovery.auto_candidates = True` and pass your embedding backend
+as `Session(..., config=config, embedder=backend)`. The default query is the
+latest user message. Candidates rank by cosine similarity only, with no
+keyword fallback; `tool_search(action="search", query=...)` retains mixed search. Use a multilingual
+embedding model for cross-language matching. Eligible tool vectors are built
+lazily on first search and updated when their search text changes; tools with
+`no_embed=True` remain accessible through category browsing or explicit search.
+
+The default discovery path needs no embedding model:
+
+```python
+tool_search(action="categories")
+tool_search(action="list", category="research", k=8)
+tool_search(action="describe", name="research.search")
+```
+
+Lists and searches return only names, categories, summaries and tags. Only
+`describe` loads a selected definition into the native tools array. Repeating
+a list/search returns unseen tools, even after changing the query or entering
+an overlapping category. Responses include remaining category counts; when
+one category is exhausted, choose another with remaining tools. `reject`
+records an unsuitable tool and reason and unloads its schema; `reset` explicitly
+allows revisiting tools. Exploration is scoped to the latest user request,
+recorded as `tool_discovery` ledger events, and preserved on resume/branch/rewind.
+Updated tool versions are discoverable again. Retrying the same command returns
+the same page; a new command advances. Discovery writes are executed serially.
+See [docs/tool-discovery.md](docs/tool-discovery.md) for the contract and examples.
+
 The native tools array keeps its order for the whole run: pinned schemas
-first, then every other tool in the order it was first sent (a candidate
-offered for the first time, or a tool found or used, is appended and stays).
+first, then selected or used tools in the order their schemas were first sent.
+Candidate cards and unselected search results never append schemas.
 The per-step ranking lives only in the candidates section at the tail, so
 new candidates never reorder the array a provider caches ahead of the
 conversation. See [docs/compression.md](docs/compression.md#the-tools-array).
 
 ## Install
+
+The small coding CLI uses the existing OpenAI-compatible adapter and needs only
+`pip install openai`. Set `OPENROUTER_API_KEY` in your environment, then run:
+
+```bash
+python examples/agent_cli.py --cwd ./my-project --json "Implement the requested change"
+```
+
+Use `--model`, `--base-url`, `--steps`, and `--seconds` to configure a run.
+`--prompt-file` reads a UTF-8 task and `--trace` saves the event ledger.
+The CLI allows tool execution; file tools are confined to `--cwd`, while Bash
+runs on the host with that working directory.
+This migration removes the old tool names and discovery configuration fields;
+there are no compatibility aliases.
 
 ```bash
 pip install state-projection-loop                  # core: no dependencies
@@ -232,7 +275,7 @@ projected every turn and checkpointed per user turn, so a decision's reason
 recorded twenty turns ago is still there verbatim after the conversation
 itself has been compressed out of the window. The original messages are
 never lost — they stay in the Event Ledger, searchable via
-`meta.history.search` even after being folded out of the live projection.
+`history_search` even after being folded out of the live projection.
 
 ## Bundled tools: packs on, names off
 
@@ -240,10 +283,10 @@ Bundled tools come in **packs** and there is one switch for them:
 
 | Pack | Tools | Default |
 |---|---|---|
-| `meta` | `meta.tool.find`, `meta.artifact.peek`, `meta.history.search` | on |
-| `checklist` | `planning.checklist.manage` | on |
+| `meta` | `tool_search`, `peek`, `history_search` | on |
+| `checklist` | `checklist` | on |
 | `state` | `state.goal.set`, `state.fact.add`, … (9 tools) | off |
-| `spawn` | `meta.agent.spawn`, `meta.agent.join` | off |
+| `spawn` | `spawn`, `join` | off |
 
 ```python
 Session(llm)                                     # meta + checklist
@@ -253,14 +296,14 @@ install_builtins(registry, ["spawn"])            # same operation on a registry 
 ```
 
 `install_builtins` is idempotent and a name the registry already resolves is
-left alone, so your own definition of `meta.tool.find` wins over the bundled
+left alone, so your own definition of `tool_search` wins over the bundled
 one. An unknown pack name raises at construction.
 
 Per-tool control is the registry's deny-list, which works for bundled and
 developer capabilities alike:
 
 ```python
-registry = Registry(disabled=["planning.checklist.manage", "debug/*"])
+registry = Registry(disabled=["checklist", "debug/*"])
 session = Session(llm, registry=registry)
 
 session.registry.disable("my.dangerous.tool")   # mid-session, e.g. per sub-agent
@@ -274,7 +317,7 @@ and not denied; there is no third state.
 
 A disabled capability is gone from **every** surface the model can see: the
 native tool schemas, the pinned specs and runtime notes in the kernel, the
-tool index, layer-2 candidates, `meta.tool.find`, and execution (it fails as
+tool index, layer-2 candidates, `tool_search`, and execution (it fails as
 `unknown_capability`). Both `Registry.__iter__` and `Registry.get()` skip
 disabled entries and everything else derives from those two, so there is no
 surface left to leak through. The deny-list is by *name*, not by registered
@@ -285,7 +328,7 @@ object, so installing a pack again cannot bring a denied tool back.
 Any **pinned** capability may carry `discovery.kernel_note`, one sentence of
 standing guidance that appears under "[Runtime notes]" while the capability
 is reachable. The bundled tools use it (that is where "use
-`planning.checklist.manage` to plan multi-step work" comes from), and so can
+`checklist` to plan multi-step work" comes from), and so can
 yours. Only pinned capabilities contribute, so the kernel stays bounded by
 the pin set you chose, never by registry size.
 
@@ -293,15 +336,15 @@ the pin set you chose, never by registry size.
 
 | Feature | Switch | What it does |
 |---|---|---|
-| Clarifying questions | pack `ask` | `meta.user.ask(question, choices?)` pauses the run in `WAITING_FOR_USER`; `send()`/`run_job()` return a `PendingQuestion`, the host calls `session.answer(text)` then `session.resume()`. The answer is the tool's result; the pause survives a restart like an approval does. |
+| Clarifying questions | pack `ask` | `ask(question, choices?)` pauses the run in `WAITING_FOR_USER`; `send()`/`run_job()` return a `PendingQuestion`, the host calls `session.answer(text)` then `session.resume()`. The answer is the tool's result; the pause survives a restart like an approval does. |
 | Loop guard | `limits.max_repeats` (3; `0` off) | An identical call (same name and arguments) that failed identically, or returned the same result, `max_repeats` times within the last `limits.repeat_window` (8) calls is not executed again; the model gets a "loop guard" observation. Pure reads may still be polled. |
 | Structured job output | `result_schema` | In job mode `finish(result)` is validated against the JSON Schema; a failing result is bounced back like an argument error. |
 | Host-side commands | `session.notice(text)` | Text the host puts into the run's context without spending a turn or calling the model — the outcome of a slash command it ran itself, or a skill it loaded on demand (`session.notice(session.invoke("skill.foo.load"))`). It renders as a system message; what the *user* typed still goes through `send()`. Recognising `/name args` is the host's job: the runtime never sees an input channel, so it never reserves a prefix. |
 | Observers | `Session(on_event=fn)` | `fn(event)` fires after every ledger append. Read-only by contract (the veto point stays the policy engine); an observer that raises is ignored. [`examples/otel_tracing.py`](examples/otel_tracing.py) turns the stream into OpenTelemetry spans (run, model call, tool command). |
 | Compression | `compression.*` (always on) | History renders in tiers by distance from a verbatim point that moves in steps, so the prompt prefix stays byte-identical between steps (prompt caches hit); old tool results are masked to one line unless they failed, the user's words are never touched. See [docs/compression.md](docs/compression.md). |
 | Compaction | `compaction.trigger_ratio` (default `0.75`, `0` off) | When the prompt exceeds the ratio of the window, one extra model call folds the history before the verbatim point into `WorkingState` as a schema-validated, grounding-checked JSON delta (`state_folded` keeps the pre-fold state). |
-| Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `meta.tool.find` with no second index. |
-| Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `filesystem.file.list/read/write` and `shell.command.run` with declared effects; never installed unless you ask. |
+| Skills | `skill_capability(name, text, summary=...)` | Progressive disclosure for instructions: a skill is a capability `skill.<name>.load`, so it rides the TOC, candidates and `tool_search` with no second index. |
+| Toolkits | `install_toolkits(registry, root, shell=True)` | Root-confined `find/read/write` and `bash` with declared effects; never installed unless you ask. |
 
 ```python
 session = Session(llm, builtins=["meta", "checklist", "ask"], on_event=print,
@@ -336,7 +379,7 @@ that failed is not mistaken for one that succeeded.
 
 The parent's remaining `max_tokens` / `max_cost` are **split** between the
 children and their usage is charged back, so spawning cannot multiply the
-budget. Sub-agents cannot ask the user (`meta.user.ask` is off in every
+budget. Sub-agents cannot ask the user (`ask` is off in every
 child), but they *can* stop for approval: the child's request surfaces on
 the root session as an ordinary `WAITING_FOR_APPROVAL`, and
 `resolve_approval(...)` + `resume()` drives the child on — across a process
@@ -348,7 +391,7 @@ their next step boundary — still `RUNNING` and resumable, not killed.
 ```python
 # spawn(tasks=[...], background=True) → [{"run_id": "run_…", "state": "RUNNING"}]
 #   …the parent keeps working…
-# [runtime] sub-agent run_… finished: COMPLETED. Call meta.agent.join(...) for its result.
+# [runtime] sub-agent run_… finished: COMPLETED. Call join(...) for its result.
 # join(run_ids=["run_…"]) → [{"run_id": ..., "state": "COMPLETED", "result": ...}]
 ```
 
@@ -357,7 +400,7 @@ continues — its next model call runs **while** the sub-agent works. A
 finished child is announced to the parent as a `[runtime]` notice at the
 **loop head**, never mid-batch: a system message wedged between an
 assistant's tool calls and their results is a sequence no provider accepts.
-`meta.agent.join(run_ids=None, cancel=False)` collects the results, waits
+`join(run_ids=None, cancel=False)` collects the results, waits
 for stragglers, or stops them.
 
 Two failure modes that background agents classically have are structurally
@@ -409,10 +452,8 @@ Config.from_dict({
   "projection": {
       "sections": ["kernel", "toc", "history", "working_state", "checklists", "candidates"],
       "window_tokens": 30000, "reserved_output_tokens": 1024, "provider_overhead_tokens": 0,
-      "dedupe_candidate_cards_against_schemas": True,
   },
-  "discovery": {"vector": "auto", "k": 8, "toc": True, "active_tools": 48,
-                "query_sources": ["last_user_message", "last_model_thought", "goal_if_exists"]},
+  "discovery": {"auto_candidates": False, "vector": "auto", "k": 8, "toc": True, "active_tools": 48},
   "compression": {"full_window": 6, "compressed_window": 24, "summary_window": 60,
                   "compressed_max_lines": 80, "observation_max_lines": 40},
   "budget": {"max_steps": 50, "max_tokens": None, "max_cost": None, "max_seconds": None,

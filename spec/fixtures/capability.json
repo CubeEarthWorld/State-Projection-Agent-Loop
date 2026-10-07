@@ -37,22 +37,22 @@
       "expected": "demo.tool.run(query: string, k: integer = 8, mode: Literal[\"a\", \"b\"] = null, cat: string | null = null, flag: boolean = true, anything: any = null) -> any"
     },
     {
-      "name": "meta.tool.find",
+      "name": "tool_search",
       "parameters": {
         "type": "object",
         "properties": {}
       },
-      "expected": "meta.tool.find() -> any"
+      "expected": "tool_search() -> any"
     }
   ],
   "api_name": [
     {
-      "name": "meta.tool.find",
-      "expected": "meta__tool__find"
+      "name": "tool_search",
+      "expected": "tool_search"
     },
     {
-      "name": "planning.checklist.manage",
-      "expected": "planning__checklist__manage"
+      "name": "checklist",
+      "expected": "checklist"
     },
     {
       "name": "a.b.c.d.e",

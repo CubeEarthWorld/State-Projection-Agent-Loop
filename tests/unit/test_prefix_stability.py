@@ -39,25 +39,31 @@ def _stable_part(request: dict) -> tuple[str, list[str]]:
 
 class TestNativeToolsStayPut:
     def test_the_tools_array_only_ever_grows_at_the_end(self):
-        """Candidates change with every message; the native list must not
-        reorder or lose an entry because of it."""
+        """Explicit selections append schemas without reordering existing ones."""
         messages = ["weather forecast please", "schedule a calendar meeting", "rain tomorrow? weather",
                     "send an email message", "weather forecast again"]
         llm = ScriptedLLM([f"ok {i}" for i in range(len(messages))])
         session = Session(llm, registry=_registry(), policy=allow_all())
-        for text in messages:
+        selections = ["weather.forecast.get", "calendar.event.add", "weather.forecast.get",
+                      "mail.message.send", "weather.forecast.get"]
+        for text, name in zip(messages, selections):
+            session.invoke("tool_search", action="describe", name=name)
             session.send(text)
         sent = [[t["name"] for t in r["tools"]] for r in llm.requests]
         for before, after in zip(sent, sent[1:]):
             assert after[:len(before)] == before, f"{after} does not extend {before}"
         assert len(set(map(tuple, sent))) > 1, "the scenario must surface new tools along the way"
-        assert sent[4] == sent[3], "a turn whose candidates were all offered already sends the same tools"
+        assert sent[4] == sent[3], "selecting an already loaded tool leaves schemas unchanged"
 
     def test_the_cached_prefix_is_byte_identical_when_only_candidates_change(self):
         llm = ScriptedLLM(["one", "two", "three"])
         session = Session(llm, registry=_registry(), policy=allow_all())
+        from state_projection_loop import ScoredTool
+        # Inject cards directly: this check exercises projection, not embeddings.
+        session._layer2_candidates = lambda: [ScoredTool(session.registry.get("weather.forecast.get"), 1.0)]
         session.send("weather forecast and calendar schedule, email and notes")  # surfaces every tool
         session.send("weather")
+        session._layer2_candidates = lambda: [ScoredTool(session.registry.get("calendar.event.add"), 1.0)]
         session.send("calendar")
         parts = [_stable_part(r) for r in llm.requests]
         # The same tools, and each request's messages the previous ones plus the new turn.
@@ -73,7 +79,7 @@ class TestNativeToolsStayPut:
             ScriptedLLM.call("weather.forecast.get", text="b"), "rain",
             ScriptedLLM.call("mail.message.send", text="c"), "sent again",
         ])
-        config = Config.from_dict({"discovery": {"query_sources": []}})  # no candidates at all
+        config = Config.from_dict({"discovery": {"auto_candidates": False}})  # no candidates at all
         session = Session(llm, registry=_registry(), config=config, policy=allow_all())
         for text in ("one", "two", "three"):
             session.send(text)
@@ -89,15 +95,15 @@ class TestNativeToolsStayPut:
             ScriptedLLM.call("notes.note.write", text="d"),
             "done",
         ])
-        config = Config.from_dict({"discovery": {"query_sources": [], "active_tools": 2}})
+        config = Config.from_dict({"discovery": {"auto_candidates": False, "active_tools": 2}})
         session = Session(llm, registry=_registry(), config=config, policy=allow_all())
         session.send("go")
         assert session.native_tools == ["mail.message.send", "notes.note.write"]
 
     def test_a_resumed_run_sends_the_same_tools(self, tmp_path):
-        config = Config.from_dict({"discovery": {"query_sources": []},
+        config = Config.from_dict({"discovery": {"auto_candidates": False},
                                    "persistence": {"ledger_directory": str(tmp_path)}})
-        first_llm = ScriptedLLM([ScriptedLLM.call("meta.tool.find", query="calendar schedule meeting"), "found"])
+        first_llm = ScriptedLLM([ScriptedLLM.call("tool_search", action="describe", name="calendar.event.add"), "found"])
         first = Session(first_llm, registry=_registry(), config=config, policy=allow_all())
         first.send("find me a calendar tool")
         assert "calendar.event.add" in first.native_tools
@@ -114,7 +120,7 @@ class TestNativeToolsStayPut:
             ScriptedLLM.call("mail.message.send", text="a"), "sent",
             ScriptedLLM.call("weather.forecast.get", text="b"), "rain",
         ])
-        config = Config.from_dict({"discovery": {"query_sources": []}})
+        config = Config.from_dict({"discovery": {"auto_candidates": False}})
         session = Session(llm, registry=_registry(), config=config, policy=allow_all())
         session.send("one")
         session.send("two")

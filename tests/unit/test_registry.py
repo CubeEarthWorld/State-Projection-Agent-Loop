@@ -59,8 +59,8 @@ class TestRegistration:
 
     def test_invalid_name_rejected(self):
         bad = capability_dict("demo.t1")
-        bad["name"] = "singleword"
-        with pytest.raises(ValueError, match="dotted"):
+        bad["name"] = "invalid-name"
+        with pytest.raises(ValueError, match="lowercase"):
             Registry().register(bad)
 
 
@@ -322,8 +322,8 @@ class TestProviderRemoval:
 class TestWildcardScope:
     def _registry(self):
         reg = Registry()
-        reg.register(capability_dict("meta.tool.find", category="meta"))
-        reg.register(capability_dict("meta.agent.spawn", category="meta"))
+        reg.register(capability_dict("tool_search", category="meta"))
+        reg.register(capability_dict("spawn", category="meta"))
         reg.register(capability_dict("web.search.query", category="web/search"))
         reg.register(capability_dict("file.read", category="file"))
         return reg
@@ -336,7 +336,7 @@ class TestWildcardScope:
 
     def test_bare_category_wildcard_matches_that_category(self):
         reg = self._registry()
-        assert sorted(c.name for c in reg.subset(["meta/*"])) == ["meta.agent.spawn", "meta.tool.find"]
+        assert sorted(c.name for c in reg.subset(["meta/*"])) == ["spawn", "tool_search"]
 
     def test_category_wildcard_still_matches_sub_categories(self):
         reg = self._registry()

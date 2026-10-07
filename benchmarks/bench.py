@@ -6,7 +6,7 @@ same tools. The only difference is how capabilities reach the model:
   preload : every capability pinned, full spec resident every turn,
             discovery off. This is the conventional agent loop.
   spal    : nothing pinned; TOC + BM25/tag candidate cards (layer 1-2),
-            meta.tool.find as the fallback (layer 3).
+            tool_search as the fallback (layer 3).
 
 Holding the runtime fixed is deliberate: any difference is the context
 strategy, not a different harness being a different harness.
@@ -31,7 +31,7 @@ from benchmarks.adapter import PROVIDERS
 KERNEL = (
     "You are a back-office operations assistant. Use the available tools to answer; "
     "never invent data. When you have the answer, call finish(result) with it. "
-    "If no tool you can see fits, use meta.tool.find to search the registry before giving up."
+    "If no tool you can see fits, use tool_search to search the registry before giving up."
 )
 
 # --------------------------------------------------------------------------
@@ -211,7 +211,7 @@ ARMS = {
     # Conventional: every spec resident every turn, no discovery layer.
     "preload": dict(pinned=True,
                     discovery={"vector": "off", "k": 0, "toc": False, "active_tools": 0}),
-    # SPAL as designed: TOC + candidate cards + meta.tool.find.
+    # SPAL as designed: TOC + candidate cards + tool_search.
     "spal": dict(pinned=False,
                  discovery={"vector": "off", "k": 8, "toc": True, "active_tools": 48}),
 }

@@ -15,4 +15,4 @@ async def _checklist(ctx: ToolContext, action: str, **arguments):
     return result
 
 
-CHECKLIST_HANDLERS = {"planning.checklist.manage": _checklist}
+CHECKLIST_HANDLERS = {"checklist": _checklist}

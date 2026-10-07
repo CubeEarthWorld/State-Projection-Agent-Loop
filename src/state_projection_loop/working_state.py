@@ -10,7 +10,7 @@ re-summarizing a summary.
 
 The original conversation text is never lost either way — it stays in the
 Event Ledger (``user_input``/``model_response``/``command_*`` events) and is
-reachable via ``meta.history.search`` even after being folded out
+reachable via ``history_search`` even after being folded out
 of the live projection.
 """
 from __future__ import annotations

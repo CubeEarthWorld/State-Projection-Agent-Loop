@@ -26,8 +26,8 @@ one fixture here that is authored by hand rather than generated.
 ## Bundled tool definitions
 
 The definitions of the capabilities this package bundles (`meta.*`,
-`state.*`, `planning.checklist.manage`, `meta.agent.spawn`,
-`meta.agent.join`) live as JSON
+`state.*`, `checklist`, `spawn`,
+`join`) live as JSON
 package data under `src/state_projection_loop/builtin/defs/`. Handlers stay
 in code — they are the part that genuinely differs per language.
 

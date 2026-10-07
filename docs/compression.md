@@ -48,7 +48,7 @@ savings are (the finding of several 2025 agent-trajectory studies is that
 masking old observations matches LLM summarization on task success at
 roughly half the cost). What does need re-reading — an error — stays
 readable. Large results are artifacts anyway; their reference survives the
-mask and `meta.artifact.peek` can always go back.
+mask and `peek` can always go back.
 
 ## When the point moves
 
@@ -71,13 +71,11 @@ Most providers render the native tool schemas ahead of the whole
 conversation, so the tools array is the front of the cached prefix: change
 it and nothing after it hits. The session therefore sends pinned schemas in
 registry order and every other schema **in the order it was first sent**.
-Neither the candidates' per-step ranking nor recency of use reorders it —
-the ranking is what the candidates section at the tail shows. A candidate
-offered for the first time is appended and then stays, so a step whose
-candidates were all offered before sends the same tools as the step before.
-The list shrinks only when the tools other than this step's candidates
-outgrow `discovery.active_tools` (the least recently used or offered goes,
-one deliberate rebuild) or when the window forces a schema out. The list is
+Candidate cards contain summaries only and do not change this array.
+An explicit `tool_search(action="describe", name=...)` appends the selected
+schema. Recency of use does not reorder the array. Non-pinned schemas are
+removed on rejection, when they outgrow `discovery.active_tools` (least
+recently used first), or when the window forces a schema out. The list is
 part of the snapshot and of each turn's checkpoint, so a resumed run sends
 the same array and `rewind` puts back the one that turn began with.
 
@@ -113,7 +111,7 @@ reserve counted it fires nearly every turn. Three rules keep it honest:
 
 Folded messages keep only the user's words in the prompt; their substance
 lives in the working state, and their text stays in the ledger for
-`meta.history.search`.
+`history_search`.
 
 ## Measured
 

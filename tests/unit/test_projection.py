@@ -105,9 +105,9 @@ class TestRenderComposition:
                          candidates=[ScoredTool(tool=cap, score=1.0)])
         msgs = projection.render(turn)
         assert "[Tool candidates" in str(msgs[-1].content)
-        assert "- demo.cand(" in str(msgs[-1].content)
+        assert "- demo.cand (misc)" in str(msgs[-1].content)
 
-    def test_candidate_cards_deduped_against_native_schemas(self):
+    def test_candidates_show_summaries_without_advertising_loaded_schemas(self):
         reg = Registry()
         cap = reg.register(capability_dict("demo.cand", summary="a somewhat long description of the tool"))
         from state_projection_loop import ScoredTool
@@ -116,8 +116,8 @@ class TestRenderComposition:
         turn = make_turn(registry=reg, candidates=[ScoredTool(tool=cap, score=1.0)])
         msgs = projection.render(turn, api_tools=[cap.tool_spec()])
         last = str(msgs[-1].content)
-        assert "schemas sent natively" in last
-        assert "a somewhat long description" not in last
+        assert "summaries only" in last
+        assert "a somewhat long description" in last
 
     def test_render_does_not_mutate_the_caller_s_tool_list(self):
         # `render` drops native schemas to fit the window; it must do that to

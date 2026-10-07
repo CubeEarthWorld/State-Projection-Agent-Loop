@@ -28,7 +28,7 @@ from .serialization import dumps
 REF_KEY = "$artifact"
 
 #: An artifact id, as ``new_id("artifact")`` builds one. Ids arrive from the
-#: model (``meta.artifact.peek``, every ``$artifact`` reference in tool
+#: model (``peek``, every ``$artifact`` reference in tool
 #: arguments), so anything carrying a separator, a ``..`` or a drive letter
 #: must never reach the filesystem: it would address another run's data, or
 #: any file on disk.

@@ -1,6 +1,6 @@
 [
   {
-    "name": "meta.user.ask",
+    "name": "ask",
     "category": "meta",
     "card": {
       "summary": "Ask the user a question and pause the run until they answer.",
@@ -29,7 +29,7 @@
     },
     "discovery": {
       "pinned": true,
-      "kernel_note": "When you need information or a decision only the user can give, call meta.user.ask; the run pauses until they answer.",
+      "kernel_note": "When you need information or a decision only the user can give, call ask; the run pauses until they answer.",
       "no_embed": true
     },
     "execution": {

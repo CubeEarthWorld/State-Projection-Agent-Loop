@@ -1,29 +1,58 @@
 [
   {
-    "name": "meta.tool.find",
+    "name": "tool_search",
     "category": "meta",
     "card": {
-      "summary": "ツール台帳を自然文で検索し、該当ツールのカード一覧を返す",
+      "summary": "ジャンルから未閲覧ツールを探し、選んだツールの詳細だけ読み込む",
       "tags": [
         "meta",
-        "検索"
+        "検索",
+        "ジャンル"
       ]
     },
     "spec": {
-      "description": "Search the capability registry with a natural-language query and return matching cards.",
+      "description": "Explore tools by category. categories returns counts and unseen totals; list returns the next unseen summaries in a category (including subcategories). search optionally finds unseen tools by name or natural-language query. Listing/searching never loads definitions. describe loads one named tool's full spec and makes it callable. reject records why a named tool is unsuitable and unloads its schema. reset explicitly starts exploration over. Progress spans all categories and queries within the current user request and survives restart; a new user request starts fresh. Repeating list/search advances to unseen tools, not the same page. Exhausted results include remaining category counts.",
       "parameters": {
         "type": "object",
         "properties": {
-          "query": {
+          "action": {
             "type": "string",
-            "description": "やりたいことを自然文で"
+            "enum": [
+              "categories",
+              "list",
+              "search",
+              "describe",
+              "reject",
+              "reset"
+            ],
+            "description": "Start with categories, then list, then describe.",
+            "default": "categories"
           },
           "category": {
             "type": [
               "string",
               "null"
             ],
-            "description": "目次のカテゴリで絞り込み"
+            "description": "Required for list. Exact category or parent prefix; '*' lists all categories."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for search. Tool name or natural-language request."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for describe/reject. Exact tool name from a summary."
+          },
+          "reason": {
+            "type": "string",
+            "default": "",
+            "description": "Why the selected tool is unsuitable (reject)."
           },
           "k": {
             "type": "integer",
@@ -31,30 +60,28 @@
             "minimum": 1,
             "maximum": 50
           }
-        },
-        "required": [
-          "query"
-        ]
+        }
       },
-      "usage_notes": "自動候補に必要なツールが見当たらない時に使う。目次のカテゴリ名で絞れる。"
+      "usage_notes": "Start with categories, list the relevant category, then describe only the tool you choose. If unsuitable, reject it and continue listing; check other categories with remaining > 0. Do not reset just to get the same results again."
     },
     "discovery": {
       "pinned": true,
-      "kernel_note": "If a needed tool is not listed, search the registry with meta.tool.find(query, category).",
+      "kernel_note": "Discover tools via tool_search(action='categories'), then action='list' with category, then action='describe' with name before use. Repeated lists/searches show unseen tools; reject unsuitable tools and explore remaining categories.",
       "no_embed": true
     },
     "execution": {
       "timeout_s": 10,
-      "retry_safety": "pure"
+      "retry_safety": "idempotent"
     },
     "effects": [
       {
-        "kind": "none"
+        "kind": "write",
+        "resource": "working_state:discovery"
       }
     ]
   },
   {
-    "name": "meta.artifact.peek",
+    "name": "peek",
     "category": "meta",
     "card": {
       "summary": "アーティファクト参照の中身を部分閲覧する",
@@ -95,7 +122,7 @@
     },
     "discovery": {
       "pinned": true,
-      "kernel_note": "Inspect what an artifact holds with meta.artifact.peek(artifact=..., query=..., range=...) rather than asking for the whole value.",
+      "kernel_note": "Inspect what an artifact holds with peek(artifact=..., query=..., range=...) rather than asking for the whole value.",
       "no_embed": true
     },
     "execution": {
@@ -110,7 +137,7 @@
     ]
   },
   {
-    "name": "meta.history.search",
+    "name": "history_search",
     "category": "meta",
     "card": {
       "summary": "折り畳まれた過去の会話をイベント台帳から検索する",

@@ -1,9 +1,9 @@
 """Tool discovery search engine, shared by layer 2 (auto candidates) and
-layer 3 (``meta.tool.find``).
+layer 3 (``tool_search``).
 
-Pure computation: no LLM is ever involved. Scoring mixes vector similarity,
-BM25 lexical match, and tag/name match. With vectors disabled or
-unavailable, weights renormalize over the remaining components.
+Auto candidates use vector similarity only. Explicit tool searches mix
+vector similarity, BM25 lexical match, and tag/name match. Without vectors,
+explicit searches renormalize weights over the remaining components.
 """
 from __future__ import annotations
 
@@ -168,9 +168,12 @@ class ToolSearch:
     ) -> list[ScoredTool]:
         """Rank tools for a natural-language query.
 
-        ``layer=2`` (auto candidates) excludes ``no_embed`` tools;
+        ``layer=2`` (auto candidates) requires embeddings and uses only
+        vector similarity, excluding ``no_embed`` tools;
         ``layer=3`` (find_tools) searches everything.
         """
+        if layer == 2 and self.embedder is None:
+            return []
         self._ensure_index()
         exclude = exclude or set()
         tools = []
@@ -188,14 +191,25 @@ class ToolSearch:
         if not tools or not (query or "").strip():
             return []
 
+        qvec: Optional[list[float]] = None
+        if self.embedder is not None and self._vectors:
+            qvec = self.embedder.embed_query(query)
+
+        if layer == 2:
+            if qvec is None:
+                return []
+            results = []
+            for t in tools:
+                if t.name in self._vectors:
+                    score = (cosine(qvec, self._vectors[t.name]) + 1.0) / 2.0
+                    results.append(ScoredTool(tool=t, score=score, components={"vector": score}))
+            results.sort(key=lambda s: s.score, reverse=True)
+            return results[:k]
+
         query_tokens = _tokenize(query)
         # absolute squash, not max-normalization: a tiny incidental match
         # must stay tiny instead of being amplified to full scale
         lexical = {t.name: self._bm25(query_tokens, t.name) for t in tools}
-
-        qvec: Optional[list[float]] = None
-        if self.embedder is not None and self._vectors:
-            qvec = self.embedder.embed_query(query)
 
         results: list[ScoredTool] = []
         for t in tools:

@@ -90,7 +90,7 @@ def _view(data: dict, mode: str = "full") -> dict[str, Any]:
 class ChecklistStore:
     """Session-local plans. Returned dictionaries never alias stored state.
 
-    Use ``Session.invoke('planning.checklist.manage', ...)`` for recorded, policy-checked edits.
+    Use ``Session.invoke('checklist', ...)`` for recorded, policy-checked edits.
     Direct ``execute`` is intended for host setup and offline interchange.
     """
 
@@ -223,5 +223,5 @@ class ChecklistStore:
             lines.append(line)
             used += len(line) + 1
         if len(lines) < len(visible):
-            lines.append(f"[{len(visible) - len(lines)} more checklists omitted; use planning.checklist.manage.]")
+            lines.append(f"[{len(visible) - len(lines)} more checklists omitted; use checklist.]")
         return "\n".join(lines)
